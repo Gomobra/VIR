@@ -9,3 +9,7 @@ vir-common = { path = "../vir-common" }
 vir-model = { path = "../vir-model" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "train"] }
 [workspace]
+
+[features]
+default = []
+cuda = ["burn/cuda"]

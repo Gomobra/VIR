@@ -8,3 +8,7 @@ license = "MIT OR Apache-2.0"
 vir-common = { path = "../vir-common" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std"] }
 [workspace]
+
+[features]
+default = []
+cuda = ["burn/cuda"]

@@ -112,6 +112,9 @@ impl Generator {
 }
 
 pub fn model_smoke() -> Result<(), VirError> {
+    #[cfg(feature = "cuda")]
+    let device = Device::cuda(0);
+    #[cfg(not(feature = "cuda"))]
     let device = Device::default();
     let cfg = GeneratorConfig {
         dim: 64,

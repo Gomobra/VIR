@@ -112,6 +112,9 @@ impl Block {
 }
 
 pub fn nn_smoke() -> Result<(), VirError> {
+    #[cfg(feature = "cuda")]
+    let device = Device::cuda(0);
+    #[cfg(not(feature = "cuda"))]
     let device = Device::default();
     let blk = Block::new(64, 4, &device);
     let x: Tensor<3> = Tensor::ones([2, 4, 64], &device);

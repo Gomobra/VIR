@@ -10,3 +10,7 @@ vir-nn = { path = "../vir-nn" }
 vir-vq = { path = "../vir-vq" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std"] }
 [workspace]
+
+[features]
+default = []
+cuda = ["burn/cuda"]

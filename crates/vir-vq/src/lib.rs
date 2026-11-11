@@ -45,6 +45,9 @@ impl Codebook {
 }
 
 pub fn vq_smoke() -> Result<(), VirError> {
+    #[cfg(feature = "cuda")]
+    let device = Device::cuda(0);
+    #[cfg(not(feature = "cuda"))]
     let device = Device::default();
     let cfg = CodebookConfig {
         num_entries: 8,
