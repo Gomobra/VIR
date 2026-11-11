@@ -33,7 +33,8 @@ impl RmsNorm {
         let sq = x.clone() * x.clone();
         let mean = sq.mean_dim(2);
         let rms = (mean + self.eps).sqrt();
-        x / rms * self.weight.val().unsqueeze_dim(0).unsqueeze_dim(0)
+        let d = self.weight.val().dims()[0];
+        x / rms * self.weight.val().clone().reshape([1, 1, d])
     }
 }
 

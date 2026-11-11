@@ -30,12 +30,16 @@ impl Codebook {
     }
 
     pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
-        let z_sq = (z.clone() * z.clone()).sum_dim(1);
-        let e_sq = (self.weight.val().clone() * self.weight.val().clone()).sum_dim(1);
-        let cross = z.clone().matmul(self.weight.val().clone().transpose());
-        let dist = z_sq.unsqueeze_dim(1) - cross * 2.0 + e_sq.unsqueeze_dim(0);
-        let idx = dist.argmin(1);
-        let q = self.weight.val().clone().select(0, idx.clone());
+        let [n, _d] = z.dims();
+        let z_sq = (z.clone() * z.clone()).sum_dim(1); // [n,1]
+        let e_sq = (self.weight.val().clone() * self.weight.val().clone()).sum_dim(1); // [v,1]
+        let cross = z.clone().matmul(self.weight.val().clone().transpose()); // [n,v]
+        // broadcast: dist = z_sq + e_sq^T - 2*cross
+        let z_sq = z_sq.reshape([n, 1]);
+        let e_sq = e_sq.transpose().reshape([1, self.weight.val().dims()[0]]);
+        let dist = z_sq.clone() + e_sq - cross * 2.0; // [n,v]
+        let idx = dist.argmin(1).reshape([n]); // [n]
+        let q = self.weight.val().clone().select(0, idx.clone()); // [n,dim]
         (idx, q)
     }
 }
