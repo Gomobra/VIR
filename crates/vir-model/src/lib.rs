@@ -1,6 +1,9 @@
 //! Generator NCM + recurrent depth + halting + block-AR + sampling.
 
 use burn::prelude::*;
+use burn::module::Module;
+use burn::module::Param;
+use burn::tensor::backend::Backend;
 use vir_common::VirError;
 use vir_nn::Block;
 

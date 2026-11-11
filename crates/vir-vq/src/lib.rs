@@ -1,6 +1,9 @@
 //! VQ-VAE multiscale (skeleton awal). Implementasi penuh menyusul.
 
 use burn::prelude::*;
+use burn::module::Module;
+use burn::module::Param;
+use burn::tensor::backend::Backend;
 use vir_common::VirError;
 
 #[derive(Debug)]

@@ -2,10 +2,16 @@
 
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
+use burn::module::Module;
+use burn::module::Param;
+use burn::tensor::backend::Backend;
 use vir_common::VirError;
 
 pub mod rope {
     use burn::prelude::*;
+use burn::module::Module;
+use burn::module::Param;
+use burn::tensor::backend::Backend;
 
     pub fn apply_rope<B: Backend>(x: Tensor<B, 3>, base: f32) -> Tensor<B, 3> {
         // x: [B, T, D], D even. Rotasi pasangan.
