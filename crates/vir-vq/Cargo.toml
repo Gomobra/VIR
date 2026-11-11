@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 vir-common = { path = "../vir-common" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std"] }
+[workspace]

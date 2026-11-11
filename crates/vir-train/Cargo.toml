@@ -8,3 +8,4 @@ license.workspace = true
 vir-common = { path = "../vir-common" }
 vir-model = { path = "../vir-model" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "nn", "std", "train"] }
+[workspace]
