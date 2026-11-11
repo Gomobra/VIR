@@ -3,7 +3,7 @@
 use burn::prelude::*;
 use burn::module::Module;
 use burn::module::Param;
-use burn::tensor::backend::Backend;
+use burn::backend::Backend;
 use vir_common::VirError;
 use vir_nn::Block;
 
