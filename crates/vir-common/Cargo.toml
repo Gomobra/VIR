@@ -1,0 +1,15 @@
+[package]
+name = "vir-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "2"
+rand = "0.8"
+rand_chacha = "0.3"
+
+[dev-dependencies]
+proptest = "1"

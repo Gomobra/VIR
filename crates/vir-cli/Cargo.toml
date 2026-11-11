@@ -1,0 +1,16 @@
+[package]
+name = "vir-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vir"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+vir-common = { path = "../vir-common" }
+vir-text = { path = "../vir-text" }
+vir-data = { path = "../vir-data" }
+vir-tui = { path = "../vir-tui" }

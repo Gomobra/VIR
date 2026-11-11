@@ -1,0 +1,8 @@
+/target/
+Cargo.lock
+# keep lock? PRD says commit Cargo.lock. Keep it.
+*.pyc
+__pycache__/
+.venv/
+node_modules/
+*.whlproptest-regressions

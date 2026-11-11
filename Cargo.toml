@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/vir-common",
+    "crates/vir-py",
+    "crates/vir-cli",
+    "crates/vir-text",
+    "crates/vir-data",
+    "crates/vir-tui",
+    "crates/vir-mfs",
+    "crates/vir-sandbox",
+    "crates/vir-agent",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["VIR contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0

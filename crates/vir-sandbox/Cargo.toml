@@ -1,0 +1,8 @@
+[package]
+name = "vir-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+vir-common = { path = "../vir-common" }

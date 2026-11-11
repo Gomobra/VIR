@@ -1,0 +1,14 @@
+[package]
+name = "vir-py"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py39", "extension-module"] }
+vir-common = { path = "../vir-common" }
+vir-text = { path = "../vir-text" }

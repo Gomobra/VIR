@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
+
+[project]
+name = "vir"
+version = "0.1.0"
+description = "VIR Vbeta - Variable-depth Iterative Reasoner (Rust core, Python API)"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+
+[tool.maturin]
+module-name = "vir._core"
+features = ["pyo3/extension-module"]
+python-source = "python"
+manifest-path = "crates/vir-py/Cargo.toml"
