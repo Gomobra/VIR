@@ -14,3 +14,5 @@ vir-common = { path = "../vir-common" }
 vir-text = { path = "../vir-text" }
 vir-data = { path = "../vir-data" }
 vir-tui = { path = "../vir-tui" }
+vir-mfs = { path = "../vir-mfs" }
+vir-agent = { path = "../vir-agent" }

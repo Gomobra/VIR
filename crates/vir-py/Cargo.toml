@@ -12,3 +12,5 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.22", features = ["abi3-py39", "extension-module"] }
 vir-common = { path = "../vir-common" }
 vir-text = { path = "../vir-text" }
+vir-mfs = { path = "../vir-mfs" }
+vir-agent = { path = "../vir-agent" }
