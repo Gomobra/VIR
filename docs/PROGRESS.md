@@ -4,7 +4,8 @@
 - F0.1 (sebagian): workspace Cargo, vir-common, vir-py, vir-cli, vir-text, vir-data, vir-tui, vir-vq, vir-nn, vir-model, vir-train (Burn, di luar workspace Termux, dibangun di CI), python/vir, pyproject, CI workflows, AGENTS.md, docs, specs/F0.1.
 - F1.8 (sebagian): `vir smoke --json` menjalankan irisan BPE train+encode+decode roundtrip; `vir tui` membuka dasbor Ratatui.
 - F2.x (sebagian): recurrent depth, halting (Fixed/Entropy), sampling (CFG, MBR), level weight, pass@k (tak bias) di vir-model/vir-train.
-- F3.x (sebagian): vir-mfs (SQLite WAL, versioning, FTS5, forget/restore, RRF, tes invarian), vir-sandbox (subprocess + timeout + truncation), vir-agent (LanguageModel trait, ScriptedLm, RLM orchestrator + budget).
+- F3.x (sebagian): vir-mfs (SQLite WAL, versioning, FTS5, forget/restore, RRF, tes invarian), vir-sandbox (subprocess + timeout + truncation), vir-agent (LanguageModel trait, ScriptedLm, RLM orchestrator + budget), vir-py bindings (Memory, rlm_run), CLI mem/rlm.
+- CI: semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train); wheels manylinux x86_64 terbangun.
 - Gerbang lokal: cargo build/test/clippy/fmt hijau; wheel maturin terbangun; import vir OK; text_encode/decode OK; vir-data shard/pack/FIM/stream/synth OK.
 - Tes: cargo test --workspace lulus (schedule proptest + config tests + vir-text roundtrip).
 - Clippy -D warnings lulus; fmt lulus; forbid_stubs lulus.
