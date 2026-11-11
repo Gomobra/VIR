@@ -4,6 +4,7 @@ use burn::prelude::*;
 use burn::module::Module;
 use burn::module::Param;
 use burn::backend::Backend;
+use burn::tensor::Device;
 use vir_common::VirError;
 use vir_nn::Block;
 
@@ -22,7 +23,7 @@ pub struct RecurrentCore<B: Backend> {
 }
 
 impl<B: Backend> RecurrentCore<B> {
-    pub fn new(dim: usize, num_heads: usize, num_blocks: usize, device: &B::Device) -> Self {
+    pub fn new(dim: usize, num_heads: usize, num_blocks: usize, device: &Device) -> Self {
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
             blocks.push(Block::new(dim, num_heads, device));
@@ -90,7 +91,7 @@ pub struct Generator<B: Backend> {
 }
 
 impl<B: Backend> Generator<B> {
-    pub fn new(cfg: &GeneratorConfig, device: &B::Device) -> Self {
+    pub fn new(cfg: &GeneratorConfig, device: &Device) -> Self {
         let mut blocks = Vec::with_capacity(cfg.num_blocks);
         for _ in 0..cfg.num_blocks {
             blocks.push(Block::new(cfg.dim, cfg.num_heads, device));
@@ -124,7 +125,7 @@ impl<B: Backend> Generator<B> {
 }
 
 pub fn model_smoke() -> Result<(), VirError> {
-    let device: <burn::backend::Flex as Backend>::Device = Default::default();
+    let device = Device::flex();
     let cfg = GeneratorConfig {
         dim: 64,
         num_heads: 4,

@@ -4,6 +4,7 @@ use burn::prelude::*;
 use burn::module::Module;
 use burn::module::Param;
 use burn::backend::Backend;
+use burn::tensor::Device;
 use vir_common::VirError;
 
 #[derive(Debug)]
@@ -18,7 +19,7 @@ pub struct Codebook<B: Backend> {
 }
 
 impl<B: Backend> Codebook<B> {
-    pub fn new(cfg: &CodebookConfig, device: &B::Device) -> Self {
+    pub fn new(cfg: &CodebookConfig, device: &Device) -> Self {
         let w = Tensor::random(
             [cfg.num_entries, cfg.dim],
             burn::tensor::Distribution::Normal(0.0, 1.0),
@@ -43,7 +44,7 @@ impl<B: Backend> Codebook<B> {
 }
 
 pub fn vq_smoke() -> Result<(), VirError> {
-    let device = Default::default();
+    let device = Device::flex();
     let cfg = CodebookConfig {
         num_entries: 8,
         dim: 4,

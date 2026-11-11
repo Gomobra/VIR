@@ -5,6 +5,7 @@ use burn::prelude::*;
 use burn::module::Module;
 use burn::module::Param;
 use burn::backend::Backend;
+use burn::tensor::Device;
 use vir_common::VirError;
 
 pub mod rope {
@@ -12,6 +13,7 @@ pub mod rope {
 use burn::module::Module;
 use burn::module::Param;
 use burn::backend::Backend;
+use burn::tensor::Device;
 
     pub fn apply_rope<B: Backend>(x: Tensor<B, 3>, base: f32) -> Tensor<B, 3> {
         // x: [B, T, D], D even. Rotasi pasangan.
@@ -42,7 +44,7 @@ pub struct RmsNorm<B: Backend> {
 }
 
 impl<B: Backend> RmsNorm<B> {
-    pub fn new(dim: usize, device: &B::Device) -> Self {
+    pub fn new(dim: usize, device: &Device) -> Self {
         Self {
             weight: Param::from_tensor(Tensor::ones([dim], device)),
             eps: 1e-6,
@@ -65,7 +67,7 @@ pub struct SwiGluMlp<B: Backend> {
 }
 
 impl<B: Backend> SwiGluMlp<B> {
-    pub fn new(dim: usize, hidden: usize, device: &B::Device) -> Self {
+    pub fn new(dim: usize, hidden: usize, device: &Device) -> Self {
         Self {
             w_gate: LinearConfig::new(dim, hidden).init(device),
             w_up: LinearConfig::new(dim, hidden).init(device),
@@ -94,7 +96,7 @@ pub struct Block<B: Backend> {
 }
 
 impl<B: Backend> Block<B> {
-    pub fn new(dim: usize, num_heads: usize, device: &B::Device) -> Self {
+    pub fn new(dim: usize, num_heads: usize, device: &Device) -> Self {
         let head_dim = dim / num_heads;
         let hidden = dim * 4 / 3 * 2; // ~8/3
         let hidden = (hidden / 8) * 8;
@@ -142,7 +144,7 @@ impl<B: Backend> Block<B> {
 }
 
 pub fn nn_smoke() -> Result<(), VirError> {
-    let device: <burn::backend::Flex as Backend>::Device = Default::default();
+    let device = Device::flex();
     let blk = Block::<burn::backend::Flex>::new(64, 4, &device);
     let x: Tensor<burn::backend::Flex, 3> = Tensor::ones([2, 4, 64], &device);
     let _ = blk.forward(x);
