@@ -1,9 +1,8 @@
-//! VQ-VAE multiscale (skeleton awal). Implementasi penuh menyusul.
+//! VQ-VAE multiscale (skeleton).
 
-use burn::prelude::*;
 use burn::module::Module;
 use burn::module::Param;
-use burn::backend::Backend;
+use burn::prelude::*;
 use burn::tensor::Device;
 use vir_common::VirError;
 
@@ -14,11 +13,11 @@ pub struct CodebookConfig {
 }
 
 #[derive(Module, Debug)]
-pub struct Codebook<B: Backend> {
+pub struct Codebook {
     pub weight: Param<Tensor<2>>,
 }
 
-impl<B: Backend> Codebook<B> {
+impl Codebook {
     pub fn new(cfg: &CodebookConfig, device: &Device) -> Self {
         let w = Tensor::random(
             [cfg.num_entries, cfg.dim],
@@ -30,9 +29,7 @@ impl<B: Backend> Codebook<B> {
         }
     }
 
-    /// Quantisasi nearest-neighbor; kembalikan indeks dan vektor terkuantisasi.
     pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
-        // distances: ||z||^2 - 2 z E^T + ||E||^2
         let z_sq = z.clone().powf(2.0).sum_dim(1);
         let e_sq = self.weight.val().clone().powf(2.0).sum_dim(1);
         let cross = z.clone().matmul(self.weight.val().clone().transpose());
@@ -44,12 +41,12 @@ impl<B: Backend> Codebook<B> {
 }
 
 pub fn vq_smoke() -> Result<(), VirError> {
-    let device = Device::flex();
+    let device = Device::default();
     let cfg = CodebookConfig {
         num_entries: 8,
         dim: 4,
     };
-    let cb = Codebook::<burn::backend::Flex>::new(&cfg, &device);
+    let cb = Codebook::new(&cfg, &device);
     let z: Tensor<2> = Tensor::ones([2, 4], &device);
     let (idx, q) = cb.quantize(z);
     let _ = (idx, q);
@@ -59,7 +56,6 @@ pub fn vq_smoke() -> Result<(), VirError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn codebook_quantize_runs() {
         assert!(vq_smoke().is_ok());

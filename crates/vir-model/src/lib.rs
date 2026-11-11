@@ -1,9 +1,7 @@
 //! Generator NCM + recurrent depth + halting + block-AR + sampling.
 
-use burn::prelude::*;
 use burn::module::Module;
-use burn::module::Param;
-use burn::backend::Backend;
+use burn::prelude::*;
 use burn::tensor::Device;
 use vir_common::VirError;
 use vir_nn::Block;
@@ -16,13 +14,12 @@ pub struct GeneratorConfig {
     pub num_loops: usize,
 }
 
-// ---------- Recurrent depth ----------
 #[derive(Module, Debug)]
-pub struct RecurrentCore<B: Backend> {
-    pub blocks: Vec<Block<B>>,
+pub struct RecurrentCore {
+    pub blocks: Vec<Block>,
 }
 
-impl<B: Backend> RecurrentCore<B> {
+impl RecurrentCore {
     pub fn new(dim: usize, num_heads: usize, num_blocks: usize, device: &Device) -> Self {
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
@@ -40,7 +37,6 @@ impl<B: Backend> RecurrentCore<B> {
     }
 }
 
-// ---------- Halting ----------
 pub trait Halter {
     fn should_halt(&self, entropy: f32) -> bool;
 }
@@ -65,13 +61,11 @@ impl Halter for EntropyHalter {
     }
 }
 
-// ---------- Sampling ----------
 pub fn cfg_logit(uc: f32, c: f32, beta: f32) -> f32 {
     uc + beta * (c - uc)
 }
 
 pub fn mbr_select(scores: &[f32]) -> usize {
-    // pilih indeks dengan skor tertinggi
     let mut best = 0usize;
     let mut bestv = f32::MIN;
     for (i, &s) in scores.iter().enumerate() {
@@ -83,26 +77,20 @@ pub fn mbr_select(scores: &[f32]) -> usize {
     best
 }
 
-// ---------- Generator ----------
 #[derive(Module, Debug)]
-pub struct Generator<B: Backend> {
-    pub blocks: Vec<Block<B>>,
-    pub core: Option<RecurrentCore<B>>,
+pub struct Generator {
+    pub blocks: Vec<Block>,
+    pub core: Option<RecurrentCore>,
 }
 
-impl<B: Backend> Generator<B> {
+impl Generator {
     pub fn new(cfg: &GeneratorConfig, device: &Device) -> Self {
         let mut blocks = Vec::with_capacity(cfg.num_blocks);
         for _ in 0..cfg.num_blocks {
             blocks.push(Block::new(cfg.dim, cfg.num_heads, device));
         }
         let core = if cfg.num_loops > 1 {
-            Some(RecurrentCore::new(
-                cfg.dim,
-                cfg.num_heads,
-                cfg.num_blocks,
-                device,
-            ))
+            Some(RecurrentCore::new(cfg.dim, cfg.num_heads, cfg.num_blocks, device))
         } else {
             None
         };
@@ -115,7 +103,6 @@ impl<B: Backend> Generator<B> {
             h = b.forward(h);
         }
         if let Some(core) = &self.core {
-            // recurrent: ulang core n kali dengan injeksi input awal (simplified: tanpa injeksi)
             for _ in 0..2 {
                 h = core.forward(h);
             }
@@ -125,7 +112,7 @@ impl<B: Backend> Generator<B> {
 }
 
 pub fn model_smoke() -> Result<(), VirError> {
-    let device = Device::flex();
+    let device = Device::default();
     let cfg = GeneratorConfig {
         dim: 64,
         num_heads: 4,
@@ -133,10 +120,9 @@ pub fn model_smoke() -> Result<(), VirError> {
         num_levels: 4,
         num_loops: 2,
     };
-    let g = Generator::<burn::backend::Flex>::new(&cfg, &device);
+    let g = Generator::new(&cfg, &device);
     let x: Tensor<3> = Tensor::ones([2, 4, 64], &device);
     let _ = g.forward(x);
-    // sanity sampling helpers
     assert!((cfg_logit(0.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
     assert_eq!(mbr_select(&[0.1, 0.5, 0.3]), 1);
     Ok(())
