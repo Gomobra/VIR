@@ -6,7 +6,8 @@
 - F2.x (sebagian): recurrent depth, halting (Fixed/Entropy), sampling (CFG, MBR), level weight, pass@k (tak bias) di vir-model/vir-train.
 - F3.x (sebagian): vir-mfs (SQLite WAL, versioning, FTS5, forget/restore, RRF, tes invarian), vir-sandbox (subprocess + timeout + truncation), vir-agent (LanguageModel trait, ScriptedLm, RLM orchestrator + budget), vir-py bindings (Memory, rlm_run), CLI mem/rlm.
 - CI: semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval); wheels manylinux x86_64 terbangun.
-- F4 (sebagian): vir-eval (pass@k, recon accuracy, needle gen), FIM di vir-data, pass@k tak bias di vir-train.
+- F4 (sebagian): vir-eval (pass@k, recon accuracy, needle gen), FIM di vir-data, pass@k tak bias di vir-train, SFT pack, GRPO advantage, kaggle_train.py skeleton.
+- CI: semua job hijau; wheels manylinux x86_64 terbangun.
 - Gerbang lokal: cargo build/test/clippy/fmt hijau; wheel maturin terbangun; import vir OK; text_encode/decode OK; vir-data shard/pack/FIM/stream/synth OK.
 - Tes: cargo test --workspace lulus (schedule proptest + config tests + vir-text roundtrip).
 - Clippy -D warnings lulus; fmt lulus; forbid_stubs lulus.
