@@ -1,0 +1,14 @@
+{
+ "id": "spesialassme/vir-kaggle-smoke",
+ "title": "vir-kaggle-smoke",
+ "code_file": "vir_kaggle.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": true,
+ "dataset_sources": [],
+ "competition_sources": [],
+ "kernel_sources": []
+}
