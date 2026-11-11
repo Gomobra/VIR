@@ -7,5 +7,5 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 vir-common = { path = "../vir-common" }
 vir-model = { path = "../vir-model" }
-burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "nn", "std", "train"] }
+burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "train"] }
 [workspace]
