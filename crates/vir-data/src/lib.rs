@@ -124,6 +124,11 @@ impl TokenStream {
     }
 }
 
+/// Format SFT: instruksi -> jawaban; kemas sebagai (prefix, target).
+pub fn sft_pack(instruction: &str, answer: &str) -> (String, String) {
+    (instruction.to_string(), answer.to_string())
+}
+
 /// Generator sintetis: aritmetika sederhana "a + b = c".
 pub fn synth_arithmetic(n: usize) -> Vec<String> {
     let mut out = Vec::with_capacity(n);

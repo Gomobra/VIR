@@ -30,6 +30,18 @@ pub fn pass_at_k(n: usize, c: usize, k: usize) -> f64 {
     1.0 - prod
 }
 
+/// Keuntungan GRPO: (r_i - mean) / std, dengan epsilon untuk std=0.
+pub fn grpo_advantage(rewards: &[f32], eps: f32) -> Vec<f32> {
+    if rewards.is_empty() {
+        return vec![];
+    }
+    let n = rewards.len() as f32;
+    let mean: f32 = rewards.iter().sum::<f32>() / n;
+    let var: f32 = rewards.iter().map(|&r| (r - mean).powi(2)).sum::<f32>() / n;
+    let std = (var + eps).sqrt();
+    rewards.iter().map(|&r| (r - mean) / std).collect()
+}
+
 pub fn train_smoke() -> Result<(), VirError> {
     let levels = vec![1usize, 13, 24, 36];
     let w = level_weight(&levels, 0.0);
@@ -53,5 +65,12 @@ mod tests {
     fn pass_at_k_k1() {
         // k=1 menyusut menjadi c/n
         assert!((pass_at_k(5, 2, 1) - 0.4).abs() < 1e-9);
+    }
+    #[test]
+    fn grpo_advantage_basic() {
+        let r = grpo_advantage(&[1.0, 1.0, 0.0, 0.0], 1e-8);
+        // mean=0.5; std populasi ~0.5 -> keuntungan ±1
+        assert!((r[0] - 1.0).abs() < 1e-5);
+        assert!((r[2] + 1.0).abs() < 1e-5);
     }
 }
