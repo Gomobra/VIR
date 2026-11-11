@@ -33,9 +33,9 @@ pub fn pass_at_k(n: usize, c: usize, k: usize) -> f64 {
 pub fn train_smoke() -> Result<(), VirError> {
     let levels = vec![1usize, 13, 24, 36];
     let w = level_weight(&levels, 0.0);
-    // α=0: tiap kode berbobot 1/N
-    let sum: f32 = w.iter().sum();
-    assert!((sum - 1.0).abs() < 1e-5);
+    // α=0: w_k = 1/N, sehingga Σ_k w_k·ℓ_k = 1
+    let weighted: f32 = w.iter().zip(levels.iter()).map(|(a, b)| a * (*b as f32)).sum();
+    assert!((weighted - 1.0).abs() < 1e-5);
     // pass@k sanity
     assert!((pass_at_k(4, 1, 2) - 0.5).abs() < 1e-9);
     assert!((pass_at_k(10, 3, 5) - 0.9166666667).abs() < 1e-6);
