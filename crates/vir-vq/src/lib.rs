@@ -30,8 +30,8 @@ impl Codebook {
     }
 
     pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
-        let z_sq = z.clone().powf(2.0).sum_dim(1);
-        let e_sq = self.weight.val().clone().powf(2.0).sum_dim(1);
+        let z_sq = (z.clone() * z.clone()).sum_dim(1);
+        let e_sq = (self.weight.val().clone() * self.weight.val().clone()).sum_dim(1);
         let cross = z.clone().matmul(self.weight.val().clone().transpose());
         let dist = z_sq.unsqueeze_dim(1) - cross * 2.0 + e_sq.unsqueeze_dim(0);
         let idx = dist.argmin(1);

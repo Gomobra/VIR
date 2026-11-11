@@ -30,7 +30,7 @@ impl RmsNorm {
     }
 
     pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
-        let sq = x.clone().powf(2.0);
+        let sq = x.clone() * x.clone();
         let mean = sq.mean_dim(2);
         let rms = (mean + self.eps).sqrt();
         x / rms * self.weight.val().unsqueeze_dim(0).unsqueeze_dim(0)
