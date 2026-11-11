@@ -31,7 +31,7 @@ impl<B: Backend> RecurrentCore<B> {
         Self { blocks }
     }
 
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
         let mut h = x;
         for b in &self.blocks {
             h = b.forward(h);
@@ -109,7 +109,7 @@ impl<B: Backend> Generator<B> {
         Self { blocks, core }
     }
 
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
         let mut h = x;
         for b in &self.blocks {
             h = b.forward(h);
@@ -134,7 +134,7 @@ pub fn model_smoke() -> Result<(), VirError> {
         num_loops: 2,
     };
     let g = Generator::<burn::backend::Flex>::new(&cfg, &device);
-    let x: Tensor<burn::backend::Flex, 3> = Tensor::ones([2, 4, 64], &device);
+    let x: Tensor<3> = Tensor::ones([2, 4, 64], &device);
     let _ = g.forward(x);
     // sanity sampling helpers
     assert!((cfg_logit(0.0, 1.0, 1.0) - 1.0).abs() < 1e-6);

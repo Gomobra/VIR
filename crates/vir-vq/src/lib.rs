@@ -15,7 +15,7 @@ pub struct CodebookConfig {
 
 #[derive(Module, Debug)]
 pub struct Codebook<B: Backend> {
-    pub weight: Param<Tensor<B, 2>>,
+    pub weight: Param<Tensor<2>>,
 }
 
 impl<B: Backend> Codebook<B> {
@@ -31,7 +31,7 @@ impl<B: Backend> Codebook<B> {
     }
 
     /// Quantisasi nearest-neighbor; kembalikan indeks dan vektor terkuantisasi.
-    pub fn quantize(&self, z: Tensor<B, 2>) -> (Tensor<B, 1, Int>, Tensor<B, 2>) {
+    pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
         // distances: ||z||^2 - 2 z E^T + ||E||^2
         let z_sq = z.clone().powf(2.0).sum_dim(1);
         let e_sq = self.weight.val().clone().powf(2.0).sum_dim(1);
@@ -50,7 +50,7 @@ pub fn vq_smoke() -> Result<(), VirError> {
         dim: 4,
     };
     let cb = Codebook::<burn::backend::Flex>::new(&cfg, &device);
-    let z: Tensor<burn::backend::Flex, 2> = Tensor::ones([2, 4], &device);
+    let z: Tensor<2> = Tensor::ones([2, 4], &device);
     let (idx, q) = cb.quantize(z);
     let _ = (idx, q);
     Ok(())

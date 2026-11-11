@@ -15,7 +15,7 @@ use burn::module::Param;
 use burn::backend::Backend;
 use burn::tensor::Device;
 
-    pub fn apply_rope<B: Backend>(x: Tensor<B, 3>, base: f32) -> Tensor<B, 3> {
+    pub fn apply_rope<B: Backend>(x: Tensor<3>, base: f32) -> Tensor<3> {
         // x: [B, T, D], D even. Rotasi pasangan.
         let [b, t, d] = x.dims();
         let half = d / 2;
@@ -39,7 +39,7 @@ use burn::tensor::Device;
 
 #[derive(Module, Debug)]
 pub struct RmsNorm<B: Backend> {
-    pub weight: Param<Tensor<B, 1>>,
+    pub weight: Param<Tensor<1>>,
     pub eps: f32,
 }
 
@@ -51,7 +51,7 @@ impl<B: Backend> RmsNorm<B> {
         }
     }
 
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
         let sq = x.clone().powf(2.0);
         let mean = sq.mean_dim(2);
         let rms = (mean + self.eps).sqrt();
@@ -75,7 +75,7 @@ impl<B: Backend> SwiGluMlp<B> {
         }
     }
 
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
         let gate = burn::tensor::activation::silu(self.w_gate.forward(x.clone()));
         let up = self.w_up.forward(x);
         self.w_down.forward(gate * up)
@@ -113,7 +113,7 @@ impl<B: Backend> Block<B> {
         }
     }
 
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
         // attention (simplified single-head-style MHA via reshape)
         let [b, t, d] = x.dims();
         let h = self.num_heads;
@@ -146,7 +146,7 @@ impl<B: Backend> Block<B> {
 pub fn nn_smoke() -> Result<(), VirError> {
     let device = Device::flex();
     let blk = Block::<burn::backend::Flex>::new(64, 4, &device);
-    let x: Tensor<burn::backend::Flex, 3> = Tensor::ones([2, 4, 64], &device);
+    let x: Tensor<3> = Tensor::ones([2, 4, 64], &device);
     let _ = blk.forward(x);
     Ok(())
 }
