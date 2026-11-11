@@ -52,8 +52,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p vir-vq
-      - run: cargo test -p vir-vq
+      - run: cargo build --manifest-path crates/vir-vq/Cargo.toml
+      - run: cargo test --manifest-path crates/vir-vq/Cargo.toml
 
   vir-nn:
     runs-on: ubuntu-latest
@@ -61,8 +61,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p vir-nn
-      - run: cargo test -p vir-nn
+      - run: cargo build --manifest-path crates/vir-nn/Cargo.toml
+      - run: cargo test --manifest-path crates/vir-nn/Cargo.toml
 
   vir-model:
     runs-on: ubuntu-latest
@@ -70,8 +70,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p vir-model
-      - run: cargo test -p vir-model
+      - run: cargo build --manifest-path crates/vir-model/Cargo.toml
+      - run: cargo test --manifest-path crates/vir-model/Cargo.toml
 
   vir-train:
     runs-on: ubuntu-latest
@@ -79,5 +79,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p vir-train
-      - run: cargo test -p vir-train
+      - run: cargo build --manifest-path crates/vir-train/Cargo.toml
+      - run: cargo test --manifest-path crates/vir-train/Cargo.toml
