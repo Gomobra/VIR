@@ -2,6 +2,7 @@
 
 use burn::prelude::*;
 use burn::tensor::Device;
+use std::hint::black_box;
 use std::time::Instant;
 use vir_vq::{Codebook, CodebookConfig};
 
@@ -19,18 +20,19 @@ fn main() {
     // warmup + sync
     for _ in 0..5 {
         let out = cb.quantize(z.clone());
-        let _ = out.0.into_data();
+        let data = out.0.into_data();
+        black_box(data);
+        let _ = device.flush();
     }
-    let _ = device.flush();
 
     let iters = 50;
     let t0 = Instant::now();
     for _ in 0..iters {
         let out = cb.quantize(z.clone());
-        // force sync by reading data back to host
-        let _ = out.0.into_data();
+        let data = out.0.into_data();
+        black_box(data);
+        let _ = device.flush();
     }
-    let _ = device.flush();
     let elapsed = t0.elapsed().as_secs_f64();
     let tokens = (batch * seq * iters) as f64;
     let toks_per_s = tokens / elapsed;
