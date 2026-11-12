@@ -107,8 +107,10 @@ pub fn vq_loss(
     let ce = burn::nn::loss::CrossEntropyLossConfig::new()
         .init(device)
         .forward(logits, target);
-    let d1 = z.detach() - z_q;
-    let d2 = z - z_q.detach();
+    let z_d = z.detach();
+    let z_q_d = z_q.detach();
+    let d1 = z_d - z_q;
+    let d2 = z - z_q_d;
     let commit = (d1.clone() * d1).mean();
     let latent = (d2.clone() * d2).mean();
     ce + commit * commitment_cost + latent
