@@ -22,7 +22,7 @@ fn main() {
         let out = cb.quantize(z.clone());
         let data = out.0.into_data();
         black_box(data);
-        let _ = device.flush();
+        let _ = device.sync();
     }
 
     let iters = 50;
@@ -31,7 +31,7 @@ fn main() {
         let out = cb.quantize(z.clone());
         let data = out.0.into_data();
         black_box(data);
-        let _ = device.flush();
+        let _ = device.sync();
     }
     let elapsed = t0.elapsed().as_secs_f64();
     let tokens = (batch * seq * iters) as f64;
