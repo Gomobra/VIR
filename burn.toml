@@ -1,0 +1,11 @@
+[cubek.matmul]
+allow_tf32 = true
+
+[cubecl.autotune]
+level = "balanced"
+
+[fusion]
+logger = { level = "disabled" }
+
+[autodiff]
+logger = { level = "disabled" }

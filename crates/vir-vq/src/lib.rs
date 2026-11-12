@@ -29,6 +29,10 @@ impl Default for CodebookConfig {
 #[derive(Module, Debug)]
 pub struct Codebook {
     pub weight: Param<Tensor<2>>,
+    #[module(skip)]
+    e_t: Tensor<2>,
+    #[module(skip)]
+    e_sq: Tensor<1>,
     pub ema_decay: f32,
     pub commitment_cost: f32,
 }
@@ -40,24 +44,46 @@ impl Codebook {
             burn::tensor::Distribution::Normal(0.0, 1.0),
             device,
         );
+        let v = cfg.num_entries;
+        let e_t = w.clone().transpose();
+        let e_sq = (w.clone() * w.clone()).sum_dim(1).reshape([v]);
         Self {
             weight: Param::from_tensor(w),
+            e_t,
+            e_sq,
             ema_decay: cfg.ema_decay,
             commitment_cost: cfg.commitment_cost,
         }
     }
 
-    /// Argmin nearest-neighbor (optimized: tidak hitung z_sq, tidak gather).
-    /// dist = e_sq - 2·z·Eᵀ; argmin = argmax(z·Eᵀ - 0.5·e_sq).
+    /// Refresh cache setelah weight berubah (mis. EMA update).
+    pub fn refresh_cache(&mut self) {
+        let w = self.weight.val();
+        let v = w.dims()[0];
+        self.e_t = w.clone().transpose();
+        self.e_sq = (w.clone() * w.clone()).sum_dim(1).reshape([v]);
+    }
+
+    /// Argmin nearest-neighbor (chunked, cache e_t/e_sq).
     pub fn quantize_idx(&self, z: Tensor<2>) -> Tensor<1, Int> {
-        let [n, _d] = z.dims();
-        let e = self.weight.val();
-        let v = e.dims()[0];
-        let e_sq = (e.clone() * e.clone()).sum_dim(1); // [v,1]
-        let cross = z.matmul(e.transpose()); // [n,v]
-        let e_sq = e_sq.transpose().reshape([1, v]); // [1,v]
-        let scores = cross - e_sq * 0.5; // [n,v]
-        scores.argmax(1).reshape([n])
+        let [n, d] = z.dims();
+        let v = self.e_t.dims()[1];
+        let chunk = 8192usize;
+        let mut parts: Vec<Tensor<1, Int>> = Vec::new();
+        let mut start = 0usize;
+        while start < n {
+            let end = (start + chunk).min(n);
+            let zc = z.clone().slice([start..end, 0..d]);
+            let cross = zc.matmul(self.e_t.clone());
+            let scores = cross - self.e_sq.clone().reshape([1, v]) * 0.5;
+            parts.push(scores.argmax(1));
+            start = end;
+        }
+        if parts.len() == 1 {
+            parts.remove(0)
+        } else {
+            Tensor::cat(parts, 0)
+        }
     }
 
     /// Full quantize: indices + quantized vectors.
@@ -71,7 +97,7 @@ impl Codebook {
     pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
         let z_cl = z.clone();
         let (_, q) = self.quantize(z_cl);
-        z.clone() + (q - z.clone()).detach()
+        z + (q - z).detach()
     }
 }
 
@@ -116,7 +142,7 @@ pub fn vq_loss(
     ce + commit * commitment_cost + latent
 }
 
-/// Nested dropout: acak cutoff k, kembalikan mask level (untuk dipakai di multiscale).
+/// Nested dropout: acak cutoff k.
 pub fn nested_dropout_cutoff(num_levels: usize, prob: f32, rng: &mut impl rand::Rng) -> usize {
     if num_levels <= 1 || prob <= 0.0 {
         return num_levels;
