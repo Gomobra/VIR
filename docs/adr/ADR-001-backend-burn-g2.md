@@ -7,13 +7,17 @@ VIR memakai Burn 0.22. Risiko: throughput training bisa jauh di bawah PyTorch (l
 - Pakai Burn 0.22.1 dengan backend CubeCL (CUDA untuk Kaggle, flex untuk CPU).
 - Ambang G2: throughput Burn ≥ 0,5× PyTorch pada model dan GPU sama.
 
-## Hasil (Nov 2026, Kaggle CUDA)
-- Forward VQ (matmul + argmin + gather), batch 256×128, V=4096, D=384, fp32:
-  - Burn: 646.488 tok/s
-  - PyTorch: 1.307.709 tok/s
-  - Rasio: **0,49×** (tepat di ambang).
-- Burn CUDA terbukti jalan. G2 **LULUS** (borderline).
+## Hasil (Nov 2026, Kaggle CUDA, V=4096, D=384, batch 256×128, 50 iters)
+
+| Versi | Burn tok/s | PyTorch tok/s | Rasio |
+|---|---|---|---|
+| fp32 naive (z_sq+gather) | 646.488 | 1.307.709 | 0,49× |
+| fp32 optimized (tanpa z_sq/gather) | 802.080 | 1.116.389 | 0,72× |
+| fp16 tensor core | 1.059.822 | 2.341.472 | 0,45× |
+
+- Burn CUDA terbukti jalan. G2 **LULUS** (borderline untuk fp32 optimized 0,72×).
+- **Belum di atas PyTorch.** Untuk mengalahkan PyTorch pada microbench ini perlu **kernel terfusi (F7.1)**: matmul + argmax dalam satu kernel (flash-attention style), bukan matmul lepas + argmax terpisah.
 
 ## Konsekuensi
-- Lanjut ke G3. Rekayasa kernel (F7.1) bila training penuh < 0,5×.
+- Lanjut ke G3. Rekayasa kernel (F7.1) diperlukan untuk target "di atas PyTorch".
 - Catatan: ini forward, bukan training (forward+backward+optimizer). Ukur training terpisah.
