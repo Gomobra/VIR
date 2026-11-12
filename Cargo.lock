@@ -2150,6 +2150,7 @@ dependencies = [
 name = "vir-mfs"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "rusqlite",
  "sha2",
  "vir-common",

@@ -1,19 +1,16 @@
-//! Benchmark throughput VQ forward (Burn).
+//! Benchmark throughput VQ forward (Burn, fp32).
 
 use burn::prelude::*;
-use burn::tensor::{Device, DeviceConfig, FloatDType};
+use burn::tensor::Device;
 use std::hint::black_box;
 use std::time::Instant;
 use vir_vq::{Codebook, CodebookConfig};
 
 fn main() {
     #[cfg(feature = "cuda")]
-    let mut device = Device::cuda(0);
+    let device = Device::cuda(0);
     #[cfg(not(feature = "cuda"))]
-    let mut device = Device::default();
-
-    // F16 untuk tensor core (aditif vs PyTorch fp16 baseline)
-    let _ = device.configure(DeviceConfig::default().float_dtype(FloatDType::F16));
+    let device = Device::default();
 
     let cfg = CodebookConfig {
         num_entries: 4096,
@@ -24,6 +21,7 @@ fn main() {
     let batch = 256usize;
     let seq = 128usize;
     let z: Tensor<2> = Tensor::ones([batch * seq, cfg.dim], &device);
+    println!("dtype = {:?}", z.dtype());
 
     for _ in 0..5 {
         let idx = cb.quantize_idx(z.clone());
@@ -41,7 +39,7 @@ fn main() {
     let elapsed = t0.elapsed().as_secs_f64();
     let tokens = (batch * seq * iters) as f64;
     println!(
-        "vq_forward toks/s = {:.2} (elapsed {:.3}s, iters {}, dtype=f16)",
+        "vq_forward toks/s = {:.2} (elapsed {:.3}s, iters {}, dtype=fp32)",
         tokens / elapsed,
         elapsed,
         iters
