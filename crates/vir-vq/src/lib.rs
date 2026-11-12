@@ -69,8 +69,9 @@ impl Codebook {
 
     /// Straight-through: z + (z_q - z).detach()
     pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
-        let (_, q) = self.quantize(z);
-        z.clone() + (q - z).detach()
+        let z_cl = z.clone();
+        let (_, q) = self.quantize(z_cl);
+        z + (q - z).detach()
     }
 }
 
@@ -98,8 +99,14 @@ pub fn vq_loss(
     z: Tensor<2>,
     z_q: Tensor<2>,
     commitment_cost: f32,
+    device: &Device,
 ) -> Tensor<1> {
-    let ce = burn::nn::loss::CrossEntropyLoss::new().forward(logits, target);
+    let [b, t, v] = logits.dims();
+    let logits = logits.reshape([b * t, v]);
+    let target = target.reshape([b * t]);
+    let ce = burn::nn::loss::CrossEntropyLossConfig::new()
+        .init(device)
+        .forward(logits, target);
     let d1 = z.detach() - z_q;
     let d2 = z - z_q.detach();
     let commit = (d1.clone() * d1).mean();
