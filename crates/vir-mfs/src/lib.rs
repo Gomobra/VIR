@@ -25,6 +25,7 @@
 //! # Ok::<(), vir_mfs::VirError>(())
 //! ```
 
+mod catalog;
 mod consolidate;
 mod db;
 mod dedup;
@@ -32,10 +33,13 @@ mod diff;
 mod fusion;
 mod meta;
 mod ops;
+mod path;
+mod query;
 mod search;
 mod store;
 mod vec_index;
 
+pub use catalog::{FileEntry, VersionInfo};
 pub use consolidate::{ConsolidationReport, HeadlineSummarizer, Summarizer};
 pub use diff::{Diff, DiffKind, DiffLine};
 pub use fusion::{
@@ -46,11 +50,9 @@ pub use ops::{
     ReadResult, ReadTarget, TreeNode, diff, find, forget, history, link, links, ls, neighbors,
     read, restore, tag, tree, untag, write,
 };
-pub use search::{SearchHit, SearchMode, SearchOptions};
-pub use store::{
-    DEFAULT_DEDUP_THRESHOLD, FileEntry, MAX_CONTENT_BYTES, MemoryStore, VersionInfo, WriteOutcome,
-    namespace_of, normalize_path,
-};
+pub use path::{namespace_of, normalize_path};
+pub use query::{SearchHit, SearchMode, SearchOptions};
+pub use store::{DEFAULT_DEDUP_THRESHOLD, MAX_CONTENT_BYTES, MemoryStore, WriteOutcome};
 pub use vec_index::{
     Embedder, HashNgramEmbedder, brute_force, cosine, decode_vector, encode_vector,
 };

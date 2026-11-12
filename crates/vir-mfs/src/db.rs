@@ -166,3 +166,37 @@ pub fn hex_sha256(data: &[u8]) -> String {
     h.update(data);
     format!("{:x}", h.finalize())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrasi_menambah_kolom_yang_hilang() {
+        let conn = open_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE);
+             CREATE TABLE versions (
+                 id INTEGER PRIMARY KEY,
+                 file_id INTEGER NOT NULL,
+                 content TEXT NOT NULL,
+                 hash TEXT NOT NULL,
+                 supersedes INTEGER,
+                 created_at INTEGER NOT NULL DEFAULT 0);",
+        )
+        .unwrap();
+        add_missing_columns(&conn).unwrap();
+        assert!(has_column(&conn, "versions", "source").unwrap());
+        assert!(has_column(&conn, "versions", "deleted").unwrap());
+        assert!(has_column(&conn, "files", "namespace").unwrap());
+        assert!(!has_column(&conn, "versions", "tidak_ada").unwrap());
+    }
+
+    #[test]
+    fn hash_sha256_diketahui() {
+        assert_eq!(
+            hex_sha256(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+}

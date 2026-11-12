@@ -3,7 +3,8 @@
 use rusqlite::params;
 
 use crate::db::sql_err;
-use crate::store::{MemoryStore, normalize_path};
+use crate::path::normalize_path;
+use crate::store::MemoryStore;
 use crate::{Result, VirError};
 
 /// Entri berkas dengan versi terbaru.

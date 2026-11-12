@@ -210,3 +210,30 @@ fn embedder_bawaan_deterministik_dan_terindeks() {
     );
     assert_eq!(store.reindex().unwrap(), 1);
 }
+
+#[test]
+fn persisten_di_berkas_dan_migrasi_kolom() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("vir-mfs-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("m.db");
+    let path_str = path.to_str().unwrap();
+    let vid = {
+        let store = MemoryStore::open(path_str).unwrap();
+        let vid = store.write("/semantik/persist", "isi persisten").unwrap();
+        store
+            .tag(store.file_id("/semantik/persist").unwrap().unwrap(), "uji")
+            .unwrap();
+        vid
+    };
+    let store = MemoryStore::open(path_str).unwrap();
+    assert_eq!(store.read(vid).unwrap(), "isi persisten");
+    assert_eq!(store.hash_of(vid).unwrap(), hex_sha256(b"isi persisten"));
+    assert!(store.vector_of(vid).unwrap().is_some());
+    assert!(store.verify(vid).unwrap());
+    drop(store);
+    let _ = std::fs::remove_dir_all(dir);
+}

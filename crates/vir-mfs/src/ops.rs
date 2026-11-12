@@ -3,10 +3,12 @@
 
 use std::collections::BTreeMap;
 
+use crate::catalog::{FileEntry, VersionInfo};
 use crate::diff::{Diff, DiffKind, diff_lines};
 use crate::meta::LinkKind;
-use crate::search::{SearchHit, SearchOptions};
-use crate::store::{FileEntry, MemoryStore, VersionInfo, WriteOutcome, normalize_path};
+use crate::path::normalize_path;
+use crate::query::{SearchHit, SearchOptions};
+use crate::store::{MemoryStore, WriteOutcome};
 use crate::{Result, VirError};
 
 /// Simpul pohon ruang nama.
@@ -86,12 +88,20 @@ pub fn ls(store: &MemoryStore, prefix: &str) -> Result<Vec<FileEntry>> {
     let prefix = normalize_path(prefix)?;
     let mut out = Vec::new();
     for entry in store.entries()? {
-        if entry.deleted || !entry.path.starts_with(&prefix) {
+        if entry.deleted || !under_prefix(&entry.path, &prefix) {
             continue;
         }
         out.push(entry);
     }
     Ok(out)
+}
+
+/// Cocokkan path dengan prefiks segmen (bukan sekadar awalan teks).
+pub(crate) fn under_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Pohon ruang nama di bawah `root`.
@@ -291,11 +301,13 @@ mod tests {
         let s = store();
         s.write("/episodik/e1", "satu").unwrap();
         s.write("/episodik/sub/e2", "dua").unwrap();
-        s.write("/semantik/s1", "tiga").unwrap();
+        s.write("/episodikx/e3", "tiga").unwrap();
+        s.write("/semantik/s1", "empat").unwrap();
         let listed = ls(&s, "/episodik").unwrap();
         assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|e| e.path != "/episodikx/e3"));
         let root = tree(&s, "/").unwrap();
-        assert_eq!(root.children.len(), 2);
+        assert_eq!(root.children.len(), 3);
         let ep = tree(&s, "/episodik").unwrap();
         assert_eq!(ep.children.len(), 2);
         assert_eq!(ep.children[0].name, "e1");

@@ -1,11 +1,12 @@
 //! Penyimpanan berkas memori: versi tak berubah, tautan, dan hapus lunak.
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::db::{
     hex_sha256, i64_vec, init_schema, one_i64, one_string, open_connection, open_memory, sql_err,
     unix_now,
 };
+use crate::path::{namespace_of, normalize_path};
 use crate::vec_index::{Embedder, HashNgramEmbedder};
 use crate::{Result, VirError};
 
@@ -13,7 +14,6 @@ use crate::{Result, VirError};
 pub const DEFAULT_DEDUP_THRESHOLD: f32 = 0.98;
 /// Batas isi satu versi (8 MiB).
 pub const MAX_CONTENT_BYTES: usize = 8 * 1024 * 1024;
-const MAX_PATH_LEN: usize = 1024;
 
 /// Toko memori MFS: SQLite di belakang, isi mentah hanya pernah ditambah.
 pub struct MemoryStore {
@@ -225,7 +225,8 @@ impl MemoryStore {
                 params![version_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
-            .ok();
+            .optional()
+            .map_err(sql_err)?;
         let (content, hash, file_id) =
             row.ok_or_else(|| VirError::Config(format!("versi {version_id} tidak ada")))?;
         let actual = hex_sha256(content.as_bytes());
@@ -319,14 +320,14 @@ impl MemoryStore {
     }
 
     fn raw_version(&self, version_id: i64) -> Result<Option<(String, String)>> {
-        Ok(self
-            .conn
+        self.conn
             .query_row(
                 "SELECT content, hash FROM versions WHERE id = ?1",
                 params![version_id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .ok())
+            .optional()
+            .map_err(sql_err)
     }
 }
 
@@ -338,43 +339,38 @@ fn latest_version(conn: &Connection, file_id: i64) -> Result<Option<i64>> {
     )
 }
 
-/// Normalkan path: mulai `/`, tanpa segmen kosong atau `.`; `..` memangkas.
-pub fn normalize_path(path: &str) -> Result<String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(VirError::Config("path kosong".into()));
-    }
-    if trimmed.len() > MAX_PATH_LEN {
-        return Err(VirError::Config(format!(
-            "path lebih dari {MAX_PATH_LEN} karakter"
-        )));
-    }
-    if trimmed.contains('\0') {
-        return Err(VirError::Config("path mengandung NUL".into()));
-    }
-    let mut parts: Vec<&str> = Vec::new();
-    for seg in trimmed.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other),
-        }
-    }
-    if parts.is_empty() {
-        return Ok("/".into());
-    }
-    Ok(format!("/{}", parts.join("/")))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Ruang nama = segmen pertama path.
-pub fn namespace_of(path: &str) -> String {
-    let path = normalize_path(path).unwrap_or_else(|_| "/".into());
-    let trimmed = path.trim_matches('/');
-    match trimmed.split_once('/') {
-        Some((first, _)) => first.to_string(),
-        None if trimmed.is_empty() => "akar".to_string(),
-        None => trimmed.to_string(),
+    #[test]
+    fn tulis_dua_versi_tanpa_menimpa() {
+        let s = MemoryStore::open_in_memory().unwrap();
+        let v1 = s.write("/semantik/a", "satu").unwrap();
+        let v2 = s.write("/semantik/a", "dua").unwrap();
+        assert!(v2 > v1);
+        assert_eq!(s.read(v1).unwrap(), "satu");
+        assert_eq!(s.read(v2).unwrap(), "dua");
+        assert_eq!(s.history("/semantik/a").unwrap(), vec![v1, v2]);
+        assert_eq!(s.version_info(v2).unwrap().supersedes, Some(v1));
+        assert!(
+            s.links_from(v2)
+                .unwrap()
+                .contains(&(v1, crate::LinkKind::Supersedes))
+        );
+    }
+
+    #[test]
+    fn isi_diubah_terdeteksi() {
+        let s = MemoryStore::open_in_memory().unwrap();
+        let vid = s.write("/semantik/a", "asli").unwrap();
+        s.conn
+            .execute(
+                "UPDATE versions SET content = 'diubah' WHERE id = ?1",
+                params![vid],
+            )
+            .unwrap();
+        assert!(!s.verify(vid).unwrap());
+        assert!(s.read(vid).is_err());
     }
 }

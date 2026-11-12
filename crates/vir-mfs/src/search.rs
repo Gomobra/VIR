@@ -7,75 +7,17 @@ use rusqlite::types::Value;
 
 use crate::Result;
 use crate::db::{sql_err, unix_now};
-use crate::fusion::{FusionConfig, rank_score, rrf_fuse};
+use crate::fusion::{rank_score, rrf_fuse};
+use crate::query::{Candidate, SearchHit, SearchMode, SearchOptions, keep_set, match_expr};
 use crate::store::MemoryStore;
 use crate::vec_index::{cosine, decode_vector};
 
-/// Mode pencarian.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchMode {
-    Hybrid,
-    Keyword,
-    Vector,
-}
-
-/// Opsi pencarian.
-#[derive(Debug, Clone)]
-pub struct SearchOptions {
-    pub query: String,
-    pub limit: usize,
-    pub mode: SearchMode,
-    pub namespace: Option<String>,
-    pub path_prefix: Option<String>,
-    pub tags: Vec<String>,
-    pub since: Option<i64>,
-    pub until: Option<i64>,
-    pub include_forgotten: bool,
-    pub fusion: FusionConfig,
-}
-
-impl Default for SearchOptions {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            limit: 10,
-            mode: SearchMode::Hybrid,
-            namespace: None,
-            path_prefix: None,
-            tags: Vec::new(),
-            since: None,
-            until: None,
-            include_forgotten: false,
-            fusion: FusionConfig::default(),
-        }
-    }
-}
-
-/// Satu hasil pencarian.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SearchHit {
-    pub version_id: i64,
-    pub file_id: i64,
-    pub path: String,
-    pub namespace: String,
-    pub hash: String,
-    pub created_at: i64,
-    pub score: f64,
-    pub fts_rank: Option<usize>,
-    pub vector_rank: Option<usize>,
-    pub accesses: u32,
-    pub content: String,
-}
-
-#[derive(Debug, Clone)]
-struct Candidate {
-    version_id: i64,
-    file_id: i64,
-    path: String,
-    namespace: String,
-    hash: String,
-    content: String,
-    created_at: i64,
+/// Hasil peringkat dua daftar sebelum faktor usia/akses.
+#[derive(Debug, Default)]
+struct Ranked {
+    base: Vec<(i64, f64)>,
+    fts: Vec<(i64, f64)>,
+    vectors: Vec<(i64, f64)>,
 }
 
 impl MemoryStore {
@@ -88,64 +30,21 @@ impl MemoryStore {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
-        let fts = self.fts_ranked(opts, &candidates)?;
-        let vectors = self.vector_ranked(opts, &candidates)?;
-        let fts_ids: Vec<i64> = fts.iter().map(|(id, _)| *id).collect();
-        let vec_ids: Vec<i64> = vectors.iter().map(|(id, _)| *id).collect();
-        let mut lists: Vec<(&[i64], f64)> = Vec::new();
-        if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Keyword) && !fts_ids.is_empty() {
-            lists.push((fts_ids.as_slice(), opts.fusion.fts_weight));
-        }
-        if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Vector) && !vec_ids.is_empty() {
-            lists.push((vec_ids.as_slice(), opts.fusion.vector_weight));
-        }
-        let base = rrf_fuse(&lists, opts.fusion.k);
-        if base.is_empty() {
+        let ranked = self.rank(opts, &candidates)?;
+        if ranked.base.is_empty() {
             return Ok(Vec::new());
         }
         let accesses = self.access_counts()?;
-        let now = unix_now();
-        let mut scored: Vec<(i64, f64)> = base
-            .into_iter()
-            .map(|(id, base)| {
-                let cand = candidates.iter().find(|c| c.version_id == id);
-                let (created_at, count) = match cand {
-                    Some(c) => (c.created_at, accesses.get(&id).copied().unwrap_or(0)),
-                    None => (now, 0),
-                };
-                let age_days = ((now - created_at).max(0) as f64) / 86_400.0;
-                (id, rank_score(base, age_days, count, &opts.fusion))
-            })
-            .collect();
-        scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-        scored.truncate(opts.limit);
-        let fts_rank: HashMap<i64, usize> = fts
-            .iter()
-            .enumerate()
-            .map(|(i, (id, _))| (*id, i))
-            .collect();
-        let vec_rank: HashMap<i64, usize> = vectors
-            .iter()
-            .enumerate()
-            .map(|(i, (id, _))| (*id, i))
-            .collect();
-        let mut hits = Vec::new();
-        for (id, score) in scored {
-            if let Some(c) = candidates.iter().find(|c| c.version_id == id) {
-                hits.push(SearchHit {
-                    version_id: c.version_id,
-                    file_id: c.file_id,
-                    path: c.path.clone(),
-                    namespace: c.namespace.clone(),
-                    hash: c.hash.clone(),
-                    created_at: c.created_at,
-                    score,
-                    fts_rank: fts_rank.get(&id).copied(),
-                    vector_rank: vec_rank.get(&id).copied(),
-                    accesses: accesses.get(&id).copied().unwrap_or(0),
-                    content: c.content.clone(),
-                });
-            }
+        let scored = score_hits(&ranked.base, &candidates, &accesses, opts);
+        let mut hits = build_hits(
+            &scored,
+            &candidates,
+            &ranked.fts,
+            &ranked.vectors,
+            &accesses,
+        );
+        for hit in &mut hits {
+            hit.content = self.content_of(hit.version_id)?.unwrap_or_default();
         }
         Ok(hits)
     }
@@ -186,38 +85,31 @@ impl MemoryStore {
             .collect())
     }
 
-    fn candidates(&self, opts: &SearchOptions) -> Result<Vec<Candidate>> {
-        let mut clauses = Vec::new();
-        let mut params: Vec<Value> = Vec::new();
-        push_filters(opts, &mut clauses, &mut params);
-        if clauses.is_empty() {
-            clauses.push("1 = 1".to_string());
+    fn rank(&self, opts: &SearchOptions, candidates: &[Candidate]) -> Result<Ranked> {
+        let fts = if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Keyword) {
+            self.fts_ranked(opts, candidates)?
+        } else {
+            Vec::new()
+        };
+        let vectors = if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Vector) {
+            self.vector_ranked(opts, candidates)?
+        } else {
+            Vec::new()
+        };
+        let fts_ids: Vec<i64> = fts.iter().map(|(id, _)| *id).collect();
+        let vec_ids: Vec<i64> = vectors.iter().map(|(id, _)| *id).collect();
+        let mut lists: Vec<(&[i64], f64)> = Vec::new();
+        if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Keyword) && !fts_ids.is_empty() {
+            lists.push((fts_ids.as_slice(), opts.fusion.fts_weight));
         }
-        let sql = format!(
-            "SELECT v.id, v.file_id, f.path, f.namespace, v.hash, v.content, v.created_at
-             FROM versions v JOIN files f ON f.id = v.file_id
-             WHERE {} ORDER BY v.id",
-            clauses.join(" AND ")
-        );
-        let mut stmt = self.conn.prepare(&sql).map_err(sql_err)?;
-        let rows = stmt
-            .query_map(params_from_iter(params), |r| {
-                Ok(Candidate {
-                    version_id: r.get(0)?,
-                    file_id: r.get(1)?,
-                    path: r.get(2)?,
-                    namespace: r.get(3)?,
-                    hash: r.get(4)?,
-                    content: r.get(5)?,
-                    created_at: r.get(6)?,
-                })
-            })
-            .map_err(sql_err)?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(sql_err)?);
+        if matches!(opts.mode, SearchMode::Hybrid | SearchMode::Vector) && !vec_ids.is_empty() {
+            lists.push((vec_ids.as_slice(), opts.fusion.vector_weight));
         }
-        Ok(out)
+        Ok(Ranked {
+            base: rrf_fuse(&lists, opts.fusion.k),
+            fts,
+            vectors,
+        })
     }
 
     fn fts_ranked(
@@ -229,7 +121,7 @@ impl MemoryStore {
         if expr.is_empty() {
             return Ok(Vec::new());
         }
-        let keep: HashSet<i64> = candidates.iter().map(|c| c.version_id).collect();
+        let keep: HashSet<i64> = keep_set(candidates);
         let mut stmt = self
             .conn
             .prepare(
@@ -237,7 +129,7 @@ impl MemoryStore {
                  ORDER BY bm25(fts) LIMIT ?2",
             )
             .map_err(sql_err)?;
-        let limit = (opts.limit.saturating_mul(20)).max(50) as i64;
+        let limit = opts.limit.saturating_mul(20).max(50) as i64;
         let rows = stmt
             .query_map(
                 params_from_iter(vec![Value::from(expr), Value::from(limit)]),
@@ -266,7 +158,7 @@ impl MemoryStore {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let keep: HashSet<i64> = candidates.iter().map(|c| c.version_id).collect();
+        let keep: HashSet<i64> = keep_set(candidates);
         let mut stmt = self
             .conn
             .prepare("SELECT version_id, blob FROM vectors ORDER BY version_id")
@@ -291,54 +183,73 @@ impl MemoryStore {
     }
 }
 
-fn push_filters(opts: &SearchOptions, clauses: &mut Vec<String>, params: &mut Vec<Value>) {
-    if !opts.include_forgotten {
-        clauses.push("v.deleted = 0".to_string());
-    }
-    if let Some(ns) = &opts.namespace {
-        clauses.push("f.namespace = ?".to_string());
-        params.push(Value::from(ns.clone()));
-    }
-    if let Some(prefix) = &opts.path_prefix {
-        let prefix = crate::store::normalize_path(prefix).unwrap_or_else(|_| "/".to_string());
-        clauses.push("f.path LIKE ? ESCAPE '\\'".to_string());
-        params.push(Value::from(escape_like(&prefix)));
-    }
-    for tag in &opts.tags {
-        clauses
-            .push("EXISTS (SELECT 1 FROM tags t WHERE t.file_id = f.id AND t.tag = ?)".to_string());
-        params.push(Value::from(tag.trim().to_string()));
-    }
-    if let Some(since) = opts.since {
-        clauses.push("v.created_at >= ?".to_string());
-        params.push(Value::from(since));
-    }
-    if let Some(until) = opts.until {
-        clauses.push("v.created_at <= ?".to_string());
-        params.push(Value::from(until));
-    }
-}
-
-fn escape_like(prefix: &str) -> String {
-    let mut out = String::new();
-    for c in prefix.chars() {
-        if c == '%' || c == '_' || c == '\\' {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out.push('%');
-    out
-}
-
-fn match_expr(query: &str) -> String {
-    let tokens: Vec<String> = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .take(16)
-        .map(|t| format!("\"{}\"*", t.to_lowercase()))
+fn score_hits(
+    base: &[(i64, f64)],
+    candidates: &[Candidate],
+    accesses: &HashMap<i64, u32>,
+    opts: &SearchOptions,
+) -> Vec<(i64, f64)> {
+    let now = unix_now();
+    let mut scored: Vec<(i64, f64)> = base
+        .iter()
+        .map(|(id, base)| {
+            let (created, count) = candidate_meta(candidates, *id, accesses, now);
+            let age_days = ((now - created).max(0) as f64) / 86_400.0;
+            (*id, rank_score(*base, age_days, count, &opts.fusion))
+        })
         .collect();
-    tokens.join(" OR ")
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    scored.truncate(opts.limit);
+    scored
+}
+
+fn candidate_meta(
+    candidates: &[Candidate],
+    id: i64,
+    accesses: &HashMap<i64, u32>,
+    now: i64,
+) -> (i64, u32) {
+    match candidates.iter().find(|c| c.version_id == id) {
+        Some(c) => (c.created_at, accesses.get(&id).copied().unwrap_or(0)),
+        None => (now, 0),
+    }
+}
+
+fn build_hits(
+    scored: &[(i64, f64)],
+    candidates: &[Candidate],
+    fts: &[(i64, f64)],
+    vectors: &[(i64, f64)],
+    accesses: &HashMap<i64, u32>,
+) -> Vec<SearchHit> {
+    let fts_rank: HashMap<i64, usize> = rank_map(fts);
+    let vec_rank: HashMap<i64, usize> = rank_map(vectors);
+    let mut hits = Vec::new();
+    for (id, score) in scored {
+        if let Some(c) = candidates.iter().find(|c| c.version_id == *id) {
+            hits.push(SearchHit {
+                version_id: c.version_id,
+                file_id: c.file_id,
+                path: c.path.clone(),
+                namespace: c.namespace.clone(),
+                hash: c.hash.clone(),
+                created_at: c.created_at,
+                score: *score,
+                fts_rank: fts_rank.get(id).copied(),
+                vector_rank: vec_rank.get(id).copied(),
+                accesses: accesses.get(id).copied().unwrap_or(0),
+                content: String::new(),
+            });
+        }
+    }
+    hits
+}
+
+fn rank_map(list: &[(i64, f64)]) -> HashMap<i64, usize> {
+    list.iter()
+        .enumerate()
+        .map(|(i, (id, _))| (*id, i))
+        .collect()
 }
 
 #[cfg(test)]
@@ -350,7 +261,10 @@ mod tests {
         s.write("/episodik/e1", "rust memori kepemilikan data")
             .unwrap();
         s.write("/episodik/e2", "python sains data numpy").unwrap();
+        s.write("/episodikx/e3", "data tambahan").unwrap();
         s.write("/semantik/s1", "catatan arsitektur rust").unwrap();
+        s.write("/semantik/s2", "catatan episodik tersimpan")
+            .unwrap();
         s
     }
 
@@ -386,12 +300,9 @@ mod tests {
         assert_eq!(hits[0].path, "/episodik/e1");
         opts.tags.clear();
         opts.path_prefix = Some("/episodik".into());
-        assert!(
-            s.search(&opts)
-                .unwrap()
-                .iter()
-                .all(|h| h.path.starts_with("/episodik"))
-        );
+        let hits = s.search(&opts).unwrap();
+        assert!(hits.iter().all(|h| h.path.starts_with("/episodik")));
+        assert!(!hits.iter().any(|h| h.path.starts_with("/episodikx")));
     }
 
     #[test]
@@ -432,9 +343,11 @@ mod tests {
     }
 
     #[test]
-    fn ekspresi_fts_aman() {
-        assert_eq!(match_expr("rust-"), "\"rust\"*");
-        assert!(match_expr("   ").is_empty());
-        assert!(match_expr("\" OR MATCH").contains("or"));
+    fn vektor_menolong_saat_token_tidak_cocok() {
+        let s = store_with_docs();
+        assert!(s.search_fts("episdot", 5).unwrap().is_empty());
+        let hits = s.search_vector("episdot", 5).unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits[0].path == "/semantik/s2");
     }
 }

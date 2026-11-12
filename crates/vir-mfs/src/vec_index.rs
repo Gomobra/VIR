@@ -1,5 +1,10 @@
 //! Indeks semantik: embedder di belakang trait, default n-gram berbasis hash,
 //! dan pencarian kosinus brute-force (cukup sampai ~100 ribu vektor).
+//!
+//! Titik ganti brute-force: pada ~100 ribu vektor, satu kueri memindai seluruh
+//! blob (O(N·d)). Jalur skala yang disiapkan PRD adalah LanceDB (HNSW) dengan
+//! Tantivy untuk teks; skema `vectors` di sini sudah cukup untuk memuat indeks
+//! itu tanpa mengubah tabel versi.
 
 use vir_common::VirError;
 

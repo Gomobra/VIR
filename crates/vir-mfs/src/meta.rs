@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::db::{i64_vec, one_i64, sql_err};
 use crate::store::MemoryStore;
@@ -183,7 +183,8 @@ impl MemoryStore {
                 params![version_id],
                 |r| r.get(0),
             )
-            .ok();
+            .optional()
+            .map_err(sql_err)?;
         Ok(total.unwrap_or(0).max(0) as u32)
     }
 
@@ -223,7 +224,8 @@ impl MemoryStore {
                 params![version_id],
                 |r| r.get(0),
             )
-            .ok();
+            .optional()
+            .map_err(sql_err)?;
         blob.map(|b| decode_vector(&b)).transpose()
     }
 
@@ -329,13 +331,13 @@ impl MemoryStore {
     }
 
     pub(crate) fn content_of(&self, version_id: i64) -> Result<Option<String>> {
-        Ok(self
-            .conn
+        self.conn
             .query_row(
                 "SELECT content FROM versions WHERE id = ?1",
                 params![version_id],
                 |r| r.get(0),
             )
-            .ok())
+            .optional()
+            .map_err(sql_err)
     }
 }
