@@ -121,8 +121,8 @@ pub fn nested_dropout_cutoff(num_levels: usize, prob: f32, rng: &mut impl rand::
     if num_levels <= 1 || prob <= 0.0 {
         return num_levels;
     }
-    if rng.gen::<f32>() < prob {
-        rng.gen_range(1..num_levels)
+    if rand::Rng::gen::<f32>(&mut *rng) < prob {
+        rand::Rng::gen_range(&mut *rng, 1..num_levels)
     } else {
         num_levels
     }
