@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 vir-common = { path = "../vir-common" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std"] }
+rand = "0.8"
 [workspace]
 
 [features]

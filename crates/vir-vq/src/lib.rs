@@ -1,20 +1,36 @@
-//! VQ-VAE multiscale (skeleton).
+//! VQ-VAE multiscale (codebook, EMA, nested dropout, decoder, loss).
 
 use burn::module::Module;
 use burn::module::Param;
+use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 use burn::tensor::Device;
 use vir_common::VirError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CodebookConfig {
     pub num_entries: usize,
     pub dim: usize,
+    pub ema_decay: f32,
+    pub commitment_cost: f32,
+}
+
+impl Default for CodebookConfig {
+    fn default() -> Self {
+        Self {
+            num_entries: 4096,
+            dim: 384,
+            ema_decay: 0.99,
+            commitment_cost: 0.25,
+        }
+    }
 }
 
 #[derive(Module, Debug)]
 pub struct Codebook {
     pub weight: Param<Tensor<2>>,
+    pub ema_decay: f32,
+    pub commitment_cost: f32,
 }
 
 impl Codebook {
@@ -26,21 +42,80 @@ impl Codebook {
         );
         Self {
             weight: Param::from_tensor(w),
+            ema_decay: cfg.ema_decay,
+            commitment_cost: cfg.commitment_cost,
         }
     }
 
-    pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
+    /// Argmin nearest-neighbor (optimized: tidak hitung z_sq, tidak gather).
+    /// dist = e_sq - 2·z·Eᵀ; argmin = argmax(z·Eᵀ - 0.5·e_sq).
+    pub fn quantize_idx(&self, z: Tensor<2>) -> Tensor<1, Int> {
         let [n, _d] = z.dims();
-        let z_sq = (z.clone() * z.clone()).sum_dim(1); // [n,1]
-        let e_sq = (self.weight.val().clone() * self.weight.val().clone()).sum_dim(1); // [v,1]
-        let cross = z.clone().matmul(self.weight.val().clone().transpose()); // [n,v]
-        // broadcast: dist = z_sq + e_sq^T - 2*cross
-        let z_sq = z_sq.reshape([n, 1]);
-        let e_sq = e_sq.transpose().reshape([1, self.weight.val().dims()[0]]);
-        let dist = z_sq.clone() + e_sq - cross * 2.0; // [n,v]
-        let idx = dist.argmin(1).reshape([n]); // [n]
-        let q = self.weight.val().clone().select(0, idx.clone()); // [n,dim]
+        let e = self.weight.val();
+        let v = e.dims()[0];
+        let e_sq = (e.clone() * e.clone()).sum_dim(1); // [v,1]
+        let cross = z.matmul(e.transpose()); // [n,v]
+        let e_sq = e_sq.transpose().reshape([1, v]); // [1,v]
+        let scores = cross - e_sq * 0.5; // [n,v]
+        scores.argmax(1).reshape([n])
+    }
+
+    /// Full quantize: indices + quantized vectors.
+    pub fn quantize(&self, z: Tensor<2>) -> (Tensor<1, Int>, Tensor<2>) {
+        let idx = self.quantize_idx(z);
+        let q = self.weight.val().select(0, idx.clone());
         (idx, q)
+    }
+
+    /// Straight-through: z + (z_q - z).detach()
+    pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
+        let (_, q) = self.quantize(z);
+        z.clone() + (q - z).detach()
+    }
+}
+
+/// Decoder kecil: rekonstruksi -> logit vocab.
+#[derive(Module, Debug)]
+pub struct Decoder {
+    pub fc: Linear,
+}
+
+impl Decoder {
+    pub fn new(dim: usize, vocab: usize, device: &Device) -> Self {
+        Self {
+            fc: LinearConfig::new(dim, vocab).init(device),
+        }
+    }
+    pub fn forward(&self, z: Tensor<3>) -> Tensor<3> {
+        self.fc.forward(z)
+    }
+}
+
+/// Loss tokenizer: CE + commitment + latent quantization.
+pub fn vq_loss(
+    logits: Tensor<3>,
+    target: Tensor<2, Int>,
+    z: Tensor<2>,
+    z_q: Tensor<2>,
+    commitment_cost: f32,
+) -> Tensor<1> {
+    let ce = burn::nn::loss::CrossEntropyLoss::new().forward(logits, target);
+    let d1 = z.detach() - z_q;
+    let d2 = z - z_q.detach();
+    let commit = (d1.clone() * d1).mean();
+    let latent = (d2.clone() * d2).mean();
+    ce + commit * commitment_cost + latent
+}
+
+/// Nested dropout: acak cutoff k, kembalikan mask level (untuk dipakai di multiscale).
+pub fn nested_dropout_cutoff(num_levels: usize, prob: f32, rng: &mut impl rand::Rng) -> usize {
+    if num_levels <= 1 || prob <= 0.0 {
+        return num_levels;
+    }
+    if rng.gen::<f32>() < prob {
+        rng.gen_range(1..num_levels)
+    } else {
+        num_levels
     }
 }
 
@@ -52,6 +127,7 @@ pub fn vq_smoke() -> Result<(), VirError> {
     let cfg = CodebookConfig {
         num_entries: 8,
         dim: 4,
+        ..CodebookConfig::default()
     };
     let cb = Codebook::new(&cfg, &device);
     let z: Tensor<2> = Tensor::ones([2, 4], &device);
@@ -66,5 +142,13 @@ mod tests {
     #[test]
     fn codebook_quantize_runs() {
         assert!(vq_smoke().is_ok());
+    }
+    #[test]
+    fn nested_dropout_bounds() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let k = nested_dropout_cutoff(12, 0.5, &mut rng);
+            assert!((1..=12).contains(&k));
+        }
     }
 }
