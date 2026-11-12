@@ -76,7 +76,8 @@ impl Codebook {
             let zc = z.clone().slice([start..end, 0..d]);
             let cross = zc.matmul(self.e_t.clone());
             let scores = cross - self.e_sq.clone().reshape([1, v]) * 0.5;
-            parts.push(scores.argmax(1));
+            let rows = end - start;
+            parts.push(scores.argmax(1).reshape([rows]));
             start = end;
         }
         if parts.len() == 1 {
@@ -97,7 +98,7 @@ impl Codebook {
     pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
         let z_cl = z.clone();
         let (_, q) = self.quantize(z_cl);
-        z + (q - z).detach()
+        z.clone() + (q - z).detach()
     }
 }
 
