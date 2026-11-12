@@ -468,7 +468,7 @@ Seluruh F1.x dikerjakan sebagai **satu irisan**: tiap crate selesai nyata, lalu 
 1. Per level k (R2): `u_k = Down_k(z^(k−1)) ∈ ℝ^{ℓ_k×d}`, `r_k^i = argmin_j ‖u_k^i − e_{k,j}‖²`, `ẑ^(k) = ẑ^(k−1) + R_k(e_k(r_k))`, `z^(k) = z − ẑ^(k)`, dengan `ẑ^(0) = 0` dan `z^(0) = z`. `R_k` memetakan `ℓ_k×d` ke `L×d`; makalah NCM hanya menyebut "operator rekonstruksi", sehingga pilihan Down/R_k (pooling dan interpolasi, atau konvolusi seperti VAR) ditetapkan lewat ADR.
 2. Simpan `r_k` dan `ẑ^(k)` tiap level (dipakai generator, R5–R6).
 3. Tes invarian: `Σ_k R_k(e_k(r_k)) = ẑ^(K)`; galat `‖z − ẑ^(k)‖` tidak naik per level pada data kecil setelah dilatih.
-4. Kandidat `Down_k`/`R_k` dari SNAC (arXiv 2410.14411): turunkan residual dengan average pooling faktor `W_k`, cari kode, lalu naikkan dengan nearest-neighbor faktor `W_k` ke resolusi asal; SNAC juga menyuntikkan blok derau yang menurut ablasinya memperbaiki rekonstruksi dan utilisasi codebook. Bandingkan dengan interpolasi linear lewat ADR.
+4. Operator Down_k/R_k: **teks** memakai `F.interpolate(mode="area")` (down) + `F.interpolate(mode="linear")` (up) + residual conv `Phi` (dari kode `HazyResearch/ncm`; SNAC hanya untuk audio di F6.4). Bandingkan dengan konvolusi seperti VAR lewat ADR. Koreksi: draf sebelumnya menyebut SNAC untuk teks — itu keliru.
 
 ##### F1.4.c Nested dropout
 **Ide:** Saat latihan, hanya k level pertama yang dipakai (k acak), agar level awal membawa informasi bermakna.
@@ -492,7 +492,7 @@ Seluruh F1.x dikerjakan sebagai **satu irisan**: tiap crate selesai nyata, lalu 
 
 **Cara membuat:**
 1. Dekoder (R4): `p_ψ(x^i | ẑ^(k))` di semua L posisi dari rekonstruksi kumulatif. Loss tokenizer: `L_tok = −(1/L)·Σ_i log p_ψ(x^i∣ẑ^(k)) + β·MSE(z, sg[ẑ^(k)]) + MSE(sg[z], ẑ^(k))`; suku kedua komitmen, suku ketiga kuantisasi laten, `sg` = stop-gradient.
-2. Nilai `β` tidak terbaca di bagian makalah yang diperiksa; jadikan hiperparameter dan cocokkan dengan `HazyResearch/ncm`. Dengan FSQ (F1.4.f) kedua suku MSE dihilangkan (FSQ tidak butuh loss tambahan).
+2. Nilai `β` dari kode acuan `HazyResearch/ncm` adalah `commitment_cost = 0.25` (bukan "tidak terbaca"). Dengan FSQ (F1.4.f) kedua suku MSE dihilangkan (FSQ tidak butuh loss tambahan).
 3. Hitung CE per potongan dan jumlahkan, dengan checkpointing agar tensor logit `L×|vocab|` tidak disimpan (vocab sampai 151.680 pada WMT14). Tes kesetaraan nilai dan gradien terhadap CE penuh.
 
 ##### F1.4.e Evaluasi rekonstruksi
@@ -1825,3 +1825,5 @@ vir/
 └── .opencode/
     └── agents/*.md                  # roster F0.3.a
 ```
+
+> **Catatan repo saat ini (Nov 2026):** tree di atas adalah target. Tambahan yang sudah ada: `LICENSE`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `.github/pull_request_template.md`, `configs/{mini,kaggle}.yaml`, `configs/tui.toml`, `data/sources.json`, `scripts/vir_kaggle*.ipynb`, `scripts/kernel-*.json`, `scripts/bench/`, `scripts/g2/`, `docs/adr/ADR-001..008`. Crate Burn (`vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-eval`) memakai `[workspace]` sendiri (standalone) karena Burn tidak compile di Termux; dibangun di CI x86_64. File modul sebagian masih `lib.rs` tunggal (belum dipecah sesuai tree).

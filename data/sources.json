@@ -1,0 +1,8 @@
+{
+  "sources": [
+    {"id": "tinystories", "license": "CC-BY-4.0", "url": "https://huggingface.co/datasets/roneneldan/TinyStories"},
+    {"id": "wmt14", "license": "research-use", "url": "https://huggingface.co/datasets/wmt/wmt14"},
+    {"id": "xsum", "license": "MIT", "url": "https://huggingface.co/datasets/EdinburghNLP/xsum"},
+    {"id": "openwebtext", "license": "CC-BY-4.0", "url": "https://huggingface.co/datasets/Skylion007/openwebtext"}
+  ]
+}

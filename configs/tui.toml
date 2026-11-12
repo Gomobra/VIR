@@ -1,0 +1,14 @@
+[theme]
+name = "dark"
+color_mode = "truecolor"
+colorblind_safe = true
+
+[input]
+low_bandwidth = false
+fps = 30
+low_bandwidth_fps = 5
+
+[keymap]
+palette = "ctrl+p"
+help = "?"
+quit = "q"
