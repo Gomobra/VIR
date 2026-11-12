@@ -35,3 +35,10 @@ Format entri:
 - Perbaikan: (belum)
 - Tes regresi: regression_e004_*
 - Commit: -
+
+## E-005 — Koreksi PRD: SNAC untuk teks
+- Gejala: PRD F1.4.b menyebut SNAC sebagai kandidat Down/R_k untuk teks.
+- Akar masalah: salah tafsir; kode NCM memakai `F.interpolate(area/linear)` untuk teks, SNAC hanya audio.
+- Perbaikan: PRD F1.4.b diperbarui; ADR-003 dicatat.
+- Tes regresi: N/A (dokumentasi)
+- Commit: a50dcbf

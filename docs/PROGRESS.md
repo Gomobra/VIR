@@ -1,27 +1,34 @@
 # PROGRESS — VIR Vbeta
 
-## Selesai
-- F0.1 (sebagian): workspace Cargo, vir-common, vir-py, vir-cli, vir-text, vir-data, vir-tui, vir-vq, vir-nn, vir-model, vir-train (Burn, di luar workspace Termux, dibangun di CI), python/vir, pyproject, CI workflows, AGENTS.md, docs, specs/F0.1.
-- F1.8 (sebagian): `vir smoke --json` menjalankan irisan BPE train+encode+decode roundtrip; `vir tui` membuka dasbor Ratatui.
-- F2.x (sebagian): recurrent depth, halting (Fixed/Entropy), sampling (CFG, MBR), level weight, pass@k (tak bias) di vir-model/vir-train.
-- F3.x (sebagian): vir-mfs (SQLite WAL, versioning, FTS5, forget/restore, RRF, tes invarian), vir-sandbox (subprocess + timeout + truncation), vir-agent (LanguageModel trait, ScriptedLm, RLM orchestrator + budget), vir-py bindings (Memory, rlm_run), CLI mem/rlm.
-- CI: semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval); wheels manylinux x86_64 terbangun.
-- F4 (sebagian): vir-eval (pass@k, recon accuracy, needle gen), FIM di vir-data, pass@k tak bias di vir-train, SFT pack, GRPO advantage, kaggle_train.py skeleton.
-- CI: semua job hijau; wheels manylinux x86_64 terbangun.
-- Gerbang lokal: cargo build/test/clippy/fmt hijau; wheel maturin terbangun; import vir OK; text_encode/decode OK; vir-data shard/pack/FIM/stream/synth OK.
-- Tes: cargo test --workspace lulus (schedule proptest + config tests + vir-text roundtrip).
-- Clippy -D warnings lulus; fmt lulus; forbid_stubs lulus.
-- Wheel maturin terbangun (Android); import vir OK; text_encode/decode OK.
+## Selesai (F0–F4 sebagian)
+- **F0**: workspace Cargo, `vir-common`, `vir-py`, `vir-cli`, `vir-text`, `vir-data`, `vir-tui`, `vir-mfs`, `vir-sandbox`, `vir-agent`, `vir-eval`, `vir-vq`, `vir-nn`, `vir-model`, `vir-train`; Python API + CLI; CI (ci/wheels/smoke); AGENTS.md; LICENSE/README/CONTRIBUTING/SECURITY; PR template; `.opencode/agents` (14 agen); `configs/`; `data/sources.json`; `docs/adr/ADR-001..008`; `specs/F0.1..F4.5`.
+- **F1**: BPE byte-level + ByteTokenizer; shard/pack/FIM/stream/synth; VQ codebook skeleton; NN block skeleton; generator skeleton; loss helpers; `vir smoke` BPE roundtrip; TUI dashboard v1.
+- **F2**: recurrent/halting/sampling skeleton; level weight; pass@k.
+- **F3**: MFS (SQLite WAL, FTS5, versioning, RRF); sandbox (subprocess); RLM (ScriptedLm + budget); Python bindings.
+- **F4**: vir-eval (pass@k, recon, needle); SFT pack; GRPO advantage; kaggle_train.py.
 
 ## Bukti
-- `cargo test --workspace` lulus (1 tes properti schedule).
-- `cargo clippy --workspace --all-targets -- -D warnings` lulus.
-- `cargo fmt --check` lulus.
-- `bash scripts/forbid_stubs.sh` lulus.
-- `vir smoke --json` mengeluarkan build info.
+- CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
+- Wheel manylinux x86_64 terbangun; `import vir` OK.
+- Kaggle G2: Burn CUDA **0.49× PyTorch** (forward VQ) → LULUS borderline (ADR-001).
+- Kaggle G2 smoke + bench: COMPLETE (log.txt + result.json).
 
-## Sisa
-- F0.2: lint config sudah ada; pemeriksa crate punya tes; cargo-mutants prosedur.
-- F0.3: agen OpenCode di .opencode/agents (belum).
-- F0.5: smoke.yml masih placeholder (vir-cli smoke belum memanggil pipeline nyata).
-- F1.x: belum dimulai.
+## Sisa (belum selesai)
+- **F1.4**: VQ penuh (EMA update, dead-code restart, nested dropout, decoder, loss, FSQ).
+- **F1.5**: RoPE nyata, mask block-diagonal/prefix-LM, leakage tests.
+- **F1.6**: generator penuh (embedding per level, head, loss/generate, sampling).
+- **F1.7**: trainer 2 tahap, Muon, checkpoint/resume, JSONL.
+- **F1.8**: irisan penuh (BPE→VQ→generator→decoder→sampling, overfit 8 sampel).
+- **F1.10/F3.8**: TUI penuh (JSONL tail, chart, snapshot 3 ukuran, 9 layar).
+- **F3.1**: Landlock + seccomp + rlimit.
+- **F3.2**: REPL stateful.
+- **F3.3**: vector index, dedup, konsolidasi, ls/tree/link/tag/diff.
+- **F3.4**: RLM rekursif + llm_query + mem + FINAL.
+- **F3.6**: API lengkap (`vir.text.Tokenizer`, `vir.Model`, dll).
+- **F3.7**: tests/e2e + tests/python.
+- **F4**: SFT training, verifier selection, RL loop, code eval, lm-eval adapter.
+- **F5/F6/F7**: konteks panjang, multimodal, optimasi.
+- Pecah file sesuai tree 6.2 (sebagian masih `lib.rs` tunggal).
+
+## Catatan
+- Crate Burn (`vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-eval`) standalone `[workspace]` karena Burn tidak compile di Termux (gemm-f16). Dibangun di CI x86_64.
