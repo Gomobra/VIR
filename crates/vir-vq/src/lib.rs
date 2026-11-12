@@ -71,7 +71,7 @@ impl Codebook {
     pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
         let z_cl = z.clone();
         let (_, q) = self.quantize(z_cl);
-        z + (q - z).detach()
+        z.clone() + (q - z.clone()).detach()
     }
 }
 
@@ -107,8 +107,8 @@ pub fn vq_loss(
     let ce = burn::nn::loss::CrossEntropyLossConfig::new()
         .init(device)
         .forward(logits, target);
-    let z_d = z.detach();
-    let z_q_d = z_q.detach();
+    let z_d = z.clone().detach();
+    let z_q_d = z_q.clone().detach();
     let d1 = z_d - z_q;
     let d2 = z - z_q_d;
     let commit = (d1.clone() * d1).mean();
