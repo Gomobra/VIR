@@ -7,9 +7,10 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 vir-common = { path = "../vir-common" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "autotune", "fusion", "persistence"] }
+burn-cuda = { version = "0.22", optional = true, features = ["autotune", "fusion", "persistence"] }
 rand = "0.8"
 [workspace]
 
 [features]
 default = []
-cuda = ["burn/cuda"]
+cuda = ["burn/cuda", "dep:burn-cuda"]
