@@ -47,7 +47,7 @@ pub fn grpo_advantage(rewards: &[f32], eps: f32) -> Vec<f32> {
 }
 
 /// Newton-Schulz orthogonalization (Muon), 5 iterasi, koefisien (3.4445, -4.7750, 2.0315).
-pub fn newton_schulz(m: &mut [f32], rows: usize, cols: usize) {
+pub fn newton_schulz(m: &mut Vec<f32>, rows: usize, cols: usize) {
     // X0 = M / ||M||_F
     let norm: f32 = m.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-7);
     for v in m.iter_mut() {
@@ -56,7 +56,7 @@ pub fn newton_schulz(m: &mut [f32], rows: usize, cols: usize) {
     let (a, b, c) = (3.4445f32, -4.7750, 2.0315);
     for _ in 0..5 {
         // X <- aX + b(XX^T)X + c(XX^T)^2 X
-        let xtx = matmul_t(&*m, rows, cols); // [cols, cols] = X^T X
+        let xtx = matmul_t(m, rows, cols); // [cols, cols] = X^T X
         let xtx2 = matmul(&xtx, &xtx, cols, cols, cols); // [cols, cols]
                                                          // X (aI + b X^T X + c (X^T X)^2)
         let mut new = vec![0.0f32; rows * cols];
