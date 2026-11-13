@@ -7,6 +7,7 @@
 - **F3**: MFS (SQLite WAL, FTS5, versioning, RRF); sandbox (subprocess); RLM (ScriptedLm + budget); Python bindings.
 - **F4**: vir-eval (pass@k, recon, needle); SFT pack; GRPO advantage; kaggle_train.py.
 - **F7.1**: fused matmul+argmax kernel (`crates/vir-vq/src/kernel.rs`, feature `fused`) — tidak menulis buffer [N,V] ke HBM; compile check CI lulus.
+- **F1.4**: vir-vq lengkap (codebook EMA, multiscale, dropout, decoder, loss, metrics, FSQ) — 50+ tes lulus di CI.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
