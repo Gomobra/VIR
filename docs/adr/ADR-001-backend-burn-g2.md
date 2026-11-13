@@ -14,11 +14,12 @@ VIR memakai Burn 0.22. Risiko: throughput training bisa jauh di bawah PyTorch (l
 | fp32 naive (z_sq+gather) | 646.488 | 1.307.709 | 0,49× |
 | fp32 optimized (tanpa z_sq/gather) | 802.080 | 1.116.389 | 0,72× |
 | fp32 + autotune/fusion (burn-cuda) | 806.976 | 1.063.044 | 0,76× |
+| fp32 + fused kernel (F7.1, scalar FMA) | 832.018 | 1.079.248 | 0,77× |
 | fp16 tensor core | 1.059.822 | 2.341.472 | 0,45× |
 
-- Burn CUDA terbukti jalan. G2 **LULUS** (borderline untuk fp32 optimized 0,72–0,76×).
-- **Belum di atas PyTorch.** Autotune+fusion (burn-cuda) hanya naik tipis (0,72→0,76×). Bottleneck utama = `argmax` (reduce) + matmul lepas, bukan GEMM saja.
-- Untuk mengalahkan PyTorch pada microbench ini perlu **kernel terfusi (F7.1/P3)**: matmul + argmax dalam satu kernel (tidak menulis [N,V] ke HBM). Estimasi riset: 5–8M tok/s (fp16) / 1.4–1.6M (fp32).
+- Burn CUDA terbukti jalan. G2 **LULUS** (borderline untuk fp32 optimized 0,72–0,77×).
+- **Fused kernel (F7.1) menghilangkan buffer [N,V] tapi masih 0,77×** karena kernel pakai scalar FMA (bukan tensor core `mma`). PyTorch memakai cuBLAS TF32/tensor core.
+- Untuk mengalahkan PyTorch: kernel harus pakai `mma`/tensor core (cubek-tile `Tile::mm`), bukan scalar FMA. Ini iterasi F7.1 berikutnya.
 
 ## Konsekuensi
 - Lanjut ke G3. Rekayasa kernel (F7.1) diperlukan untuk target "di atas PyTorch".
