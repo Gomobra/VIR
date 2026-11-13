@@ -110,7 +110,8 @@ impl Generator {
             let x = self.core.forward(x);
             let x = self.coda.forward(x);
             let logits = self.heads[k].forward(x);
-            let idx = logits.argmax(2); // [B, target_len]
+            let [b, l, _] = logits.dims();
+            let idx = logits.argmax(2).reshape([b, l]); // [B, target_len]
             codes.push(idx.clone());
             // update rekonstruksi kumulatif: tambah embedding kode
             let [b, l] = idx.dims();
