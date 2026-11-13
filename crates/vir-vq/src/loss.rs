@@ -83,6 +83,7 @@ pub fn fsq_loss(
 mod tests {
     use super::*;
     use crate::decoder::Decoder;
+    use burn::tensor::Distribution;
 
     fn device() -> Device {
         Device::default()

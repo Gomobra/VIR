@@ -369,7 +369,7 @@ mod tests {
     }
 
     fn f(t: Tensor<3>) -> Vec<f32> {
-        t.into_data().to_vec::<f32>().unwrap_or_default()
+        t.into_data().try_to_vec::<f32>().unwrap_or_default()
     }
 
     /// Matriks pooling membentuk partisi: setiap posisi masuk tepat satu blok.
