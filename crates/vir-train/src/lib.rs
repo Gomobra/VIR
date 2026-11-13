@@ -56,7 +56,7 @@ pub fn newton_schulz(m: &mut [f32], rows: usize, cols: usize) {
     let (a, b, c) = (3.4445f32, -4.7750, 2.0315);
     for _ in 0..5 {
         // X <- aX + b(XX^T)X + c(XX^T)^2 X
-        let xtx = matmul_t(m, rows, cols); // [cols, cols] = X^T X
+        let xtx = matmul_t(&*m, rows, cols); // [cols, cols] = X^T X
         let xtx2 = matmul(&xtx, &xtx, cols, cols, cols); // [cols, cols]
                                                          // X (aI + b X^T X + c (X^T X)^2)
         let mut new = vec![0.0f32; rows * cols];
