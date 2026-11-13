@@ -237,7 +237,7 @@ mod tests {
         // rotasi menjaga norma per posisi
         let nx = (x.clone() * x.clone()).sum_dim(2);
         let ny = (y.clone() * y.clone()).sum_dim(2);
-        let diff = (nx - ny).abs().max().into_scalar();
+        let diff: f32 = (nx - ny).abs().max().into_scalar();
         assert!(diff < 1e-3, "norm berubah: {diff}");
     }
 }
