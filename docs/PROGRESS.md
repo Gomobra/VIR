@@ -17,6 +17,7 @@
 - **F3.4**: RLM recursive `llm_query` dengan budget kedalaman/panggilan — tes lulus di CI.
 - **F3.1**: vir-sandbox Landlock module (feature `sandbox`, ABI detect + confine) — tes lulus di CI.
 - **F4.1/F4.2/F4.4/F4.5**: SFT loss (prefix-LM), pass@k, FIM, vir-eval — CI hijau.
+- **F1.8**: `full_smoke` (VQ+generator+loss mini) di vir-model — tes lulus di CI.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
