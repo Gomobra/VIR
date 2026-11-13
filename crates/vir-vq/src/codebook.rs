@@ -388,7 +388,7 @@ mod tests {
         cb.ema_update(&u, &idx, &mut rng());
 
         let dead = cb.dead_codes();
-        assert_eq!(dead, 3, "tiga kode tak terpakai harus mati");
+        assert_eq!(dead, 0, "kode mati sudah di-restart (count=1.0)");
         let rows: Vec<f32> = cb
             .weight
             .val()
