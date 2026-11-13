@@ -45,7 +45,7 @@ pub fn apply_rope(x: Tensor<3>, base: f32) -> Tensor<3> {
     let sin = Tensor::<2>::from_floats(burn::tensor::TensorData::new(sin, [t, d]), &device)
         .unsqueeze_dim(0);
     let x1 = x.clone().slice([0..b, 0..t, 0..half]);
-    let x2 = x.slice([0..b, 0..t, half..d]);
+    let x2 = x.clone().slice([0..b, 0..t, half..d]);
     let rotated = burn::tensor::Tensor::cat(vec![x2.clone().neg(), x1], 2);
     x * cos + rotated * sin
 }
