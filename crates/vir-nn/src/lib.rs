@@ -171,19 +171,13 @@ impl Block {
         let h = self.num_heads;
         let hd = self.head_dim;
         let xn = self.ln1.forward(x.clone());
-        let q = self
-            .wq
-            .forward(xn.clone())
+        let q = apply_rope(self.wq.forward(xn.clone()), 10000.0)
             .reshape([b, t, h, hd])
             .swap_dims(1, 2);
-        let k = self
-            .wk
-            .forward(xn.clone())
+        let k = apply_rope(self.wk.forward(xn.clone()), 10000.0)
             .reshape([b, t, h, hd])
             .swap_dims(1, 2);
         let v = self.wv.forward(xn).reshape([b, t, h, hd]).swap_dims(1, 2);
-        let q = apply_rope(q, 10000.0);
-        let k = apply_rope(k, 10000.0);
         let kt = k.clone().swap_dims(2, 3);
         let scores = q.matmul(kt) / (hd as f32).sqrt();
         let w = burn::tensor::activation::softmax(scores, 3);
