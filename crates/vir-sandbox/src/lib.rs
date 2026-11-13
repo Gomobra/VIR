@@ -1,5 +1,7 @@
 //! Sandbox eksekusi kode (dasar: subprocess + timeout + batas keluaran).
 
+pub mod landlock;
+
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use vir_common::VirError;

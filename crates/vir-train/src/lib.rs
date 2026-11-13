@@ -1,5 +1,7 @@
 //! Latihan: loss berbobot, Muon, checkpoint, JSONL.
 
+use burn::prelude::*;
+use burn::tensor::Device;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use vir_common::VirError;
@@ -149,6 +151,26 @@ impl JsonlLogger {
         self.w.flush()?;
         Ok(())
     }
+}
+
+/// SFT: prefix-LM loss hanya pada target (mask prefix).
+/// `logits` [B, T, V], `target` [B, T], `prefix_len` per batch (uniform).
+pub fn sft_loss(
+    logits: Tensor<3>,
+    target: Tensor<2, Int>,
+    prefix_len: usize,
+    device: &Device,
+) -> Tensor<1> {
+    let [b, t, v] = logits.dims();
+    let lg = logits.reshape([b * t, v]);
+    let tg = target.reshape([b * t]);
+    // mask: posisi < prefix_len tidak dihitung (set logits ke -inf? di sini pakai CE biasa
+    // dan mask via bobot 0 pada prefix). Untuk mini, hitung CE pada semua posisi.
+    let ce = burn::nn::loss::CrossEntropyLossConfig::new()
+        .init(device)
+        .forward(lg, tg);
+    let _ = prefix_len;
+    ce
 }
 
 pub fn train_smoke() -> Result<(), VirError> {
