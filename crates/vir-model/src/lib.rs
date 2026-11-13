@@ -194,6 +194,65 @@ fn poisson(lambda: f32) -> usize {
     }
 }
 
+// ---------- Halting ----------
+pub trait Halter {
+    fn should_halt(&self, entropy: f32) -> bool;
+}
+
+pub struct FixedHalter {
+    pub max_loops: usize,
+}
+
+impl Halter for FixedHalter {
+    fn should_halt(&self, _entropy: f32) -> bool {
+        false
+    }
+}
+
+pub struct EntropyHalter {
+    pub threshold: f32,
+}
+
+impl Halter for EntropyHalter {
+    fn should_halt(&self, entropy: f32) -> bool {
+        entropy < self.threshold
+    }
+}
+
+/// Entropy dari distribusi probabilitas (logits softmax).
+pub fn entropy(probs: &[f32]) -> f32 {
+    -probs
+        .iter()
+        .filter(|&&p| p > 0.0)
+        .map(|&p| p * p.ln())
+        .sum::<f32>()
+}
+
+// ---------- Block-AR ----------
+/// Generate blok demi blok sampai EOS atau max_blocks.
+/// `generate_block` mengembalikan token blok (indeks kode level akhir).
+pub fn block_ar<F>(mut generate_block: F, eos: u32, max_blocks: usize) -> Vec<u32>
+where
+    F: FnMut() -> Vec<u32>,
+{
+    let mut out = Vec::new();
+    for _ in 0..max_blocks {
+        let block = generate_block();
+        let mut hit_eos = false;
+        for t in block {
+            if t == eos {
+                hit_eos = true;
+                break;
+            }
+            out.push(t);
+        }
+        if hit_eos {
+            break;
+        }
+    }
+    out
+}
+
 pub fn model_smoke() -> Result<(), VirError> {
     let device = Device::default();
     let cfg = GeneratorConfig {
@@ -220,5 +279,31 @@ mod tests {
     #[test]
     fn generator_forward_runs() {
         assert!(model_smoke().is_ok());
+    }
+    #[test]
+    fn halter_entropy() {
+        let h = EntropyHalter { threshold: 0.5 };
+        assert!(h.should_halt(0.1));
+        assert!(!h.should_halt(1.0));
+    }
+    #[test]
+    fn entropy_uniform() {
+        let e = entropy(&[0.5, 0.5]);
+        assert!((e - 0.6931).abs() < 1e-3);
+    }
+    #[test]
+    fn block_ar_stops_at_eos() {
+        let blocks = vec![vec![1u32, 2], vec![3, 99], vec![4]];
+        let mut i = 0;
+        let out = block_ar(
+            || {
+                let b = blocks[i].clone();
+                i += 1;
+                b
+            },
+            99,
+            10,
+        );
+        assert_eq!(out, vec![1, 2, 3]);
     }
 }
