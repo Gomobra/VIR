@@ -253,6 +253,41 @@ where
     out
 }
 
+// ---------- Sampling lanjutan (CFG + MBR) ----------
+/// CFG level logit: ℓ_uc + β(ℓ - ℓ_uc).
+pub fn cfg_logit(uc: f32, c: f32, beta: f32) -> f32 {
+    uc + beta * (c - uc)
+}
+
+/// MBR: pilih kandidat dengan kemiripan rata-rata tertinggi ke kandidat lain.
+/// `candidates`: K_c × L (token ids). `sim`: fungsi kemiripan.
+pub fn mbr_select<F>(candidates: &[Vec<u32>], sim: F) -> usize
+where
+    F: Fn(&[u32], &[u32]) -> f32,
+{
+    let k = candidates.len();
+    if k <= 1 {
+        return 0;
+    }
+    let mut best = 0usize;
+    let mut best_score = f32::MIN;
+    for i in 0..k {
+        let mut acc = 0.0f32;
+        for j in 0..k {
+            if i == j {
+                continue;
+            }
+            acc += sim(&candidates[i], &candidates[j]);
+        }
+        let score = acc / (k - 1) as f32;
+        if score > best_score {
+            best_score = score;
+            best = i;
+        }
+    }
+    best
+}
+
 pub fn model_smoke() -> Result<(), VirError> {
     let device = Device::default();
     let cfg = GeneratorConfig {
@@ -305,5 +340,23 @@ mod tests {
             10,
         );
         assert_eq!(out, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn cfg_logit_math() {
+        assert!((cfg_logit(0.0, 1.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((cfg_logit(0.0, 1.0, 0.0) - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mbr_picks_most_similar() {
+        let cands = vec![vec![1u32, 2, 3], vec![1, 2, 3], vec![9, 9, 9]];
+        let sim = |a: &[u32], b: &[u32]| -> f32 {
+            let same = a.iter().zip(b.iter()).filter(|(x, y)| x == y).count();
+            same as f32 / a.len().max(1) as f32
+        };
+        // kandidat 0 dan 1 identik -> salah satu terpilih, bukan 2
+        let best = mbr_select(&cands, sim);
+        assert!(best == 0 || best == 1);
     }
 }
