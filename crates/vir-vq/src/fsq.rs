@@ -185,7 +185,7 @@ impl Fsq {
     /// Pembulatan dengan straight-through estimator (langkah 1).
     fn round_ste(&self, x: Tensor<2>) -> Tensor<2> {
         let rounded = x.clone().round();
-        x + (rounded - x).detach()
+        x.clone() + (rounded - x).detach()
     }
 
     /// Kode diskret `[N, n]` (float, nilai bulat) dari `u` `[N, d]`.
@@ -196,7 +196,7 @@ impl Fsq {
     /// Indeks campuran (`idx = Σ (q_i + ⌊L_i/2⌋)·b_i`) dari kode `[N, n]`.
     fn mixed_radix_index(&self, codes: Tensor<2>) -> Tensor<1, Int> {
         let shape = [1, self.levels.len()];
-        let digits = codes + self.half_exact.clone().reshape(shape);
+        let digits = codes.clone() + self.half_exact.clone().reshape(shape);
         let flat = digits.matmul(self.basis.clone().reshape([self.levels.len(), 1]));
         flat.reshape([codes.dims()[0]]).round().int()
     }
@@ -204,7 +204,8 @@ impl Fsq {
     /// Dekode indeks campuran kembali ke kode `[N, n]` (untuk `lookup`).
     fn decode_index(&self, indices: Tensor<1, Int>) -> Tensor<2> {
         let n = self.levels.len();
-        let values = indices.float().reshape([indices.dims()[0], 1]);
+        let rows = indices.dims()[0];
+        let values = indices.float().reshape([rows, 1]);
         let mut digits: Vec<Tensor<2>> = Vec::with_capacity(n);
         let mut rest = values;
         for l in &self.levels {
@@ -326,7 +327,7 @@ pub fn normalize_with_stats(x: Tensor<2>, eps: f32) -> Normalized {
     let var = (centered.clone() * centered).mean_dim(1).reshape([n, 1]);
     let rstd = (var + eps).sqrt().recip();
     Normalized {
-        x: centered * rstd.clone(),
+        x: centered.clone() * rstd.clone(),
         mean,
         rstd,
     }
@@ -365,7 +366,7 @@ impl Quantizer for RfsqNorm {
 
     fn quantize(&self, u: Tensor<2>) -> Quantized {
         let stats = normalize_with_stats(u, self.eps);
-        let q = self.inner.quantize(stats.x);
+        let q = self.inner.quantize(stats.x.clone());
         let quantized = denormalize(q.quantized, &stats);
         Quantized {
             indices: q.indices,

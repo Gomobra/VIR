@@ -197,7 +197,7 @@ impl Codebook {
     /// Straight-through: `z + (z_q - z).detach()` (NCM §3.3).
     pub fn straight_through(&self, z: Tensor<2>) -> Tensor<2> {
         let (_, q) = self.quantize_pair(z.clone());
-        z + (q - z).detach()
+        z.clone() + (q - z).detach()
     }
 
     /// Pembaruan EMA + restart kode mati (F1.4.a langkah 2).
@@ -208,7 +208,7 @@ impl Codebook {
     pub fn ema_update(&mut self, u: &Tensor<2>, indices: &Tensor<1, Int>, rng: &mut dyn RngCore) {
         let v = self.num_entries;
         let onehot = indices.clone().float().one_hot::<2>(v);
-        let batch_count = onehot.clone().sum_dim(0);
+        let batch_count = onehot.clone().sum_dim(0).reshape([v]);
         let batch_sum = onehot.transpose().matmul(u.clone().detach());
         let decay = self.ema_decay;
         let mut count = self.ema_count.clone().mul_scalar(decay)

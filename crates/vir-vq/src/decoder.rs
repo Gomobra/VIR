@@ -81,7 +81,7 @@ impl Decoder {
         let [b, l, d] = x.dims();
         let mu = x.clone().mean_dim(2).reshape([b, l, 1]);
         let centered = x - mu;
-        let var = (centered.clone() * centered).mean_dim(2).reshape([b, l, 1]);
+        let var = (centered.clone() * centered.clone()).mean_dim(2).reshape([b, l, 1]);
         let normed = centered / (var + self.eps).sqrt();
         normed * self.norm_gamma.val().reshape([1, 1, d])
             + self.norm_beta.val().reshape([1, 1, d])

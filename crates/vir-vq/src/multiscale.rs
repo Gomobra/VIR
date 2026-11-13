@@ -22,7 +22,8 @@
 
 use crate::quantizer::Quantizer;
 use burn::module::Module;
-use burn::nn::conv::{Conv1d, Conv1dConfig, PaddingConfig1d};
+use burn::nn::conv::{Conv1d, Conv1dConfig};
+use burn::nn::PaddingConfig1d;
 use burn::prelude::*;
 use vir_common::VirError;
 

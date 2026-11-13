@@ -63,7 +63,7 @@ pub fn vq_loss_chunked(
     chunk: usize,
 ) -> Tensor<1> {
     let [b, t, d] = z.dims();
-    let ce = chunked_cross_entropy(decoder, z_hat, target, chunk);
+    let ce = chunked_cross_entropy(decoder, z_hat.clone(), target, chunk);
     let commit = commitment_loss(z.clone().reshape([b * t, d]), z_hat.clone().reshape([b * t, d]));
     let latent = latent_loss(z.reshape([b * t, d]), z_hat.reshape([b * t, d]));
     ce + commit * commitment_cost + latent
