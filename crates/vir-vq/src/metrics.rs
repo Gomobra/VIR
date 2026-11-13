@@ -18,7 +18,7 @@ use crate::quantizer::QuantizerStats;
 use burn::prelude::*;
 
 /// Akurasi token eksak `benar / total` (0 bila kosong).
-pub fn token_accuracy(predicted: &[i64], expected: &[i64]) -> f64 {
+pub fn token_accuracy(predicted: &[i32], expected: &[i32]) -> f64 {
     let n = predicted.len().min(expected.len());
     if n == 0 {
         return 0.0;
@@ -33,15 +33,15 @@ pub fn token_accuracy(predicted: &[i64], expected: &[i64]) -> f64 {
 
 /// Akurasi dari dua tensor indeks berbentuk sama (`[N]` atau `[B, L]`).
 pub fn tensor_accuracy(predicted: &Tensor<2, Int>, expected: &Tensor<2, Int>) -> f64 {
-    let p: Vec<i64> = predicted
+    let p: Vec<i32> = predicted
         .clone()
         .into_data()
-        .try_to_vec::<i64>()
+        .try_to_vec::<i32>()
         .unwrap_or_default();
-    let e: Vec<i64> = expected
+    let e: Vec<i32> = expected
         .clone()
         .into_data()
-        .try_to_vec::<i64>()
+        .try_to_vec::<i32>()
         .unwrap_or_default();
     token_accuracy(&p, &e)
 }
