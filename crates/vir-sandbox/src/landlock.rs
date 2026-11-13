@@ -23,8 +23,7 @@ pub fn confine(workdir: &str, allow_write: &[&str]) -> Result<(), VirError> {
     #[cfg(feature = "sandbox")]
     {
         use landlock::{
-            AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
-            ABI,
+            ABI, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
         };
         let abi = ABI::new();
         let read_write = AccessFs::from_all(abi);
