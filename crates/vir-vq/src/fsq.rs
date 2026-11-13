@@ -324,7 +324,7 @@ pub fn normalize_with_stats(x: Tensor<2>, eps: f32) -> Normalized {
     let [n, _d] = x.dims();
     let mean = x.clone().mean_dim(1).reshape([n, 1]);
     let centered = x - mean.clone();
-    let var = (centered.clone() * centered).mean_dim(1).reshape([n, 1]);
+    let var = (centered.clone() * centered.clone()).mean_dim(1).reshape([n, 1]);
     let rstd = (var + eps).sqrt().recip();
     Normalized {
         x: centered.clone() * rstd.clone(),
