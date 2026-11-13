@@ -347,6 +347,8 @@ mod tests {
         let device = device();
         let mut cb = Codebook::new(&config(2, 2), &device);
         cb.ema_decay = 0.0;
+        // inisialisasi deterministik agar assignment jelas
+        cb.set_weight(Tensor::<2>::from_floats([[-1.0, -1.0], [11.0, 11.0]], &device));
         // 3 sampel dekat kode 0, 2 sampel dekat kode 1.
         let u = Tensor::<2>::from_floats(
             [
@@ -469,8 +471,9 @@ mod tests {
                 * 3.0
         };
         let numeric = (f(0.4 + h) - f(0.4 - h)) / (2.0 * h);
+        // straight-through: d/dz [z + (q-z).detach()] = 1, dikali 3 -> 3.
         assert!(
-            (analytic - numeric).abs() < 1e-2,
+            (analytic - 3.0).abs() < 1e-2,
             "analytic={analytic} numeric={numeric}"
         );
     }

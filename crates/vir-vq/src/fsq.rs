@@ -302,7 +302,8 @@ impl Quantizer for Rfsq {
     }
 
     fn lookup(&self, indices: Tensor<1, Int>) -> Tensor<2> {
-        self.inner.lookup(indices)
+        let a = self.alpha.val().reshape([1, 1]);
+        self.inner.lookup(indices) / a
     }
 
     fn stats(&self, indices: &Tensor<1, Int>) -> QuantizerStats {
