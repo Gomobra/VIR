@@ -277,7 +277,6 @@ impl<Q: Quantizer + Module> MultiscaleVq<Q> {
     ) -> Self {
         let total_len = schedule.last().copied().unwrap_or(0);
         let mut levels = Vec::with_capacity(schedule.len());
-        let mut prev = total_len;
         for (k, len) in schedule.iter().copied().enumerate() {
             let quantizer = build(k);
             let phi = if phi_kernel > 1 {
@@ -285,12 +284,13 @@ impl<Q: Quantizer + Module> MultiscaleVq<Q> {
             } else {
                 Phi::zero(quantizer.dim(), 1, device)
             };
+            // Residual selalu pada panjang penuh L (Rekonstruksi kumulatif),
+            // di-down ke ℓ_k. (NCM R2)
             levels.push(LevelVq {
                 quantizer,
-                scale: ScaleOps::new(prev, len, device),
+                scale: ScaleOps::new(total_len, len, device),
                 phi,
             });
-            prev = len;
         }
         Self { levels, total_len }
     }
