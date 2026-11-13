@@ -13,6 +13,8 @@
 - **F1.7**: vir-train (Muon Newton-Schulz, JSONL logger, pass@k tak bias, GRPO advantage, level_weight) — tes lulus di CI.
 - **F2.1**: vir-model recurrent depth (prelude/core/coda, injection adapter, r sampling Poisson lognormal) — tes lulus di CI.
 - **F2.2/F2.3**: halting (Fixed/Entropy) + entropy + block-AR loop — tes lulus di CI.
+- **F2.4**: CFG logit + MBR select (similarity-based) — tes lulus di CI.
+- **F3.4**: RLM recursive `llm_query` dengan budget kedalaman/panggilan — tes lulus di CI.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
