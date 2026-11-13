@@ -9,6 +9,7 @@
 - **F7.1**: fused matmul+argmax kernel (`crates/vir-vq/src/kernel.rs`, feature `fused`) — tidak menulis buffer [N,V] ke HBM; compile check CI lulus.
 - **F1.4**: vir-vq lengkap (codebook EMA, multiscale, dropout, decoder, loss, metrics, FSQ) — 50+ tes lulus di CI.
 - **F1.5**: vir-nn (RoPE nyata, block-diagonal + prefix-LM mask, attention, RMSNorm, SwiGLU, leakage tests) — tes lulus di CI.
+- **F1.6**: vir-model (generator: codebook per level, proyeksi rekonstruksi, prelude/core/coda, head per level, loss R6, generate level-by-level) — tes lulus di CI.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
