@@ -94,9 +94,9 @@ mod tests {
         let device = device();
         let z = Tensor::<2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &device);
         let zero = commitment_loss(z.clone(), z.clone());
-        assert!(zero.into_data().to_vec::<f32>().unwrap_or_default()[0].abs() < 1e-6);
+        assert!(zero.into_data().try_to_vec::<f32>().unwrap_or_default()[0].abs() < 1e-6);
         let far = latent_loss(z.clone(), z.clone() + 2.0);
-        let val = far.into_data().to_vec::<f32>().unwrap_or_default()[0];
+        let val = far.into_data().try_to_vec::<f32>().unwrap_or_default()[0];
         assert!((val - 4.0).abs() < 1e-5, "got {val}");
     }
 
@@ -114,8 +114,8 @@ mod tests {
         let gq = z_q
             .grad(&grads)
             .unwrap_or_else(|| Tensor::zeros([1, 1], &device));
-        let gz: f32 = gz.into_data().to_vec::<f32>().unwrap_or_default()[0];
-        let gq: f32 = gq.into_data().to_vec::<f32>().unwrap_or_default()[0];
+        let gz: f32 = gz.into_data().try_to_vec::<f32>().unwrap_or_default()[0];
+        let gq: f32 = gq.into_data().try_to_vec::<f32>().unwrap_or_default()[0];
         // d/dz (z - sg[z_q])² = 2(z - z_q) = 4; gradien ke z_q harus nol.
         assert!((gz - 4.0).abs() < 1e-4, "gz={gz}");
         assert!(gq.abs() < 1e-6, "gq={gq}");
@@ -139,7 +139,7 @@ mod tests {
             &device,
         );
         // z == z_q → kedua suku MSE nol, sisa hanya CE (> 0).
-        let val = loss.into_data().to_vec::<f32>().unwrap_or_default()[0];
+        let val = loss.into_data().try_to_vec::<f32>().unwrap_or_default()[0];
         assert!(val > 0.0, "CE harus positif, got {val}");
     }
 
@@ -164,8 +164,8 @@ mod tests {
         );
         let chunked = vq_loss_chunked(&decoder, z, z_hat, target, 0.25, 2);
         let (a, b) = (
-            dense.into_data().to_vec::<f32>().unwrap_or_default()[0],
-            chunked.into_data().to_vec::<f32>().unwrap_or_default()[0],
+            dense.into_data().try_to_vec::<f32>().unwrap_or_default()[0],
+            chunked.into_data().try_to_vec::<f32>().unwrap_or_default()[0],
         );
         assert!((a - b).abs() < 1e-4, "dense={a} chunked={b}");
     }

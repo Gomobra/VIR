@@ -198,8 +198,11 @@ mod tests {
         let b = chunked_cross_entropy(&decoder, z.clone(), target.clone(), 0);
         let c = chunked_cross_entropy(&decoder, z, target, 5);
         let to_f = |t: Tensor<1>| t.into_data().try_to_vec::<f32>().unwrap_or_default()[0];
-        assert!((to_f(a) - to_f(b)).abs() < 1e-5);
-        assert!((to_f(b) - to_f(c)).abs() < 1e-5);
+        let fa = to_f(a);
+        let fb = to_f(b);
+        let fc = to_f(c);
+        assert!((fa - fb).abs() < 1e-5);
+        assert!((fb - fc).abs() < 1e-5);
     }
 
     /// Decoder menghasilkan logits dengan bentuk `[B, L, vocab]` dan token `[B, L]`.

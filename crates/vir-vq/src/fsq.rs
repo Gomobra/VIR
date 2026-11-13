@@ -391,6 +391,7 @@ impl Quantizer for RfsqNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use burn::tensor::Distribution;
     use rand::SeedableRng;
 
     fn device() -> Device {
@@ -431,7 +432,7 @@ mod tests {
         let idx: Vec<i64> = q.indices.clone().into_data().try_to_vec::<i64>().unwrap_or_default();
         assert!(idx.iter().all(|i| *i >= 0 && *i < 35), "idx={idx:?}");
 
-        let codes: Vec<f32> = q.codes.into_data().to_vec::<f32>().unwrap_or_default();
+        let codes: Vec<f32> = q.codes.into_data().try_to_vec::<f32>().unwrap_or_default();
         // Dimensi 0: L=7 → bulat ∈ [-3, 3]; dimensi 1: L=5 → ∈ [-2, 2].
         for (i, v) in codes.iter().enumerate() {
             let bound = if i % 2 == 0 { 3.0 } else { 2.0 };
@@ -448,8 +449,8 @@ mod tests {
         let u = Tensor::<2>::random([16, 4], Distribution::Normal(0.0, 1.0), &d);
         let q = fsq.quantize(u);
         let back = fsq.lookup(q.indices);
-        let a: Vec<f32> = q.codes.into_data().to_vec::<f32>().unwrap_or_default();
-        let b: Vec<f32> = back.into_data().to_vec::<f32>().unwrap_or_default();
+        let a: Vec<f32> = q.codes.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let b: Vec<f32> = back.into_data().try_to_vec::<f32>().unwrap_or_default();
         assert_eq!(a.len(), b.len());
         for (x, y) in a.iter().zip(b.iter()) {
             assert!((x - y).abs() < 1e-4, "a={a:?} b={b:?}");
@@ -470,9 +471,9 @@ mod tests {
         let g = u
             .grad(&grads)
             .unwrap_or_else(|| Tensor::zeros([2, 3], &d));
-        let gv: Vec<f32> = g.into_data().to_vec::<f32>().unwrap_or_default();
-        let sv: Vec<f32> = st.into_data().to_vec::<f32>().unwrap_or_default();
-        let qv: Vec<f32> = q.quantized.into_data().to_vec::<f32>().unwrap_or_default();
+        let gv: Vec<f32> = g.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let sv: Vec<f32> = st.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let qv: Vec<f32> = q.quantized.into_data().try_to_vec::<f32>().unwrap_or_default();
         for (a, b) in sv.iter().zip(qv.iter()) {
             assert!((a - b).abs() < 1e-5, "st={sv:?} q={qv:?}");
         }
@@ -506,7 +507,7 @@ mod tests {
         let quantized = q.quantize(u);
         let back = q.lookup(quantized.indices);
         assert_eq!(back.dims(), [8, 4]);
-        let a: f32 = q.alpha.val().into_data().to_vec::<f32>().unwrap_or_default()[0];
+        let a: f32 = q.alpha.val().into_data().try_to_vec::<f32>().unwrap_or_default()[0];
         assert!((a - 1.0).abs() < 1e-6);
     }
 
@@ -522,8 +523,8 @@ mod tests {
         let u = Tensor::<2>::from_floats([[0.3, 0.1, 0.2]], &d);
         let out = q.quantize(u);
         let back = q.lookup(out.indices);
-        let a: Vec<f32> = out.quantized.into_data().to_vec::<f32>().unwrap_or_default();
-        let b: Vec<f32> = back.into_data().to_vec::<f32>().unwrap_or_default();
+        let a: Vec<f32> = out.quantized.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let b: Vec<f32> = back.into_data().try_to_vec::<f32>().unwrap_or_default();
         for (x, y) in a.iter().zip(b.iter()) {
             assert!((x - y).abs() < 1e-4, "a={a:?} b={b:?}");
         }
@@ -539,8 +540,8 @@ mod tests {
         );
         let stats = normalize_with_stats(x.clone(), 1e-5);
         let back = denormalize(stats.x.clone(), &stats);
-        let a: Vec<f32> = x.into_data().to_vec::<f32>().unwrap_or_default();
-        let b: Vec<f32> = back.into_data().to_vec::<f32>().unwrap_or_default();
+        let a: Vec<f32> = x.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let b: Vec<f32> = back.into_data().try_to_vec::<f32>().unwrap_or_default();
         for (x, y) in a.iter().zip(b.iter()) {
             assert!((x - y).abs() < 1e-4, "a={a:?} b={b:?}");
         }
@@ -550,7 +551,7 @@ mod tests {
             .clone()
             .mean_dim(1)
             .into_data()
-            .to_vec::<f32>()
+            .try_to_vec::<f32>()
             .unwrap_or_default()[0];
         assert!(mean.abs() < 1e-5, "mean={mean}");
     }
@@ -580,7 +581,7 @@ mod tests {
             .weight
             .val()
             .into_data()
-            .to_vec::<f32>()
+            .try_to_vec::<f32>()
             .unwrap_or_default();
         let u = Tensor::<2>::random([8, 3], Distribution::Normal(0.0, 1.0), &d);
         let idx = fsq.quantize(u.clone()).indices;
@@ -591,7 +592,7 @@ mod tests {
             .weight
             .val()
             .into_data()
-            .to_vec::<f32>()
+            .try_to_vec::<f32>()
             .unwrap_or_default();
         assert_eq!(before, after);
     }
