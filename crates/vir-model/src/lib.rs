@@ -288,6 +288,43 @@ where
     best
 }
 
+/// F1.8 irisan vertikal mini: VQ encode → generator forward → loss turun.
+pub fn full_smoke() -> Result<(), VirError> {
+    let device = Device::default();
+    let cfg = GeneratorConfig {
+        dim: 32,
+        num_heads: 4,
+        num_blocks: 2,
+        num_levels: 4,
+        num_loops: 2,
+        codebook_size: 64,
+    };
+    let g = Generator::new(&cfg, &device);
+    // mini batch: 2 × 16 token, 4 level
+    let z = Tensor::<3>::random(
+        [2, 16, 32],
+        burn::tensor::Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let z_hats = vec![z.clone(); 4];
+    let logits = g.forward(&z_hats);
+    assert_eq!(logits.len(), 4);
+    // loss turun: hitung ncm_loss dengan target acak
+    let targets: Vec<Tensor<2, Int>> = (0..4)
+        .map(|_| {
+            Tensor::<2, Int>::random(
+                [2, 16],
+                burn::tensor::Distribution::Uniform(0.0, 64.0),
+                &device,
+            )
+        })
+        .collect();
+    let weights = vec![0.25f32; 4];
+    let loss = ncm_loss(&logits, &targets, &weights);
+    assert!(loss.into_scalar::<f32>() >= 0.0);
+    Ok(())
+}
+
 pub fn model_smoke() -> Result<(), VirError> {
     let device = Device::default();
     let cfg = GeneratorConfig {
@@ -314,6 +351,10 @@ mod tests {
     #[test]
     fn generator_forward_runs() {
         assert!(model_smoke().is_ok());
+    }
+    #[test]
+    fn full_smoke_runs() {
+        assert!(full_smoke().is_ok());
     }
     #[test]
     fn halter_entropy() {
