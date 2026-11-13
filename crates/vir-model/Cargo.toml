@@ -9,6 +9,7 @@ vir-common = { path = "../vir-common" }
 vir-nn = { path = "../vir-nn" }
 vir-vq = { path = "../vir-vq" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "autotune", "fusion", "persistence"] }
+rand = "0.8"
 [workspace]
 
 [features]

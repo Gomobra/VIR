@@ -32,6 +32,8 @@ pub struct Generator {
     pub coda: Block,
     /// Head per level: hidden → |V_k|.
     pub heads: Vec<Linear>,
+    /// Adapter injeksi recurrent: [s, e] (2h) → h.
+    pub adapter: Linear,
     pub dim: usize,
 }
 
@@ -59,6 +61,7 @@ impl Generator {
             core: Block::new(cfg.dim, cfg.num_heads, device),
             coda: Block::new(cfg.dim, cfg.num_heads, device),
             heads,
+            adapter: LinearConfig::new(cfg.dim * 2, cfg.dim).init(device),
             dim: cfg.dim,
         }
     }
@@ -140,6 +143,55 @@ pub fn ncm_loss(logits: &[Tensor<3>], targets: &[Tensor<2, Int>], weights: &[f32
         });
     }
     total.unwrap_or_else(|| Tensor::zeros([1], &Device::default()))
+}
+
+/// Recurrent forward: prelude(e) → core diulang r kali dengan injeksi e → coda.
+pub fn recurrent_forward(
+    prelude: &Block,
+    core: &Block,
+    coda: &Block,
+    adapter: &Linear,
+    e: Tensor<3>,
+    r: usize,
+) -> Tensor<3> {
+    let mut s = prelude.forward(e.clone());
+    for _ in 0..r {
+        // injeksi: adapter([s, e])
+        let [b, t, d] = s.dims();
+        let cat = burn::tensor::Tensor::cat(vec![s.clone(), e.clone()], 2);
+        let inj = adapter.forward(cat).reshape([b, t, d]);
+        s = core.forward(s + inj);
+    }
+    coda.forward(s)
+}
+
+/// Sampling r ~ Poisson(exp(τ)) + 1, τ ~ N(log r̄ - σ²/2, σ).
+pub fn sample_r(mean_r: f32, sigma: f32, rng: &mut impl rand::Rng) -> usize {
+    let mu = (mean_r.ln()) - 0.5 * sigma * sigma;
+    let tau = mu + sigma * rand_distr(rng);
+    let r = poisson(tau.exp()) + 1;
+    r.max(1)
+}
+
+fn rand_distr(rng: &mut impl rand::Rng) -> f32 {
+    // Box-Muller
+    let u1 = rand::Rng::gen_range(&mut *rng, 0.0f32..1.0).max(1e-7);
+    let u2 = rand::Rng::gen_range(&mut *rng, 0.0f32..1.0);
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+}
+
+fn poisson(lambda: f32) -> usize {
+    // Knuth (lambda kecil)
+    let l = (-lambda).exp();
+    let mut k = 0usize;
+    let mut p = 1.0f32;
+    loop {
+        p *= rand::Rng::gen_range(&mut rand::thread_rng(), 0.0f32..1.0);
+        if p <= l {
+            return k;
+        }
+        k += 1;
+    }
 }
 
 pub fn model_smoke() -> Result<(), VirError> {
