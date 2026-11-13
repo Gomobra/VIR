@@ -17,13 +17,13 @@ use burn::prelude::*;
 
 /// `MSE(z, sg[z_q])` — suku komitmen R4.
 pub fn commitment_loss(z: Tensor<2>, z_q: Tensor<2>) -> Tensor<1> {
-    let diff = z.detach() - z_q;
+    let diff = z - z_q.detach();
     (diff.clone() * diff).mean()
 }
 
 /// `MSE(sg[z], z_q)` — suku kuantisasi laten R4.
 pub fn latent_loss(z: Tensor<2>, z_q: Tensor<2>) -> Tensor<1> {
-    let diff = z - z_q.detach();
+    let diff = z.detach() - z_q;
     (diff.clone() * diff).mean()
 }
 

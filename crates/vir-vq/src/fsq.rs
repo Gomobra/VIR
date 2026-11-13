@@ -448,8 +448,8 @@ mod tests {
         let fsq = Fsq::new(&cfg, 4, &d).expect("fsq");
         let u = Tensor::<2>::random([16, 4], Distribution::Normal(0.0, 1.0), &d);
         let q = fsq.quantize(u);
-        let back = fsq.lookup(q.indices);
-        let a: Vec<f32> = q.codes.into_data().try_to_vec::<f32>().unwrap_or_default();
+        let back = fsq.lookup(q.indices.clone());
+        let a: Vec<f32> = q.quantized.into_data().try_to_vec::<f32>().unwrap_or_default();
         let b: Vec<f32> = back.into_data().try_to_vec::<f32>().unwrap_or_default();
         assert_eq!(a.len(), b.len());
         for (x, y) in a.iter().zip(b.iter()) {

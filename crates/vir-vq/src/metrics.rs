@@ -26,7 +26,7 @@ pub fn token_accuracy(predicted: &[i64], expected: &[i64]) -> f64 {
     let hit = predicted
         .iter()
         .zip(expected.iter())
-        .filter(|(p, e)| p == e)
+        .filter(|(p, e)| *p == *e)
         .count();
     hit as f64 / n as f64
 }

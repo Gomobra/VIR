@@ -104,20 +104,21 @@ fn pooling_matrix(in_len: usize, out_len: usize) -> Vec<Vec<f32>> {
 
 /// Bobot interpolasi linear (`align_corners = true`); `in_len == 1` menyiarkan.
 fn interp_matrix(in_len: usize, out_len: usize) -> Vec<Vec<f32>> {
-    if in_len == 1 {
-        return vec![vec![1.0f32]; out_len];
+    // up: [L, ℓ] — tiap baris (posisi L) punya bobot interpolasi atas ℓ.
+    if out_len == 1 {
+        return vec![vec![1.0f32]; in_len];
     }
-    let mut rows = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let t = if out_len == 1 {
+    let mut rows = Vec::with_capacity(in_len);
+    for i in 0..in_len {
+        let t = if in_len == 1 {
             0.0
         } else {
-            i as f32 * (in_len - 1) as f32 / (out_len - 1) as f32
+            i as f32 * (out_len - 1) as f32 / (in_len - 1) as f32
         };
-        let lo = (t.floor() as usize).min(in_len - 1);
-        let hi = (lo + 1).min(in_len - 1);
+        let lo = (t.floor() as usize).min(out_len - 1);
+        let hi = (lo + 1).min(out_len - 1);
         let frac = t - lo as f32;
-        let mut row = vec![0.0f32; in_len];
+        let mut row = vec![0.0f32; out_len];
         row[lo] += 1.0 - frac;
         row[hi] += frac;
         rows.push(row);
