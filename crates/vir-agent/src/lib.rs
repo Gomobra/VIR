@@ -46,28 +46,42 @@ pub struct RlmRun {
     pub calls_used: usize,
 }
 
+/// Panggil sub-model rekursif dengan anggaran kedalaman + jumlah panggilan.
+pub fn llm_query(
+    root: &dyn LanguageModel,
+    prompt: &str,
+    depth: usize,
+    cfg: &RlmConfig,
+    calls: &mut usize,
+) -> Result<String, VirError> {
+    if depth > cfg.max_depth {
+        return Err(VirError::Internal("anggaran kedalaman habis".into()));
+    }
+    if *calls >= cfg.max_calls {
+        return Err(VirError::Internal("anggaran panggilan habis".into()));
+    }
+    *calls += 1;
+    root.generate(prompt)
+}
+
 pub fn run_rlm(
     root: &dyn LanguageModel,
-    _context: &str,
+    context: &str,
     cfg: &RlmConfig,
 ) -> Result<RlmRun, VirError> {
     let mut calls = 0usize;
     let mut steps = 0usize;
     let mut final_answer = None;
 
-    // root menghasilkan satu kode; coba jalankan di python REPL sederhana
     while calls < cfg.max_calls && final_answer.is_none() {
         calls += 1;
-        let prompt = "tulis kode python yang mencetak FINAL(answer)";
-        let code = root.generate(prompt)?;
+        let prompt = format!("tugas: {context}\ntulis kode python yang mencetak FINAL(answer)");
+        let code = root.generate(&prompt)?;
         steps += 1;
 
-        // jalankan kode di sandbox python
         let res: RunResult = run("python3", &["-c", &code], &Policy::default())?;
-        // deteksi FINAL(...)
         if let Some(pos) = res.stdout.find("FINAL(") {
-            let rest = &res.stdout[pos..];
-            final_answer = Some(rest.to_string());
+            final_answer = Some(res.stdout[pos..].to_string());
             break;
         }
         if steps >= cfg.max_depth {
