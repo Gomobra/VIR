@@ -1,5 +1,7 @@
-//! Agen: trait LanguageModel, REPL, RLM.
+//! Agen: trait LanguageModel, REPL stateful, RLM rekursif.
 
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, Stdio};
 use vir_common::VirError;
 use vir_sandbox::{Policy, RunResult, run};
 
@@ -31,6 +33,75 @@ impl LanguageModel for ScriptedLm {
         } else {
             Ok(String::new())
         }
+    }
+}
+
+/// REPL stateful: proses CPython berumur panjang, variabel bertahan antar eksekusi.
+pub struct Repl {
+    child: Child,
+    stdin: std::process::ChildStdin,
+    reader: BufReader<std::process::ChildStdout>,
+}
+
+impl Repl {
+    pub fn start() -> Result<Self, VirError> {
+        let mut child = Command::new("python3")
+            .arg("-u")
+            .arg("-c")
+            .arg("import sys\nwhile True:\n    line=sys.stdin.readline()\n    if not line: break\n    exec(line)\n    print('__DONE__', flush=True)")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| VirError::Internal(e.to_string()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| VirError::Internal("stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| VirError::Internal("stdout".into()))?;
+        Ok(Self {
+            child,
+            stdin,
+            reader: BufReader::new(stdout),
+        })
+    }
+
+    /// Eksekusi kode, kembalikan output (sampai marker __DONE__).
+    pub fn exec(&mut self, code: &str) -> Result<String, VirError> {
+        writeln!(self.stdin, "{code}").map_err(|e| VirError::Internal(e.to_string()))?;
+        self.stdin
+            .flush()
+            .map_err(|e| VirError::Internal(e.to_string()))?;
+        let mut out = String::new();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = self
+                .reader
+                .read_line(&mut line)
+                .map_err(|e| VirError::Internal(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            if line.contains("__DONE__") {
+                break;
+            }
+            out.push_str(&line);
+        }
+        Ok(out)
+    }
+
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+impl Drop for Repl {
+    fn drop(&mut self) {
+        self.kill();
     }
 }
 
@@ -118,5 +189,14 @@ mod tests {
         let r = run_rlm(&lm, "ctx", &cfg).unwrap();
         assert!(r.final_answer.is_some());
         assert!(r.final_answer.unwrap().contains("FINAL("));
+    }
+
+    #[test]
+    fn repl_persists_state() {
+        let mut repl = Repl::start().unwrap();
+        let out1 = repl.exec("x = 41").unwrap();
+        assert_eq!(out1.trim(), "");
+        let out2 = repl.exec("print(x + 1)").unwrap();
+        assert_eq!(out2.trim(), "42");
     }
 }
