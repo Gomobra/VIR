@@ -71,13 +71,23 @@ impl ScaleOps {
 
     /// Turun: `[B, L, d] → [B, ℓ, d]`.
     pub fn down(&self, x: Tensor<3>) -> Tensor<3> {
-        let m = self.down.clone().reshape([1, self.out_len, self.in_len]);
+        let [b, _, _] = x.dims();
+        let m = self
+            .down
+            .clone()
+            .reshape([1, self.out_len, self.in_len])
+            .expand([b, self.out_len, self.in_len]);
         m.matmul(x)
     }
 
     /// Naik: `[B, ℓ, d] → [B, L, d]`.
     pub fn up(&self, x: Tensor<3>) -> Tensor<3> {
-        let m = self.up.clone().reshape([1, self.in_len, self.out_len]);
+        let [b, _, _] = x.dims();
+        let m = self
+            .up
+            .clone()
+            .reshape([1, self.in_len, self.out_len])
+            .expand([b, self.in_len, self.out_len]);
         m.matmul(x)
     }
 }
@@ -439,10 +449,10 @@ mod tests {
         let mut model = MultiscaleVq::new(
             &levels,
             1,
-            |_| {
+            |k| {
                 Codebook::new(
                     &CodebookConfig {
-                        num_entries: 4,
+                        num_entries: if k == 0 { 2 } else { 1 },
                         dim: 1,
                         ..CodebookConfig::default()
                     },
