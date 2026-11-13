@@ -12,6 +12,7 @@
 - **F1.6**: vir-model (generator: codebook per level, proyeksi rekonstruksi, prelude/core/coda, head per level, loss R6, generate level-by-level) — tes lulus di CI.
 - **F1.7**: vir-train (Muon Newton-Schulz, JSONL logger, pass@k tak bias, GRPO advantage, level_weight) — tes lulus di CI.
 - **F2.1**: vir-model recurrent depth (prelude/core/coda, injection adapter, r sampling Poisson lognormal) — tes lulus di CI.
+- **F2.2/F2.3**: halting (Fixed/Entropy) + entropy + block-AR loop — tes lulus di CI.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
