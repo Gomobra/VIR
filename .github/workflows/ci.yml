@@ -57,6 +57,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --manifest-path crates/vir-vq/Cargo.toml
       - run: cargo test --manifest-path crates/vir-vq/Cargo.toml
+      - run: cargo build --manifest-path crates/vir-vq/Cargo.toml --features fused
 
   vir-nn:
     runs-on: ubuntu-latest

@@ -8,9 +8,14 @@ license = "MIT OR Apache-2.0"
 vir-common = { path = "../vir-common" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "autotune", "fusion", "persistence"] }
 burn-cuda = { version = "0.22", optional = true, features = ["autotune", "fusion", "persistence"] }
+# Kernel terfusi (F7.1). Tanpa runtime sendiri: `fused` selalu mengaktifkan
+# `cuda`, dan `burn-cuda` yang membawa `cubecl/cuda` lewat `burn-backend`.
+burn-cubecl = { version = "0.22", optional = true, default-features = false, features = ["std", "fusion"] }
 rand = "0.8"
 [workspace]
 
 [features]
 default = []
 cuda = ["burn/cuda", "dep:burn-cuda"]
+# Kernel terfusi F7.1: butuh runtime CUDA.
+fused = ["cuda", "dep:burn-cubecl"]

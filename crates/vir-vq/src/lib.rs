@@ -7,6 +7,10 @@ use burn::prelude::*;
 use burn::tensor::Device;
 use vir_common::VirError;
 
+#[cfg(feature = "fused")]
+#[cfg(feature = "fused")]
+pub mod kernel;
+
 #[derive(Debug, Clone)]
 pub struct CodebookConfig {
     pub num_entries: usize,
@@ -65,7 +69,28 @@ impl Codebook {
     }
 
     /// Argmin nearest-neighbor (chunked, cache e_t/e_sq).
+    ///
+    /// Dengan feature `fused` dan device CubeCL f32, memakai kernel terfusi
+    /// (matmul + argmax dalam satu kernel, tanpa buffer `[N, V]`); selain itu
+    /// memakai [`Self::quantize_idx_reference`].
     pub fn quantize_idx(&self, z: Tensor<2>) -> Tensor<1, Int> {
+        #[cfg(feature = "fused")]
+        {
+            // bias = -0.5 * ||e_j||^2 sudah di-cache (e_sq), jadi kernel hanya
+            // menerima satu tensor [V] tambahan.
+            let bias = self.e_sq.clone().mul_scalar(-0.5);
+            if let Some(idx) = crate::kernel::try_fused_argmin(&z, &self.weight.val(), &bias) {
+                return idx;
+            }
+        }
+        self.quantize_idx_reference(z)
+    }
+
+    /// Jalur matmul + argmax biasa (chunked, cache e_t/e_sq).
+    ///
+    /// Dipakai sebagai fallback dan sebagai pembanding benih (ground truth) untuk
+    /// kernel terfusi pada device non-CubeCL.
+    pub fn quantize_idx_reference(&self, z: Tensor<2>) -> Tensor<1, Int> {
         let [n, d] = z.dims();
         let v = self.e_t.dims()[1];
         let chunk = 8192usize;
@@ -175,6 +200,8 @@ pub fn vq_smoke() -> Result<(), VirError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use burn::tensor::Distribution;
+
     #[test]
     fn codebook_quantize_runs() {
         assert!(vq_smoke().is_ok());
@@ -186,5 +213,48 @@ mod tests {
             let k = nested_dropout_cutoff(12, 0.5, &mut rng);
             assert!((1..=12).contains(&k));
         }
+    }
+
+    /// Mengunci konvensi skor `z · e_j - 0.5 * ||e_j||^2` yang juga dipakai kernel
+    /// terfusi: bias harus `-0.5 * ||e_j||^2` (bukan `+0.5`).
+    #[test]
+    fn quantize_idx_matches_direct_scores() {
+        let device = Device::default();
+        let cfg = CodebookConfig {
+            num_entries: 16,
+            dim: 8,
+            ..CodebookConfig::default()
+        };
+        let cb = Codebook::new(&cfg, &device);
+        let z = Tensor::<2>::random([128, 8], Distribution::Normal(0.0, 1.0), &device);
+
+        let idx = cb.quantize_idx(z.clone());
+        let scores = z.matmul(cb.e_t.clone()) - cb.e_sq.clone().reshape([1, 16]) * 0.5;
+        let expected = scores.argmax(1).reshape([128]);
+
+        assert_eq!(ints(idx), ints(expected));
+    }
+
+    /// Baca tensor indeks sebagai `Vec<i32>`.
+    fn ints(tensor: Tensor<1, Int>) -> Vec<i32> {
+        tensor
+            .into_data()
+            .try_to_vec::<i32>()
+            .expect("tensor data as i32")
+    }
+
+    /// Tanpa device CubeCL, `quantize_idx` harus memakai jalur referensi.
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn fused_requires_cube_device() {
+        let device = Device::default();
+        let cfg = CodebookConfig {
+            num_entries: 8,
+            dim: 4,
+            ..CodebookConfig::default()
+        };
+        let cb = Codebook::new(&cfg, &device);
+        let z = Tensor::<2>::random([6, 4], Distribution::Normal(0.0, 1.0), &device);
+        let _ = cb.quantize_idx(z);
     }
 }
