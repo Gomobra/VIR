@@ -13,24 +13,22 @@ pub fn rope_cos_sin(seq_len: usize, head_dim: usize, base: f32) -> (Vec<f32>, Ve
     let mut cos = Vec::with_capacity(seq_len * head_dim);
     let mut sin = Vec::with_capacity(seq_len * head_dim);
     for pos in 0..seq_len {
+        let mut row_cos = Vec::with_capacity(head_dim);
+        let mut row_sin = Vec::with_capacity(head_dim);
         for i in 0..half {
             let inv = 1.0 / base.powf(2.0 * i as f32 / head_dim as f32);
             let angle = pos as f32 * inv;
-            cos.push(angle.cos());
-            sin.push(angle.sin());
+            row_cos.push(angle.cos());
+            row_sin.push(angle.sin());
         }
-    }
-    // duplikasi ke paruh kedua
-    let mut cos2 = Vec::with_capacity(seq_len * head_dim);
-    let mut sin2 = Vec::with_capacity(seq_len * head_dim);
-    for pos in 0..seq_len {
+        // duplikasi ke paruh kedua
         for i in 0..half {
-            cos2.push(cos[pos * half + i]);
-            sin2.push(sin[pos * half + i]);
+            row_cos.push(row_cos[i]);
+            row_sin.push(row_sin[i]);
         }
+        cos.extend_from_slice(&row_cos);
+        sin.extend_from_slice(&row_sin);
     }
-    cos.extend_from_slice(&cos2);
-    sin.extend_from_slice(&sin2);
     (cos, sin)
 }
 
