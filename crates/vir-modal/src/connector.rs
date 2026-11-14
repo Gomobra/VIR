@@ -58,7 +58,7 @@ impl Connector {
 }
 
 fn gelu(x: f32) -> f32 {
-    0.5 * x * (1.0 + (0.7978845608 * (x + 0.044715 * x * x * x)).tanh())
+    0.5 * x * (1.0 + (0.7978846 * (x + 0.044715 * x * x * x)).tanh())
 }
 
 /// Trait tokenizer modalitas (gambar/audio) → kode diskret.
