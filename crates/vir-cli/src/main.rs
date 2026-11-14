@@ -94,8 +94,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cfg = RlmConfig {
                 max_depth: 2,
                 max_calls: 2,
+                max_steps: 2,
             };
-            let r = run_rlm(&lm, &context, &cfg)?;
+            let mut mem = |_path: &str,
+                           _args: &serde_json::Value|
+             -> Result<serde_json::Value, vir_common::VirError> {
+                Ok(serde_json::Value::Null)
+            };
+            let r = run_rlm(&lm, &context, &cfg, &mut mem)?;
             println!("final: {:?}", r.final_answer);
             println!("steps: {}, calls: {}", r.steps, r.calls_used);
         }

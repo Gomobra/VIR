@@ -75,8 +75,13 @@ fn rlm_run(
     let cfg = RlmConfig {
         max_depth,
         max_calls,
+        max_steps: max_calls,
     };
-    let r = run_rlm(&lm, context, &cfg)
+    let mut mem =
+        |_path: &str,
+         _args: &serde_json::Value|
+         -> Result<serde_json::Value, vir_common::VirError> { Ok(serde_json::Value::Null) };
+    let r = run_rlm(&lm, context, &cfg, &mut mem)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(r.final_answer)
 }

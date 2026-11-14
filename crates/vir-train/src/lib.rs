@@ -1,270 +1,190 @@
-//! Latihan: loss berbobot, Muon, checkpoint, JSONL.
+//! Latihan dua tahap VIR (PRD F1.7): VQ-VAE (tahap 1) sampai gerbang
+//! rekonstruksi lulus, lalu generator NCM dengan tokenizer beku (tahap 2).
+//!
+//! Tata letak:
+//!
+//! | Modul | Isi |
+//! |---|---|
+//! | [`loss`] | loss berbobot level (R6), CE dengan mask padding, pass@k, GRPO |
+//! | [`corruption`] | korupsi kode masukan per level (NCM §3.4) + laju sebenarnya |
+//! | [`optim`] | Muon (Newton–Schulz) + AdamW hibrid, clipping, state 8-bit |
+//! | [`schedule`] | jadwal LR kosinus dan warmup–stabil–decay |
+//! | [`trainer`] | trainer dua tahap + gerbang rekonstruksi + resume |
+//! | [`checkpoint`] | checkpoint atomik (`state.json` + `tensors.bin`) |
+//! | [`logging`] | log JSONL per langkah (loss total, per level, utilisasi) |
+//! | [`metrics`] | utilisasi/perplexity codebook per level |
+//! | [`rng`] | RNG xoshiro256++ yang bisa diserialisasi (resume identik) |
+//! | [`burn_bridge`] | optimizer Burn: AdamW + grup Muon |
+//!
+//! Contoh alur (pemanggil menyediakan `StepFn` yang memegang model):
+//!
+//! ```text
+//! let mut trainer = Trainer::new(config, store, "runs/exp1")?;
+//! let out = trainer.run(&mut |ctx, store| { /* forward+backward, isi grad */ })?;
+//! ```
 
-use burn::prelude::*;
-use burn::tensor::Device;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+pub mod burn_bridge;
+pub mod checkpoint;
+pub mod corruption;
+pub mod logging;
+pub mod loss;
+pub mod metrics;
+pub mod optim;
+pub mod rng;
+pub mod schedule;
+pub mod trainer;
+
+pub use checkpoint::{build as build_checkpoint, Checkpoint, CheckpointFile, Progress};
+pub use corruption::{level_rates, Corruption, CorruptBatch, RateShape};
+pub use logging::{EventRecord, JsonlLogger, StepRecord};
+pub use loss::{
+    code_weight, grpo_advantage, grpo_objective, level_loss_terms, level_weight,
+    masked_level_loss, ncm_loss, nll_per_position, pass_at_k, sft_loss, LossBreakdown,
+};
+pub use metrics::{histogram, level_stats, perplexity, utilization, LevelStat};
+pub use optim::{
+    classify, clip_grad_norm, newton_schulz, newton_schulz_steps, AdamState, AdamW, Hybrid,
+    MomState, Muon, MuonParams, OptimSettings, OptGroup, ParamRole, ParamSlot, ParamStore,
+    MUON_SCALE, NS_COEFFS, NS_STEPS,
+};
+pub use rng::Rng;
+pub use schedule::{LrKind, LrSchedule};
+pub use trainer::{
+    GateMetric, GateTracker, ReconGate, RunOutcome, Stage, StepCtx, StepFn, StepOut, TrainConfig,
+    Trainer,
+};
+
 use vir_common::VirError;
 
-/// Bobot level: w_k = ℓ_k^{-α} / Σ_j ℓ_j^{1-α}.
-pub fn level_weight(levels: &[usize], alpha: f32) -> Vec<f32> {
-    let denom: f32 = levels.iter().map(|&l| (l as f32).powf(1.0 - alpha)).sum();
-    levels
-        .iter()
-        .map(|&l| {
-            if denom > 0.0 {
-                (l as f32).powf(-alpha) / denom
-            } else {
-                0.0
-            }
-        })
-        .collect()
-}
-
-/// pass@k estimator tak bias (Chen et al.): 1 - prod_{i=n-c+1}^{n}(1 - k/i).
-pub fn pass_at_k(n: usize, c: usize, k: usize) -> f64 {
-    if n == 0 {
-        return 0.0;
-    }
-    if n - c < k {
-        return 1.0;
-    }
-    let mut prod = 1.0f64;
-    for i in (n - c + 1)..=n {
-        prod *= 1.0 - (k as f64) / (i as f64);
-    }
-    1.0 - prod
-}
-
-/// Keuntungan GRPO.
-pub fn grpo_advantage(rewards: &[f32], eps: f32) -> Vec<f32> {
-    if rewards.is_empty() {
-        return vec![];
-    }
-    let n = rewards.len() as f32;
-    let mean: f32 = rewards.iter().sum::<f32>() / n;
-    let var: f32 = rewards.iter().map(|&r| (r - mean).powi(2)).sum::<f32>() / n;
-    let std = (var + eps).sqrt();
-    rewards.iter().map(|&r| (r - mean) / std).collect()
-}
-
-/// Newton-Schulz orthogonalization (Muon), 5 iterasi, koefisien (3.4445, -4.7750, 2.0315).
-pub fn newton_schulz(m: &mut Vec<f32>, rows: usize, cols: usize) {
-    // X0 = M / ||M||_F
-    let norm: f32 = m.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-7);
-    for v in m.iter_mut() {
-        *v /= norm;
-    }
-    let (a, b, c) = (3.4445f32, -4.7750, 2.0315);
-    for _ in 0..5 {
-        // X <- aX + b(XX^T)X + c(XX^T)^2 X
-        let xtx = matmul_t(m, rows, cols); // [cols, cols] = X^T X
-        let xtx2 = matmul(&xtx, &xtx, cols, cols, cols); // [cols, cols]
-                                                         // X (aI + b X^T X + c (X^T X)^2)
-        let mut new = vec![0.0f32; rows * cols];
-        for i in 0..rows {
-            for j in 0..cols {
-                let mut acc = 0.0f32;
-                for k in 0..cols {
-                    let xtx_v = xtx[k * cols + j];
-                    let xtx2_v = xtx2[k * cols + j];
-                    acc +=
-                        (if k == j { a } else { 0.0 } + b * xtx_v + c * xtx2_v) * m[i * cols + k];
-                }
-                new[i * cols + j] = acc;
-            }
-        }
-        *m = new;
-    }
-}
-
-fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
-    let mut out = vec![0.0f32; m * n];
-    for i in 0..m {
-        for j in 0..n {
-            let mut acc = 0.0f32;
-            for kk in 0..k {
-                acc += a[i * k + kk] * b[kk * n + j];
-            }
-            out[i * n + j] = acc;
-        }
-    }
-    out
-}
-
-fn matmul_t(a: &[f32], m: usize, k: usize) -> Vec<f32> {
-    // A^T A: [k, k]
-    let mut out = vec![0.0f32; k * k];
-    for i in 0..m {
-        for j in 0..k {
-            for l in 0..k {
-                out[j * k + l] += a[i * k + j] * a[i * k + l];
-            }
-        }
-    }
-    out
-}
-
-/// Muon optimizer state (momentum + Newton-Schulz).
-pub struct Muon {
-    pub momentum: Vec<f32>,
-    pub beta: f32,
-}
-
-impl Muon {
-    pub fn new(size: usize, beta: f32) -> Self {
-        Self {
-            momentum: vec![0.0; size],
-            beta,
-        }
-    }
-
-    /// Update bobot W [rows, cols] dengan grad G (row-major).
-    pub fn step(&mut self, w: &mut [f32], g: &[f32], rows: usize, cols: usize, lr: f32, wd: f32) {
-        let n = w.len();
-        for i in 0..n {
-            self.momentum[i] = self.beta * self.momentum[i] + g[i];
-        }
-        let mut m = self.momentum.clone();
-        newton_schulz(&mut m, rows, cols);
-        let scale = 0.2 * (rows.max(cols) as f32).sqrt();
-        for i in 0..n {
-            w[i] -= lr * (scale * m[i] + wd * w[i]);
-        }
-    }
-}
-
-/// Logger JSONL.
-pub struct JsonlLogger {
-    w: BufWriter<File>,
-}
-
-impl JsonlLogger {
-    pub fn new(path: &str) -> Result<Self, VirError> {
-        let f = File::create(path)?;
-        Ok(Self {
-            w: BufWriter::new(f),
-        })
-    }
-    pub fn log(&mut self, obj: &str) -> Result<(), VirError> {
-        writeln!(self.w, "{obj}")?;
-        self.w.flush()?;
-        Ok(())
-    }
-}
-
-/// SFT: prefix-LM loss hanya pada target (mask prefix).
-/// `logits` [B, T, V], `target` [B, T], `prefix_len` per batch (uniform).
-pub fn sft_loss(
-    logits: Tensor<3>,
-    target: Tensor<2, Int>,
-    prefix_len: usize,
-    device: &Device,
-) -> Tensor<1> {
-    let [b, t, v] = logits.dims();
-    if prefix_len >= t {
-        return Tensor::zeros([1], device);
-    }
-    // hanya hitung CE pada posisi target (setelah prefix)
-    let logits = logits.slice([0..b, prefix_len..t, 0..v]);
-    let target = target.slice([0..b, prefix_len..t]);
-    let [b2, t2, v2] = logits.dims();
-    let lg = logits.reshape([b2 * t2, v2]);
-    let tg = target.reshape([b2 * t2]);
-    burn::nn::loss::CrossEntropyLossConfig::new()
-        .init(device)
-        .forward(lg, tg)
-}
-
-/// GRPO objective: PPO-clip + KL penalty (no critic).
-/// `logp` = log-prob policy, `ref_logp` = log-prob ref, `adv` = advantage, `clip` = ε.
-pub fn grpo_objective(logp: f32, ref_logp: f32, adv: f32, clip: f32, kl_coef: f32) -> f32 {
-    let ratio = (logp - ref_logp).exp();
-    let clipped = ratio.clamp(1.0 - clip, 1.0 + clip);
-    let policy = ratio * adv;
-    let policy_clipped = clipped * adv;
-    let kl = logp - ref_logp;
-    policy.min(policy_clipped) - kl_coef * kl
-}
-
-/// Checkpoint sederhana: meta JSON + path bobot.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Checkpoint {
-    pub version: String,
-    pub stage: u32,
-    pub step: u64,
-    pub path: String,
-}
-
-impl Checkpoint {
-    pub fn save(&self, dir: &str) -> Result<(), VirError> {
-        let path = format!("{dir}/checkpoint.json");
-        let s = serde_json::to_string(self).map_err(|e| VirError::Internal(e.to_string()))?;
-        std::fs::write(path, s)?;
-        Ok(())
-    }
-    pub fn load(dir: &str) -> Result<Self, VirError> {
-        let path = format!("{dir}/checkpoint.json");
-        let s = std::fs::read_to_string(path)?;
-        serde_json::from_str(&s).map_err(|e| VirError::Internal(e.to_string()))
-    }
-}
-
-/// Trainer dua tahap (skeleton): tahap 1 VQ, tahap 2 generator.
-pub struct Trainer {
-    pub stage: u32,
-    pub step: u64,
-    pub checkpoint_dir: String,
-}
-
-impl Trainer {
-    pub fn new(checkpoint_dir: &str) -> Self {
-        Self {
-            stage: 1,
-            step: 0,
-            checkpoint_dir: checkpoint_dir.to_string(),
-        }
-    }
-
-    /// Latih `steps` langkah (hook nyata menyusul).
-    pub fn train(&mut self, steps: u64) -> Result<(), VirError> {
-        for _ in 0..steps {
-            self.step += 1;
-            if self.step % 1000 == 0 {
-                let ck = Checkpoint {
-                    version: "Vbeta".into(),
-                    stage: self.stage,
-                    step: self.step,
-                    path: self.checkpoint_dir.clone(),
-                };
-                ck.save(&self.checkpoint_dir)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Resume dari checkpoint terakhir.
-    pub fn resume(&mut self) -> Result<(), VirError> {
-        let ck = Checkpoint::load(&self.checkpoint_dir)?;
-        self.stage = ck.stage;
-        self.step = ck.step;
-        Ok(())
-    }
-}
-
+/// Uji asap menyeluruh (dipakai `vir smoke`): RNG, loss, korupsi, Muon,
+/// AdamW, jadwal, metrik, logger, dan checkpoint.
 pub fn train_smoke() -> Result<(), VirError> {
-    let levels = vec![1usize, 13, 24, 36];
-    let w = level_weight(&levels, 0.0);
-    let weighted: f32 = w
-        .iter()
-        .zip(levels.iter())
-        .map(|(a, b)| a * (*b as f32))
-        .sum();
-    assert!((weighted - 1.0).abs() < 1e-5);
-    assert!((pass_at_k(4, 1, 2) - 0.5).abs() < 1e-9);
-    assert!((pass_at_k(10, 3, 5) - 0.9166666667).abs() < 1e-6);
-    let adv = grpo_advantage(&[1.0, 1.0, 0.0, 0.0], 1e-8);
-    assert!((adv[0] - 1.0).abs() < 1e-5);
+    rng::rng_smoke()?;
+    loss::loss_smoke()?;
+    corruption::corruption_smoke()?;
+    optim::muon_smoke()?;
+    optim::adam_smoke()?;
+    schedule::schedule_smoke()?;
+    metrics::metrics_smoke()?;
+    logging::logging_smoke()?;
+    checkpoint::checkpoint_smoke()?;
     Ok(())
 }
 
+/// Uji asap mini: jalankan dua langkah nyata pada permukaan kuadratik,
+/// checkpoint, resume, lalu selesaikan — hasil harus identik dengan satu jalan
+/// tanpa henti (PRD F1.7: resume identik).
+pub fn trainer_smoke() -> Result<(), VirError> {
+    let dir_a = temp_dir("vir_train_trainer_smoke")?;
+    let dir_b = temp_dir("vir_train_trainer_smoke_full")?;
+    let dir_a = dir_a.as_str();
+    let dir_b = dir_b.as_str();
+
+    let config = TrainConfig {
+        seed: 9,
+        stage: Stage::Vq,
+        steps: 6,
+        log_every: 1,
+        checkpoint_every: 2,
+        gate: None,
+        corruption: Some(Corruption::new(9, &[4, 8], 0.5, RateShape::LinearDecay)),
+        ..TrainConfig::default()
+    };
+
+    let mut a = Trainer::new(config.clone(), smoke_store(), dir_a)?;
+    let mut f = smoke_step;
+    a.run_steps(2, &mut f)?;
+    a.save()?;
+    // Hentikan checkpoint otomatis agar titik resume tidak tertimpa.
+    a.config.checkpoint_every = 0;
+    let after_two = a.store.slots[0].data.clone();
+    a.run_steps(4, &mut f)?;
+    let full = a.store.slots[0].data.clone();
+
+    let mut b = Trainer::new(config, smoke_store(), dir_b)?;
+    b.run_steps(6, &mut f)?;
+    if b.store.slots[0].data != full {
+        return Err(VirError::Internal(
+            "dua jalan tanpa resume berbeda (RNG tidak konsisten)".into(),
+        ));
+    }
+
+    let mut c = Trainer::resume(dir_a)?;
+    if c.step != 2 {
+        return Err(VirError::Internal(format!("resume step {} != 2", c.step)));
+    }
+    if c.store.slots[0].data != after_two {
+        return Err(VirError::Internal(
+            "resume tidak memulihkan parameter secara identik".into(),
+        ));
+    }
+    c.run_steps(4, &mut f)?;
+    if c.store.slots[0].data != full {
+        return Err(VirError::Internal(
+            "resume menghasilkan langkah berikutnya yang berbeda".into(),
+        ));
+    }
+
+    std::fs::remove_dir_all(dir_a)?;
+    std::fs::remove_dir_all(dir_b)?;
+    Ok(())
+}
+
+/// Direktori sementara bersih untuk smoke.
+fn temp_dir(name: &str) -> Result<String, VirError> {
+    let path = std::env::temp_dir().join(name);
+    let dir = path
+        .to_str()
+        .ok_or_else(|| VirError::Internal("path smoke tidak valid".into()))?
+        .to_string();
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(dir)
+}
+
+/// Store mini: satu matriks dan satu bias (semua peran VQ).
+fn smoke_store() -> ParamStore {
+    let mut store = ParamStore::new();
+    store.add(ParamSlot::new(
+        "core.q.weight",
+        2,
+        2,
+        ParamRole::Vq,
+        vec![0.0; 4],
+    ));
+    store.add(ParamSlot::vector("norm.bias", ParamRole::Vq, vec![0.0, 0.0]));
+    store
+}
+
+/// Langkah mini: `loss = ½ Σ (w − t)²`, gradien `w − t`.
+fn smoke_step(mut ctx: StepCtx<'_>, store: &mut ParamStore) -> Result<StepOut, VirError> {
+    let target = [1.0f32, -1.0, 0.5, -0.5];
+    let mut loss = 0.0f32;
+    let mut grads: Vec<Vec<f32>> = Vec::with_capacity(store.slots.len());
+    for slot in store.slots.iter() {
+        let mut g = Vec::with_capacity(slot.len());
+        let mut acc = 0.0f32;
+        for (k, w) in slot.data.iter().enumerate() {
+            let t = target[k % target.len()];
+            acc += 0.5 * (w - t) * (w - t);
+            g.push(w - t);
+        }
+        loss += acc;
+        grads.push(g);
+    }
+    for (i, g) in grads.iter().enumerate() {
+        store.set_grad(i, g);
+    }
+    let corruption_rate = ctx
+        .corruption
+        .as_mut()
+        .map(|c| c.next_batch(0, 1, 4, 8).measured_rate());
+    Ok(StepOut {
+        loss_total: loss,
+        per_level: vec![loss],
+        level_tokens: vec![4.0],
+        utilization: vec![0.5],
+        perplexity: vec![3.0],
+        recon: Some(1.0 / (1.0 + loss)),
+        corruption_rate,
+    })
+}
