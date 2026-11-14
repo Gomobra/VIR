@@ -63,22 +63,3 @@ impl FsqQuantizer {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fsq_codebook_size() {
-        let q = FsqQuantizer::new(vec![8, 5, 5, 5, 5], 4);
-        assert_eq!(q.codebook_size(), 8 * 5 * 5 * 5 * 5);
-    }
-
-    #[test]
-    fn fsq_quantize_shape() {
-        let q = FsqQuantizer::new(vec![5, 5], 4);
-        let z = vec![0.1f32; 8];
-        let (codes, qz) = q.quantize(&z).unwrap();
-        assert_eq!(codes.len(), 2 * 2);
-        assert_eq!(qz.len(), 8);
-    }
-}

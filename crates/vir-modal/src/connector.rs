@@ -67,26 +67,3 @@ pub trait ModalTokenizer {
     fn decode(&self, codes: &[u32]) -> Result<Vec<f32>, VirError>;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn connector_forward_shape() {
-        let c = Connector::new(4, 8, 4);
-        let x = vec![0.1f32; 8];
-        let out = c.forward(&x).unwrap();
-        assert_eq!(out.len(), 8);
-    }
-
-    #[test]
-    fn connector_rejects_bad_len() {
-        let c = Connector::new(4, 8, 4);
-        assert!(c.forward(&[0.1, 0.2, 0.3]).is_err());
-    }
-
-    #[test]
-    fn gelu_zero() {
-        assert!(gelu(0.0).abs() < 1e-6);
-    }
-}

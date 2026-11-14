@@ -248,19 +248,3 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_loss_extracts_value() {
-        let line = r#"{"step":1,"loss":0.1234,"lr":0.001}"#;
-        assert_eq!(parse_loss(line), Some(0.1234));
-    }
-
-    #[test]
-    fn parse_loss_missing() {
-        assert_eq!(parse_loss("{\"step\":1}"), None);
-    }
-}

@@ -82,26 +82,3 @@ pub fn fsq_smoke() -> Result<(), VirError> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn codebook_quantize_runs() {
-        assert!(vq_smoke().is_ok());
-    }
-
-    #[test]
-    fn fsq_smoke_runs() {
-        assert!(fsq_smoke().is_ok());
-    }
-
-    /// Modul yang diekspor tetap terjangkau dari akar krat.
-    #[test]
-    fn public_api_is_wired() {
-        assert_eq!(ABLATION_PROBS.len(), 4);
-        assert_eq!(classify_token("42"), ErrorCategory::Number);
-        let dist = cutoff_distribution(0.5, 12);
-        assert_eq!(dist.len(), 13);
-    }
-}

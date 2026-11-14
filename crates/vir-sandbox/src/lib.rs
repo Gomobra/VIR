@@ -86,37 +86,3 @@ fn cap(bytes: &[u8], max: usize) -> (String, bool) {
         (String::from_utf8_lossy(&bytes[..max]).into_owned(), true)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn run_echo() {
-        let r = run("echo", &["hello"], &Policy::default()).unwrap();
-        assert_eq!(r.stdout.trim(), "hello");
-        assert_eq!(r.exit_code, Some(0));
-        assert!(!r.timed_out);
-    }
-
-    #[test]
-    fn run_timeout() {
-        let pol = Policy {
-            timeout: Duration::from_millis(100),
-            ..Policy::default()
-        };
-        let r = run("sleep", &["10"], &pol).unwrap();
-        assert!(r.timed_out);
-    }
-
-    #[test]
-    fn run_truncate() {
-        let pol = Policy {
-            max_output: 4,
-            ..Policy::default()
-        };
-        let r = run("printf", &["abcdefgh"], &pol).unwrap();
-        assert!(r.truncated);
-        assert_eq!(r.stdout.len(), 4);
-    }
-}

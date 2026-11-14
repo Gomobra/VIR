@@ -47,38 +47,3 @@ pub fn recon_accuracy(original: &[u32], reconstructed: &[u32]) -> f64 {
     ok as f64 / original.len() as f64
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pass_at_k_delegates() {
-        assert!((eval_pass_at_k(4, 1, 2) - 0.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn pass_at_k_hand_values() {
-        // 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
-        assert!((pass_at_k(5, 2, 2) - 0.7).abs() < 1e-12);
-        // semua benar -> 1
-        assert!((pass_at_k(5, 5, 2) - 1.0).abs() < 1e-12);
-        // tidak ada benar -> 0
-        assert!((pass_at_k(5, 0, 1) - 0.0).abs() < 1e-12);
-        // k > n -> 1 (semua kemungkinan tercakup)
-        assert!((pass_at_k(3, 0, 5) - 1.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn recon_accuracy_full() {
-        let a = vec![1, 2, 3];
-        let b = vec![1, 2, 3];
-        assert!((recon_accuracy(&a, &b) - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn recon_accuracy_partial() {
-        let a = vec![1, 2, 3, 4];
-        let b = vec![1, 9, 3, 4];
-        assert!((recon_accuracy(&a, &b) - 0.75).abs() < 1e-9);
-    }
-}

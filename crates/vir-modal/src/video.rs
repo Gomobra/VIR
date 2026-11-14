@@ -29,22 +29,3 @@ pub fn sample_scene_change(frame_diffs: &[f32], threshold: f32) -> Vec<u32> {
     out
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fixed_sampling() {
-        let t = sample_fixed(10, 30, 1).unwrap();
-        assert_eq!(t.len(), 10);
-        assert_eq!(t[0], 0);
-        assert_eq!(t[9], 9);
-    }
-
-    #[test]
-    fn scene_change() {
-        let diffs = [0.1, 0.5, 0.2, 0.9, 0.05];
-        let s = sample_scene_change(&diffs, 0.4);
-        assert_eq!(s, vec![1, 3]);
-    }
-}

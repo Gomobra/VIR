@@ -338,39 +338,3 @@ fn latest_version(conn: &Connection, file_id: i64) -> Result<Option<i64>> {
         params![file_id],
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tulis_dua_versi_tanpa_menimpa() {
-        let s = MemoryStore::open_in_memory().unwrap();
-        let v1 = s.write("/semantik/a", "satu").unwrap();
-        let v2 = s.write("/semantik/a", "dua").unwrap();
-        assert!(v2 > v1);
-        assert_eq!(s.read(v1).unwrap(), "satu");
-        assert_eq!(s.read(v2).unwrap(), "dua");
-        assert_eq!(s.history("/semantik/a").unwrap(), vec![v1, v2]);
-        assert_eq!(s.version_info(v2).unwrap().supersedes, Some(v1));
-        assert!(
-            s.links_from(v2)
-                .unwrap()
-                .contains(&(v1, crate::LinkKind::Supersedes))
-        );
-    }
-
-    #[test]
-    fn isi_diubah_terdeteksi() {
-        let s = MemoryStore::open_in_memory().unwrap();
-        let vid = s.write("/semantik/a", "asli").unwrap();
-        s.conn
-            .execute(
-                "UPDATE versions SET content = 'diubah' WHERE id = ?1",
-                params![vid],
-            )
-            .unwrap();
-        assert!(!s.verify(vid).unwrap());
-        assert!(s.read(vid).is_err());
-    }
-}

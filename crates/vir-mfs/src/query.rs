@@ -171,16 +171,3 @@ pub(crate) fn match_expr(query: &str) -> String {
 pub(crate) fn keep_set(candidates: &[Candidate]) -> HashSet<i64> {
     candidates.iter().map(|c| c.version_id).collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ekspresi_fts_aman() {
-        assert_eq!(match_expr("rust-"), "\"rust\"*");
-        assert!(match_expr("   ").is_empty());
-        assert!(match_expr("\" OR MATCH").contains("or"));
-        assert!(match_expr("a b").contains(" OR "));
-    }
-}

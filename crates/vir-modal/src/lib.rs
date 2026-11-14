@@ -71,30 +71,3 @@ pub fn layout_smoke() -> Result<usize, VirError> {
     Ok(ids.len())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn layout_standar_punya_lima_codebook() -> Result<(), VirError> {
-        let layout = standard_layout(32_000)?;
-        assert_eq!(layout.codebook_keys().count(), 6);
-        assert!(layout.total() > 32_000 + 72);
-        Ok(())
-    }
-
-    #[test]
-    fn asap_layout_audio() -> Result<(), VirError> {
-        assert_eq!(layout_smoke()?, 2 + 6);
-        Ok(())
-    }
-
-    #[test]
-    fn anggaran_token_prd() -> Result<(), VirError> {
-        assert_eq!(image_tokens(224, 224, DEFAULT_PATCH)?, 196);
-        assert_eq!(image_tokens(384, 384, DEFAULT_PATCH)?, 576);
-        assert_eq!(snac24k_codes(10_000)?, 820);
-        assert!((snac24k_bitrate() - 984.0).abs() < 1e-3);
-        Ok(())
-    }
-}

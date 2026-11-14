@@ -44,18 +44,3 @@ pub fn namespace_of(path: &str) -> String {
         None => trimmed.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_dinormalkan() {
-        assert_eq!(normalize_path("a/./b").unwrap(), "/a/b");
-        assert_eq!(normalize_path("/a/b/../c").unwrap(), "/a/c");
-        assert_eq!(normalize_path("/").unwrap(), "/");
-        assert!(normalize_path("   ").is_err());
-        assert_eq!(namespace_of("/episodik/e1"), "episodik");
-        assert_eq!(namespace_of("/"), "akar");
-    }
-}

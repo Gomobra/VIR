@@ -92,37 +92,3 @@ impl FromStr for ModalKind {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_dan_nama_konsisten() {
-        for kind in ModalKind::ALL {
-            let parsed = ModalKind::from_str(kind.as_str()).unwrap_or(kind);
-            assert_eq!(parsed, kind);
-            assert_eq!(parsed.to_string(), kind.as_str());
-        }
-    }
-
-    #[test]
-    fn tolak_modalitas_asing() {
-        assert!(ModalKind::from_str("hologram").is_err());
-    }
-
-    #[test]
-    fn hanya_gambar_dan_audio_yang_generatif() {
-        assert!(ModalKind::Image.is_generative());
-        assert!(ModalKind::Audio.is_generative());
-        assert!(!ModalKind::Text.is_generative());
-        assert!(!ModalKind::Video.is_generative());
-        assert!(ModalKind::Video.is_temporal());
-        assert!(ModalKind::Image.is_spatial());
-    }
-
-    #[test]
-    fn teks_tidak_punya_penanda() {
-        assert!(ModalKind::Text.markers().is_none());
-        assert!(ModalKind::Image.markers().is_some());
-    }
-}

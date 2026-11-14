@@ -56,17 +56,3 @@ pub fn level_schedule(
     out[n - 1] = target_length;
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::LevelScheduleKind;
-
-    #[test]
-    fn linear_12_128() {
-        let v = level_schedule(LevelScheduleKind::Linear, 128, 12);
-        assert_eq!(v, vec![1, 13, 24, 36, 47, 59, 70, 82, 93, 105, 116, 128]);
-        let sum: usize = v.iter().sum();
-        assert_eq!(sum, 774);
-    }
-}

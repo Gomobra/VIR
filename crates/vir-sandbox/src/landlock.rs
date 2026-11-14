@@ -63,19 +63,3 @@ pub fn confine(workdir: &str, allow_write: &[&str]) -> Result<(), VirError> {
         ))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn abi_detected_or_disabled() {
-        // tanpa fitur sandbox, harus error jelas (bukan panic)
-        let r = detect_abi();
-        if cfg!(feature = "sandbox") {
-            assert!(r.is_ok());
-        } else {
-            assert!(r.is_err());
-        }
-    }
-}

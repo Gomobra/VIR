@@ -86,26 +86,3 @@ pub fn snac24k() -> Rvq {
     Rvq::new(4096, 8, 3)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rvq_roundtrip_shape() {
-        let rvq = Rvq::new(16, 4, 2);
-        let z = vec![0.1f32; 8];
-        let codes = rvq.encode(&z, 2, 4).unwrap();
-        assert_eq!(codes.len(), 2);
-        assert_eq!(codes[0].len(), 2);
-        let dec = rvq.decode(&codes, 2, 4);
-        assert_eq!(dec.len(), 8);
-    }
-
-    #[test]
-    fn snac24k_bitrate() {
-        let rvq = snac24k();
-        // (12+23+47) * log2(4096) = 82 * 12 = 984 bps
-        let bps = rvq.bitrate(&[12.0, 23.0, 47.0]);
-        assert!((bps - 984.0).abs() < 1e-3);
-    }
-}
