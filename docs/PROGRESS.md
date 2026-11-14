@@ -30,6 +30,8 @@
 - **F5.2**: KDA chunkwise (UT) + naive fix — CI hijau.
 - **F6.1/F6.2**: Connector (MLP) + ModalTokenizer trait — CI hijau.
 - **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
+- **F6.5**: video frame sampler (fixed + scene change) — CI hijau.
+- **F7.3**: release workflow (wheels on tag) + docs/API.md — CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
