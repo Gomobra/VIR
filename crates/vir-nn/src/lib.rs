@@ -4,6 +4,7 @@ use burn::module::Module;
 use burn::module::Param;
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
+use burn::tensor::Bool;
 use burn::tensor::Device;
 use vir_common::VirError;
 
@@ -167,6 +168,11 @@ impl Block {
     }
 
     pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
+        self.forward_masked(x, None)
+    }
+
+    /// Forward dengan mask opsional [T, T] bool (true = boleh lihat).
+    pub fn forward_masked(&self, x: Tensor<3>, mask: Option<Tensor<2, Bool>>) -> Tensor<3> {
         let [b, t, d] = x.dims();
         let h = self.num_heads;
         let hd = self.head_dim;
@@ -187,7 +193,13 @@ impl Block {
         .swap_dims(1, 2);
         let v = self.wv.forward(xn).reshape([b, t, h, hd]).swap_dims(1, 2);
         let kt = k.clone().swap_dims(2, 3);
-        let scores = q.matmul(kt) / (hd as f32).sqrt();
+        let mut scores = q.matmul(kt) / (hd as f32).sqrt();
+        if let Some(m) = mask {
+            // mask [T,T] -> [1,1,T,T]
+            let m = m.reshape([1, 1, t, t]);
+            let neg = m.clone().bool_not();
+            scores = scores.mask_fill(neg, f32::NEG_INFINITY);
+        }
         let w = burn::tensor::activation::softmax(scores, 3);
         let ctx = w.matmul(v).swap_dims(1, 2).reshape([b, t, d]);
         let attn = self.wo.forward(ctx);

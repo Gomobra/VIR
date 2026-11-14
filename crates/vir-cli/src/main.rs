@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use vir_agent::{RlmConfig, ScriptedLm, run_rlm};
+use vir_agent::{run_rlm, RlmConfig, ScriptedLm};
 use vir_common::build_info;
 use vir_data::synth_arithmetic;
 use vir_mfs::MemoryStore;
