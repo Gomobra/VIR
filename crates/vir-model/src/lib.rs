@@ -169,7 +169,7 @@ pub fn recurrent_forward(
 pub fn sample_r(mean_r: f32, sigma: f32, rng: &mut impl rand::Rng) -> usize {
     let mu = (mean_r.ln()) - 0.5 * sigma * sigma;
     let tau = mu + sigma * rand_distr(rng);
-    let r = poisson(tau.exp()) + 1;
+    let r = poisson(tau.exp(), rng) + 1;
     r.max(1)
 }
 
@@ -180,13 +180,13 @@ fn rand_distr(rng: &mut impl rand::Rng) -> f32 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
 }
 
-fn poisson(lambda: f32) -> usize {
+fn poisson(lambda: f32, rng: &mut impl rand::Rng) -> usize {
     // Knuth (lambda kecil)
     let l = (-lambda).exp();
     let mut k = 0usize;
     let mut p = 1.0f32;
     loop {
-        p *= rand::Rng::gen_range(&mut rand::thread_rng(), 0.0f32..1.0);
+        p *= rand::Rng::gen_range(&mut *rng, 0.0f32..1.0);
         if p <= l {
             return k;
         }

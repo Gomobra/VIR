@@ -36,7 +36,7 @@ enum Commands {
     Version,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Smoke { json } => {
@@ -67,10 +67,7 @@ fn main() {
             }
         }
         Commands::Tui => {
-            if let Err(e) = vir_tui::run() {
-                eprintln!("tui error: {e}");
-                std::process::exit(1);
-            }
+            vir_tui::run()?;
         }
         Commands::Mem {
             path,
@@ -78,17 +75,16 @@ fn main() {
             read,
             find,
         } => {
-            let store =
-                MemoryStore::open(&path).unwrap_or_else(|_| MemoryStore::open_in_memory().unwrap());
+            let store = MemoryStore::open(&path)?;
             if let Some(content) = write {
-                let vid = store.write("/cli", &content).unwrap();
+                let vid = store.write("/cli", &content)?;
                 println!("wrote version {}", vid);
             }
             if let Some(vid) = read {
-                println!("{}", store.read(vid).unwrap());
+                println!("{}", store.read(vid)?);
             }
             if let Some(q) = find {
-                for (id, content, score) in store.find(&q, 5).unwrap() {
+                for (id, content, score) in store.find(&q, 5)? {
                     println!("{}: {} (score {:.4})", id, content, score);
                 }
             }
@@ -99,10 +95,11 @@ fn main() {
                 max_depth: 2,
                 max_calls: 2,
             };
-            let r = run_rlm(&lm, &context, &cfg).unwrap();
+            let r = run_rlm(&lm, &context, &cfg)?;
             println!("final: {:?}", r.final_answer);
             println!("steps: {}, calls: {}", r.steps, r.calls_used);
         }
         Commands::Version => println!("{}", build_info()),
     }
+    Ok(())
 }

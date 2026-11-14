@@ -26,18 +26,30 @@ pub fn read_shard(path: &str) -> Result<Vec<u32>, VirError> {
     if buf.len() < 8 {
         return Err(VirError::Internal("shard terlalu pendek".into()));
     }
-    let magic = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let magic = u32::from_le_bytes(
+        buf[0..4]
+            .try_into()
+            .map_err(|_| VirError::Internal("magic shard".into()))?,
+    );
     if magic != SHARD_MAGIC {
         return Err(VirError::Internal("magic shard salah".into()));
     }
-    let count = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
+    let count = u32::from_le_bytes(
+        buf[4..8]
+            .try_into()
+            .map_err(|_| VirError::Internal("count shard".into()))?,
+    ) as usize;
     if buf.len() < 8 + count * 4 {
         return Err(VirError::Internal("shard terpotong".into()));
     }
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let off = 8 + i * 4;
-        out.push(u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()));
+        out.push(u32::from_le_bytes(
+            buf[off..off + 4]
+                .try_into()
+                .map_err(|_| VirError::Internal("token shard".into()))?,
+        ));
     }
     Ok(out)
 }

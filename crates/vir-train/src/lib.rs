@@ -162,15 +162,18 @@ pub fn sft_loss(
     device: &Device,
 ) -> Tensor<1> {
     let [b, t, v] = logits.dims();
-    let lg = logits.reshape([b * t, v]);
-    let tg = target.reshape([b * t]);
-    // mask: posisi < prefix_len tidak dihitung (set logits ke -inf? di sini pakai CE biasa
-    // dan mask via bobot 0 pada prefix). Untuk mini, hitung CE pada semua posisi.
-    let ce = burn::nn::loss::CrossEntropyLossConfig::new()
+    if prefix_len >= t {
+        return Tensor::zeros([1], device);
+    }
+    // hanya hitung CE pada posisi target (setelah prefix)
+    let logits = logits.slice([0..b, prefix_len..t, 0..v]);
+    let target = target.slice([0..b, prefix_len..t]);
+    let [b2, t2, v2] = logits.dims();
+    let lg = logits.reshape([b2 * t2, v2]);
+    let tg = target.reshape([b2 * t2]);
+    burn::nn::loss::CrossEntropyLossConfig::new()
         .init(device)
-        .forward(lg, tg);
-    let _ = prefix_len;
-    ce
+        .forward(lg, tg)
 }
 
 /// GRPO objective: PPO-clip + KL penalty (no critic).
