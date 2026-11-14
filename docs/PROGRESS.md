@@ -32,7 +32,8 @@
 - **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
 - **F6.5**: video frame sampler (fixed + scene change) — CI hijau.
 - **F7.3**: release workflow (wheels on tag) + docs/API.md — CI hijau.
-- **Subagent work**: vir-model (generator/recurrent/block_ar/sampling/loss/scale/smoke modules), vir-cli (cmd_train/generate/eval/mem/rlm/smoke + backend), vir-sandbox (seccomp-bpf + syscalls + limits), vir-py (allow_threads + namespace), TUI full screens. CI hijau.
+- **Subagent work**: vir-model (generator/recurrent/block_ar/sampling/loss/scale/smoke modules), vir-cli (cmd_train/generate/eval/mem/rlm/smoke + backend), vir-sandbox (seccomp-bpf + syscalls + limits), vir-py (allow_threads + namespace), TUI full screens, vir-eval (RULER 5 kategori + ROUGE/BLEU + eval suite), vir-modal (F6.1-F6.5 encoders). CI hijau.
+- **F1.7**: BurnStepFn konkret (forward+backward+grad→ParamStore) — compile CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
