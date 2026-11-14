@@ -116,3 +116,106 @@ pub fn generative_ppl(sample: &[u32], reference: &TokenDist) -> f64 {
     2f64.powf(cross_bits)
 }
 
+/// Hitung multiset n-gram dari sekuens token.
+fn ngram_counts(tokens: &[u32], n: usize) -> BTreeMap<Vec<u32>, u32> {
+    let mut map: BTreeMap<Vec<u32>, u32> = BTreeMap::new();
+    if n == 0 || tokens.len() < n {
+        return map;
+    }
+    for w in tokens.windows(n) {
+        *map.entry(w.to_vec()).or_insert(0) += 1;
+    }
+    map
+}
+
+/// F1 dari tumpang tindih n-gram (ROUGE-N), token sebagai satuan.
+pub fn rouge_n(reference: &[u32], candidate: &[u32], n: usize) -> f64 {
+    let r = ngram_counts(reference, n);
+    let c = ngram_counts(candidate, n);
+    let r_total: u32 = r.values().sum();
+    let c_total: u32 = c.values().sum();
+    if r_total == 0 || c_total == 0 {
+        return 0.0;
+    }
+    let overlap: u32 = c
+        .iter()
+        .map(|(gram, &count)| count.min(r.get(gram).copied().unwrap_or(0)))
+        .sum();
+    let precision = overlap as f64 / c_total as f64;
+    let recall = overlap as f64 / r_total as f64;
+    if precision + recall == 0.0 {
+        0.0
+    } else {
+        2.0 * precision * recall / (precision + recall)
+    }
+}
+
+/// Panjang subsequence bersama terpanjang (LCS) untuk ROUGE-L.
+fn lcs_len(a: &[u32], b: &[u32]) -> usize {
+    if a.is_empty() || b.is_empty() {
+        return 0;
+    }
+    let mut prev = vec![0usize; b.len() + 1];
+    let mut cur = vec![0usize; b.len() + 1];
+    for &x in a {
+        for (j, &y) in b.iter().enumerate() {
+            cur[j + 1] = if x == y {
+                prev[j] + 1
+            } else {
+                prev[j + 1].max(cur[j])
+            };
+        }
+        std::mem::swap(&mut prev, &mut cur);
+        for slot in cur.iter_mut() {
+            *slot = 0;
+        }
+    }
+    prev[b.len()]
+}
+
+/// ROUGE-L: F1 dari panjang LCS terhadap panjang referensi dan kandidat.
+pub fn rouge_l(reference: &[u32], candidate: &[u32]) -> f64 {
+    let lcs = lcs_len(reference, candidate) as f64;
+    if lcs == 0.0 {
+        return 0.0;
+    }
+    let precision = lcs / candidate.len() as f64;
+    let recall = lcs / reference.len() as f64;
+    if precision + recall == 0.0 {
+        0.0
+    } else {
+        2.0 * precision * recall / (precision + recall)
+    }
+}
+
+/// BLEU (satu referensi) dengan brevity penalty, sampai 4-gram.
+pub fn bleu(reference: &[u32], candidate: &[u32]) -> f64 {
+    if candidate.is_empty() || reference.is_empty() {
+        return 0.0;
+    }
+    let max_n = candidate.len().min(4);
+    let mut log_sum = 0.0f64;
+    for n in 1..=max_n {
+        let r = ngram_counts(reference, n);
+        let c = ngram_counts(candidate, n);
+        let c_total: u32 = c.values().sum();
+        if c_total == 0 {
+            return 0.0;
+        }
+        let overlap: u32 = c
+            .iter()
+            .map(|(gram, &count)| count.min(r.get(gram).copied().unwrap_or(0)))
+            .sum();
+        let precision = overlap as f64 / c_total as f64;
+        if precision <= 0.0 {
+            return 0.0;
+        }
+        log_sum += precision.ln();
+    }
+    let brevity = if candidate.len() as f64 >= reference.len() as f64 {
+        1.0
+    } else {
+        (1.0 - reference.len() as f64 / candidate.len() as f64).exp()
+    };
+    brevity * (log_sum / max_n as f64).exp()
+}
