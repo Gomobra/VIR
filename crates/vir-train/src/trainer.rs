@@ -24,10 +24,10 @@
 //! gradien), lalu mengembalikan metrik. Dengan begitu trainer, optimizer,
 //! jadwal, checkpoint, dan log bisa diuji tanpa membangun model Burn.
 
-use crate::checkpoint::{build, CheckpointFile, Progress, LOG_FILE};
+use crate::checkpoint::{CheckpointFile, LOG_FILE, Progress, build};
 use crate::corruption::Corruption;
 use crate::logging::{EventRecord, JsonlLogger, StepRecord};
-use crate::optim::{clip_grad_norm, Hybrid, OptimSettings, ParamStore};
+use crate::optim::{Hybrid, OptimSettings, ParamStore, clip_grad_norm};
 use crate::rng::Rng;
 use crate::schedule::LrSchedule;
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,10 @@ pub enum GateMetric {
 impl GateMetric {
     /// `true` bila nilai besar berarti lolos.
     pub fn higher_is_better(self) -> bool {
-        matches!(self, Self::TokenAccuracy | Self::ExactMatch | Self::Utilization)
+        matches!(
+            self,
+            Self::TokenAccuracy | Self::ExactMatch | Self::Utilization
+        )
     }
 
     /// Nama metrik untuk log.
@@ -624,7 +627,11 @@ impl Trainer {
             .gate
             .map(|g| g.metric.higher_is_better())
             .unwrap_or(true);
-        let better = if higher { v > self.best_recon } else { v < self.best_recon };
+        let better = if higher {
+            v > self.best_recon
+        } else {
+            v < self.best_recon
+        };
         if better {
             self.best_recon = v;
         }

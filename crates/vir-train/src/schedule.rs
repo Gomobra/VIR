@@ -114,7 +114,9 @@ impl LrSchedule {
             ));
         }
         if self.floor > self.peak {
-            return Err(VirError::Config("LR lantai tidak boleh melebihi puncak".into()));
+            return Err(VirError::Config(
+                "LR lantai tidak boleh melebihi puncak".into(),
+            ));
         }
         if self.total == 0 {
             return Err(VirError::Config("total langkah LR harus > 0".into()));

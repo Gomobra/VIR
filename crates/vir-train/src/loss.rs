@@ -139,7 +139,10 @@ impl LossBreakdown {
 
     /// Nilai suku per level sebagai `f32` (host).
     pub fn values(&self) -> Vec<f32> {
-        self.terms.iter().map(|t| t.clone().into_scalar::<f32>()).collect()
+        self.terms
+            .iter()
+            .map(|t| t.clone().into_scalar::<f32>())
+            .collect()
     }
 
     /// Nilai total sebagai `f32` (host).

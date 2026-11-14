@@ -154,7 +154,9 @@ pub fn logging_smoke() -> Result<(), VirError> {
     let dir = std::env::temp_dir().join("vir_train_log_smoke");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("steps.jsonl");
-    let path = path.to_str().ok_or_else(|| VirError::Internal("path tidak valid".into()))?;
+    let path = path
+        .to_str()
+        .ok_or_else(|| VirError::Internal("path tidak valid".into()))?;
     {
         let mut log = JsonlLogger::new(path)?;
         log.log(&EventRecord::new("stage_start", 1, 0, "mulai", None))?;

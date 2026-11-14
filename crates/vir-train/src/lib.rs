@@ -24,6 +24,7 @@
 //! ```
 
 pub mod burn_bridge;
+pub mod burn_step;
 pub mod checkpoint;
 pub mod corruption;
 pub mod logging;
@@ -34,18 +35,18 @@ pub mod rng;
 pub mod schedule;
 pub mod trainer;
 
-pub use checkpoint::{build as build_checkpoint, Checkpoint, CheckpointFile, Progress};
-pub use corruption::{level_rates, Corruption, CorruptBatch, RateShape};
+pub use checkpoint::{Checkpoint, CheckpointFile, Progress, build as build_checkpoint};
+pub use corruption::{CorruptBatch, Corruption, RateShape, level_rates};
 pub use logging::{EventRecord, JsonlLogger, StepRecord};
 pub use loss::{
-    code_weight, grpo_advantage, grpo_objective, level_loss_terms, level_weight,
-    masked_level_loss, ncm_loss, nll_per_position, pass_at_k, sft_loss, LossBreakdown,
+    LossBreakdown, code_weight, grpo_advantage, grpo_objective, level_loss_terms, level_weight,
+    masked_level_loss, ncm_loss, nll_per_position, pass_at_k, sft_loss,
 };
-pub use metrics::{histogram, level_stats, perplexity, utilization, LevelStat};
+pub use metrics::{LevelStat, histogram, level_stats, perplexity, utilization};
 pub use optim::{
-    classify, clip_grad_norm, newton_schulz, newton_schulz_steps, AdamState, AdamW, Hybrid,
-    MomState, Muon, MuonParams, OptimSettings, OptGroup, ParamRole, ParamSlot, ParamStore,
-    MUON_SCALE, NS_COEFFS, NS_STEPS,
+    AdamState, AdamW, Hybrid, MUON_SCALE, MomState, Muon, MuonParams, NS_COEFFS, NS_STEPS,
+    OptGroup, OptimSettings, ParamRole, ParamSlot, ParamStore, classify, clip_grad_norm,
+    newton_schulz, newton_schulz_steps,
 };
 pub use rng::Rng;
 pub use schedule::{LrKind, LrSchedule};
@@ -151,7 +152,11 @@ fn smoke_store() -> ParamStore {
         ParamRole::Vq,
         vec![0.0; 4],
     ));
-    store.add(ParamSlot::vector("norm.bias", ParamRole::Vq, vec![0.0, 0.0]));
+    store.add(ParamSlot::vector(
+        "norm.bias",
+        ParamRole::Vq,
+        vec![0.0, 0.0],
+    ));
     store
 }
 

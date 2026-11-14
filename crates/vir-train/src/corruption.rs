@@ -121,7 +121,13 @@ impl Corruption {
     }
 
     /// Bangun mask + kode pengganti untuk level `level` (`batch × ℓ_level`).
-    pub fn next_batch(&mut self, level: usize, batch: usize, len: usize, codes: usize) -> CorruptBatch {
+    pub fn next_batch(
+        &mut self,
+        level: usize,
+        batch: usize,
+        len: usize,
+        codes: usize,
+    ) -> CorruptBatch {
         let rate = self.rates.get(level).copied().unwrap_or(0.0);
         self.next_batch_rate(level, batch, len, codes, rate)
     }
@@ -179,7 +185,11 @@ impl Corruption {
     }
 
     /// Terapkan korupsi ke beberapa level sekaligus (indeks per level).
-    pub fn apply_levels(&self, idx: &[Tensor<2, Int>], batches: &[CorruptBatch]) -> Vec<Tensor<2, Int>> {
+    pub fn apply_levels(
+        &self,
+        idx: &[Tensor<2, Int>],
+        batches: &[CorruptBatch],
+    ) -> Vec<Tensor<2, Int>> {
         idx.iter()
             .zip(batches.iter())
             .map(|(t, c)| self.apply(t, c))
@@ -202,9 +212,7 @@ pub fn corruption_smoke() -> Result<(), vir_common::VirError> {
     let rates = level_rates(&levels, 0.5, RateShape::LinearDecay);
     let mean: f32 = rates.iter().sum::<f32>() / rates.len() as f32;
     if (mean - 0.5).abs() > 1e-5 {
-        return Err(VirError::Internal(format!(
-            "rata-rata laju {mean} != 0,5"
-        )));
+        return Err(VirError::Internal(format!("rata-rata laju {mean} != 0,5")));
     }
     if rates[0] <= rates[4] {
         return Err(VirError::Internal("laju tidak turun terhadap level".into()));
@@ -223,7 +231,9 @@ pub fn corruption_smoke() -> Result<(), vir_common::VirError> {
         acc += batch.measured_rate();
     }
     if (acc / levels.len() as f32 - 0.5).abs() > 0.05 {
-        return Err(VirError::Internal("laju sebenarnya jauh dari target".into()));
+        return Err(VirError::Internal(
+            "laju sebenarnya jauh dari target".into(),
+        ));
     }
     let clean = Corruption::none(5, &levels).next_batch(0, 2, 8, 16);
     if clean.corrupted != 0 {

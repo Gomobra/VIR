@@ -400,15 +400,7 @@ pub fn checkpoint_smoke() -> Result<(), VirError> {
         stage_step: 7,
         transitions: 0,
     };
-    let file = build(
-        &config,
-        &progress,
-        &Rng::new(1),
-        &gate,
-        None,
-        &store,
-        &opt,
-    );
+    let file = build(&config, &progress, &Rng::new(1), &gate, None, &store, &opt);
     file.save_atomic(dir)?;
     let loaded = CheckpointFile::load(dir)?;
     let (store2, _opt2) = loaded.restore()?;

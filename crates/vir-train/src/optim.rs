@@ -52,7 +52,9 @@ pub enum OptGroup {
 /// parameter 1D → AdamW; selain itu (matriks 2D blok) → Muon.
 pub fn classify(name: &str, rows: usize, cols: usize) -> OptGroup {
     let lower = name.to_lowercase();
-    let special = ["head", "embed", "codebook", "norm", "bias", "scale", "shift"];
+    let special = [
+        "head", "embed", "codebook", "norm", "bias", "scale", "shift",
+    ];
     if rows <= 1 || cols <= 1 || special.iter().any(|s| lower.contains(*s)) {
         return OptGroup::AdamW;
     }
@@ -403,7 +405,12 @@ impl MomState {
     }
 
     /// Pulihkan dari byte checkpoint.
-    pub fn decode(tag: u8, len: usize, buf: &[u8], pos: &mut usize) -> Result<Self, vir_common::VirError> {
+    pub fn decode(
+        tag: u8,
+        len: usize,
+        buf: &[u8],
+        pos: &mut usize,
+    ) -> Result<Self, vir_common::VirError> {
         use vir_common::VirError;
         let need = |n: usize, pos: usize| -> Result<(), VirError> {
             if pos + n <= buf.len() {
@@ -551,7 +558,12 @@ impl Muon {
         } else {
             mom.clone()
         };
-        newton_schulz_steps(&mut view, slot.rows.max(1), slot.cols.max(1), self.params.ns_steps);
+        newton_schulz_steps(
+            &mut view,
+            slot.rows.max(1),
+            slot.cols.max(1),
+            self.params.ns_steps,
+        );
         self.states[i].store(&mom);
         let scale = MUON_SCALE * (slot.rows.max(slot.cols).max(1) as f32).sqrt();
         for (w, v) in slot.data.iter_mut().zip(view.iter()) {
@@ -621,12 +633,18 @@ impl AdamW {
             .iter()
             .map(|s| AdamState::zeros(s.len()))
             .collect();
-        Self { states, params: *params }
+        Self {
+            states,
+            params: *params,
+        }
     }
 
     /// AdamW dari state tersimpan (resume).
     pub fn from_states(states: Vec<AdamState>, params: &AdamParams) -> Self {
-        Self { states, params: *params }
+        Self {
+            states,
+            params: *params,
+        }
     }
 
     /// Update satu slot.
@@ -751,7 +769,12 @@ impl Hybrid {
     }
 
     /// Langkah mengikuti jadwal LR (Muon memakai grid terpisah).
-    pub fn step_schedule(&mut self, store: &mut ParamStore, sched: &LrSchedule, step: u64) -> usize {
+    pub fn step_schedule(
+        &mut self,
+        store: &mut ParamStore,
+        sched: &LrSchedule,
+        step: u64,
+    ) -> usize {
         let lr_adamw = sched.lr_f32(step);
         let lr_muon = sched.lr_f32(step) * self.settings.muon_lr_scale;
         self.step(store, lr_muon, lr_adamw)
@@ -805,7 +828,13 @@ pub fn muon_smoke() -> Result<(), vir_common::VirError> {
         }
     }
     // RMS update Muon ≈ 0,2 (Lemma 1 + faktor skala).
-    let mut slot = ParamSlot::new("core.q.weight", 32, 16, ParamRole::Generator, vec![0.1; 32 * 16]);
+    let mut slot = ParamSlot::new(
+        "core.q.weight",
+        32,
+        16,
+        ParamRole::Generator,
+        vec![0.1; 32 * 16],
+    );
     let mut seed = 99u64;
     for g in slot.grad.iter_mut() {
         seed = seed
@@ -838,8 +867,18 @@ pub fn muon_smoke() -> Result<(), vir_common::VirError> {
 pub fn adam_smoke() -> Result<(), vir_common::VirError> {
     use vir_common::VirError;
     let mut store = ParamStore::new();
-    store.add(ParamSlot::vector("norm.weight", ParamRole::Generator, vec![1.0, 1.0]));
-    store.add(ParamSlot::new("core.q.weight", 4, 4, ParamRole::Generator, vec![0.0; 16]));
+    store.add(ParamSlot::vector(
+        "norm.weight",
+        ParamRole::Generator,
+        vec![1.0, 1.0],
+    ));
+    store.add(ParamSlot::new(
+        "core.q.weight",
+        4,
+        4,
+        ParamRole::Generator,
+        vec![0.0; 16],
+    ));
     if store.get(0).map(|s| s.group) != Some(OptGroup::AdamW) {
         return Err(VirError::Internal("norm salah klasifikasi".into()));
     }
@@ -859,7 +898,9 @@ pub fn adam_smoke() -> Result<(), vir_common::VirError> {
     }
     let s0 = store.get(0).map(|s| s.data.clone()).unwrap_or_default();
     if !(s0[0] < 1.0 && s0[1] > 1.0) {
-        return Err(VirError::Internal("AdamW tidak mengikuti tanda gradien".into()));
+        return Err(VirError::Internal(
+            "AdamW tidak mengikuti tanda gradien".into(),
+        ));
     }
     let frozen = store.freeze_role(ParamRole::Vq);
     if frozen != 0 {
