@@ -17,7 +17,7 @@
 //! dan weight decay AdamW dapat dipakai ulang, sesuai PRD langkah 4.
 
 use burn::module::ParamGroup;
-use burn::optim::{AdamWConfig, AdjustLrFn, ModuleOptimizer, MuonConfig, WeightDecayConfig};
+use burn::optim::{AdamWConfig, AdjustLrFn, ModuleOptimizer, MuonConfig};
 
 /// Setelan optimizer Burn.
 #[derive(Debug, Clone, PartialEq)]
@@ -64,7 +64,6 @@ pub fn burn_optimizer(cfg: &BurnHybridSettings) -> ModuleOptimizer {
         .init();
     let muon = MuonConfig::new()
         .with_adjust_lr_fn(AdjustLrFn::MatchRmsAdamW)
-        .with_weight_decay(Some(WeightDecayConfig::new().with_penalty(cfg.weight_decay)))
         .with_ns_steps(cfg.ns_steps)
         .build();
     adamw.with_group(
