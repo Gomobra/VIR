@@ -21,8 +21,9 @@ use vir_common::VirError;
 use vir_vq::quantizer::indices_to_vec;
 use vir_vq::{Codebook, CodebookConfig, Decoder, MultiscaleVq};
 
-use crate::block_ar::{BlockArConfig, BlockMeta, block_ar};
-use crate::generator::{Generator, GeneratorConfig, ncm_loss, teacher_inputs};
+use crate::block_ar::{block_ar, BlockArConfig, BlockMeta};
+use crate::generator::{Generator, GeneratorConfig};
+use crate::loss::{ncm_loss, teacher_inputs};
 use crate::sampling::Sampler;
 
 /// Level gerbang (naik ketat, berakhir `L = 16`).
@@ -265,11 +266,7 @@ pub fn full_smoke() -> Result<(), VirError> {
         ..CodebookConfig::default()
     };
     let vq = MultiscaleVq::new(&levels, 3, |_| Codebook::new(&cb, &device), &device);
-    let z = Tensor::<3>::random(
-        [SAMPLES, LEN, DIM],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    );
+    let z = Tensor::<3>::random([SAMPLES, LEN, DIM], Distribution::Normal(0.0, 1.0), &device);
     let encoded = vq.encode_full(z);
     let targets = encoded.indices.clone();
 
@@ -317,7 +314,17 @@ pub fn full_smoke() -> Result<(), VirError> {
     let first = model.generate(None, &sampler)?;
     let second = model.generate(None, &sampler)?;
     for k in 0..first.codes.len() {
-        if indices_to_vec(&first.codes[k]) != indices_to_vec(&second.codes[k]) {
+        let a: Vec<i64> = first.codes[k]
+            .clone()
+            .into_data()
+            .try_to_vec::<i64>()
+            .unwrap_or_default();
+        let b: Vec<i64> = second.codes[k]
+            .clone()
+            .into_data()
+            .try_to_vec::<i64>()
+            .unwrap_or_default();
+        if a != b {
             return Err(VirError::Internal(format!(
                 "generate level {k} tidak deterministik"
             )));
@@ -354,7 +361,9 @@ pub fn full_smoke() -> Result<(), VirError> {
         |z: &Tensor<3>| Ok(decode_tokens(&decoder, z)),
     )?;
     if cost.blocks == 0 || tokens.is_empty() {
-        return Err(VirError::Internal("loop blok tidak menghasilkan token".into()));
+        return Err(VirError::Internal(
+            "loop blok tidak menghasilkan token".into(),
+        ));
     }
     if tokens.len() > cfg.max_tokens {
         return Err(VirError::Internal(format!(

@@ -118,7 +118,7 @@ pub fn sample_index(probs: &[f32], rng: &mut impl rand::Rng) -> usize {
     if probs.is_empty() || total <= 0.0 {
         return 0;
     }
-    let u: f32 = rand::Rng::gen(rng) * total;
+    let u: f32 = rand::Rng::gen_range(&mut *rng, 0.0..1.0) * total;
     let mut acc = 0.0f32;
     for (i, &p) in probs.iter().enumerate() {
         acc += p;
@@ -144,10 +144,7 @@ pub fn sample_codes(logits: Tensor<3>, sampler: &Sampler) -> Tensor<2, Int> {
     for row in values.chunks_exact(v) {
         out.push(sample_row(row, sampler, &mut rng) as i64);
     }
-    Tensor::<2, Int>::from_ints(
-        burn::tensor::TensorData::new(out, [b, l]),
-        &device,
-    )
+    Tensor::<2, Int>::from_ints(burn::tensor::TensorData::new(out, [b, l]), &device)
 }
 
 /// Sampel satu baris logit.
