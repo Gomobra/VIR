@@ -34,6 +34,7 @@ pub mod kind;
 pub mod sample;
 pub mod sequence;
 pub mod token;
+pub mod video;
 
 pub use asset::ModalAsset;
 pub use budget::{
