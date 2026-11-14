@@ -2213,6 +2213,7 @@ name = "vir-sandbox"
 version = "0.1.0"
 dependencies = [
  "landlock",
+ "libc",
  "seccompiler",
  "vir-common",
 ]

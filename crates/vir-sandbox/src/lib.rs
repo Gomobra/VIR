@@ -1,6 +1,7 @@
 //! Sandbox eksekusi kode (dasar: subprocess + timeout + batas keluaran).
 
 pub mod landlock;
+pub mod limits;
 
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
