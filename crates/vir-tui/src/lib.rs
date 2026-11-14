@@ -174,10 +174,28 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 Screen::Train => {
+                    let chunks2 = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(3), Constraint::Min(1)])
+                        .split(chunks[1]);
+                    let status = format!(
+                        "loss={} | steps={}",
+                        reader
+                            .latest_loss()
+                            .map(|l| format!("{l:.4}"))
+                            .unwrap_or("-".into()),
+                        reader.count()
+                    );
                     f.render_widget(
-                        Paragraph::new("Latih: JSONL tail + chart (F3.8.b)")
-                            .block(Block::default().borders(Borders::ALL)),
-                        chunks[1],
+                        Paragraph::new(status)
+                            .block(Block::default().borders(Borders::ALL).title("Latih")),
+                        chunks2[0],
+                    );
+                    f.render_widget(
+                        reader
+                            .sparkline()
+                            .block(Block::default().borders(Borders::ALL).title("Loss/LR")),
+                        chunks2[1],
                     );
                 }
                 Screen::Generate => {
