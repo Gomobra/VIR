@@ -42,6 +42,19 @@ pub fn recon_accuracy(original: &[u32], reconstructed: &[u32]) -> f64 {
     ok as f64 / original.len() as f64
 }
 
+/// RULER task generator: needle, multi-key, multi-hop, aggregation.
+pub fn gen_ruler_needle(seed: u64, haystack_len: usize, num_keys: usize) -> (Vec<u32>, Vec<u32>) {
+    let mut hay = vec![1u32; haystack_len];
+    let mut keys = Vec::with_capacity(num_keys);
+    for k in 0..num_keys {
+        let pos = (seed as usize * (k + 1) * 37) % haystack_len.max(1);
+        let key = 1000 + k as u32;
+        hay[pos] = key;
+        keys.push(key);
+    }
+    (hay, keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +82,13 @@ mod tests {
     fn needle_contains_jarum() {
         let (hay, needle) = gen_needle(7, 100);
         assert!(hay.contains(&needle));
+    }
+
+    #[test]
+    fn ruler_needle_has_all_keys() {
+        let (hay, keys) = gen_ruler_needle(7, 100, 3);
+        for k in keys {
+            assert!(hay.contains(&k));
+        }
     }
 }
