@@ -1,10 +1,11 @@
 //! Batas proses (rlimit) dan process group untuk anak proses (F3.1).
 //!
 //! Urutan konfinemen mengikuti Sandlock: `setpgid` → `chdir`
-//! (`Command::current_dir`) → `PR_SET_NO_NEW_PRIVS` + aturan Landlock
-//! (`landlock::confine`) → `exec`. `setpgid` di sini membuat anak menjadi
-//! pemimpin grup prosesnya sendiri sehingga timeout dapat membunuh seluruh
-//! turunan dengan `kill(-pgid, SIGKILL)`.
+//! (`Command::current_dir`) → `PR_SET_NO_NEW_PRIVS` → aturan Landlock →
+//! filter seccomp → `exec`. Modul ini menangani langkah pertama (dan rlimit);
+//! `lib.rs` merangkai sisanya. `setpgid` di sini membuat anak menjadi pemimpin
+//! grup prosesnya sendiri sehingga timeout dapat membunuh seluruh turunan
+//! dengan `kill(-pgid, SIGKILL)`.
 
 use nix::sys::resource::{Resource, getrlimit, setrlimit};
 use std::os::unix::process::CommandExt;

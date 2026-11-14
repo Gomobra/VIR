@@ -301,6 +301,7 @@ fn repl_policy() -> Policy {
         },
         allow_write: Vec::new(),
         landlock: false,
+        seccomp: false,
     }
 }
 

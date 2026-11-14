@@ -8,13 +8,19 @@
 //! - batas waktu dinding dengan pembunuhan seluruh grup proses;
 //! - pemotongan keluaran besar;
 //! - (fitur `sandbox`) pembatasan sistem berkas/jaringan dengan
-//!   [`landlock::confine`] yang dipasang di `pre_exec`.
+//!   [`landlock::confine`] dan allowlist syscall dengan [`seccomp::confine`],
+//!   keduanya dipasang di `pre_exec` mengikuti urutan Sandlock:
+//!   `setpgid` → `chdir` → `PR_SET_NO_NEW_PRIVS` → Landlock → seccomp →
+//!   `exec`.
 //!
-//! Tanpa fitur `sandbox`, pembatasan sistem berkas tidak tersedia; hanya rlimit,
-//! timeout, dan batas keluaran yang berlaku. Lihat `docs/adr/ADR-006-sandbox.md`.
+//! Tanpa fitur `sandbox`, pembatasan sistem berkas dan penyaringan syscall tidak
+//! tersedia; hanya rlimit, timeout, dan batas keluaran yang berlaku.
+//! Lihat `docs/adr/ADR-006-sandbox.md`.
 
 pub mod landlock;
 pub mod limits;
+pub mod seccomp;
+pub mod syscalls;
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -48,6 +54,11 @@ pub struct Policy {
     pub allow_write: Vec<PathBuf>,
     /// Terapkan pembatasan Landlock bila fitur `sandbox` aktif.
     pub landlock: bool,
+    /// Terapkan allowlist syscall seccomp-bpf bila fitur `sandbox` aktif.
+    ///
+    /// Wajib bekerja bersama [`Policy::landlock`]: keduanya dipasang pada anak
+    /// sebelum `exec` (Landlock lebih dulu, seccomp terakhir).
+    pub seccomp: bool,
 }
 
 impl Default for Policy {
@@ -72,6 +83,7 @@ impl Default for Policy {
             limits: ResourceLimits::standard(),
             allow_write: Vec::new(),
             landlock: true,
+            seccomp: true,
         }
     }
 }
@@ -118,6 +130,12 @@ impl Policy {
         self.landlock = enabled;
         self
     }
+
+    /// Aktif/nonaktifkan allowlist syscall seccomp-bpf.
+    pub fn with_seccomp(mut self, enabled: bool) -> Self {
+        self.seccomp = enabled;
+        self
+    }
 }
 
 /// Hasil eksekusi satu perintah.
@@ -150,6 +168,7 @@ fn build_command(program: &str, args: &[&str], policy: &Policy, stdin: Stdio) ->
         .stderr(Stdio::piped());
     limits::confine_command(&mut cmd, policy.limits);
     wire_landlock(&mut cmd, policy);
+    wire_seccomp(&mut cmd, policy);
     cmd
 }
 
@@ -288,4 +307,33 @@ fn wire_landlock(cmd: &mut Command, policy: &Policy) {
 }
 
 #[cfg(not(feature = "sandbox"))]
-fn wire_landlock(_cmd: &mut Command, _policy: &Policy) {}
+fn wire_landlock(_cmd: &mut Command, _policy: &Policy) {
+    // Landlock tidak tersedia tanpa fitur `sandbox`; rlimit dan timeout tetap
+    // berlaku.
+}
+
+#[cfg(feature = "sandbox")]
+fn wire_seccomp(cmd: &mut Command, policy: &Policy) {
+    use std::os::unix::process::CommandExt;
+    if !policy.seccomp {
+        return;
+    }
+    // SAFETY: closure hanya memasang `PR_SET_NO_NEW_PRIVS` dan filter seccomp
+    // pada proses anak sebelum `exec`.
+    unsafe {
+        cmd.pre_exec(|| {
+            // Landlock (yang dipasang lebih dulu) juga memasang flag ini, tetapi
+            // pemasangan eksplisit membuat urutan pada modul ini berdiri sendiri
+            // dan tetap benar bila Landlock nonaktif.
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            seccomp::confine().map_err(|e| std::io::Error::other(e.to_string()))
+        });
+    }
+}
+
+#[cfg(not(feature = "sandbox"))]
+fn wire_seccomp(_cmd: &mut Command, _policy: &Policy) {
+    // Filter syscall tidak tersedia tanpa fitur `sandbox`.
+}
