@@ -45,7 +45,9 @@ impl SegmentRole {
             SegmentRole::Image => Some(ModalKind::Image),
             SegmentRole::Audio => Some(ModalKind::Audio),
             SegmentRole::Video => Some(ModalKind::Video),
-            SegmentRole::System | SegmentRole::User | SegmentRole::Assistant
+            SegmentRole::System
+            | SegmentRole::User
+            | SegmentRole::Assistant
             | SegmentRole::Time => None,
         }
     }
@@ -217,7 +219,10 @@ impl PairedSample {
             )));
         }
         if self.segments.is_empty() {
-            return Err(VirError::Config(format!("sampel tanpa segmen: {}", self.id)));
+            return Err(VirError::Config(format!(
+                "sampel tanpa segmen: {}",
+                self.id
+            )));
         }
         for s in &self.segments {
             s.validate()?;
@@ -276,7 +281,10 @@ mod tests {
         let line = s.to_json_line()?;
         let back = PairedSample::from_json_line(&line)?;
         assert_eq!(back, s);
-        assert_eq!(back.text(), "Jelaskan gambar ini. Seekor kucing di atas kertas.");
+        assert_eq!(
+            back.text(),
+            "Jelaskan gambar ini. Seekor kucing di atas kertas."
+        );
         assert_eq!(back.count_kind(ModalKind::Image), 1);
         Ok(())
     }

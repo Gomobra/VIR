@@ -144,7 +144,10 @@ impl ModalAsset {
         if ok {
             Ok(())
         } else {
-            Err(VirError::Config(format!("{field} tidak valid: {}", self.path)))
+            Err(VirError::Config(format!(
+                "{field} tidak valid: {}",
+                self.path
+            )))
         }
     }
 

@@ -12,9 +12,7 @@ use vir_common::VirError;
 
 /// Jenis modalitas. `Text` disertakan agar satu ruang ID (ADR-009 §5) bisa
 /// menjelaskan seluruh urutan, termasuk teks.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModalKind {
     Text,

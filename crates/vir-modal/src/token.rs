@@ -64,9 +64,7 @@ impl Span {
 }
 
 /// Kunci satu codebook: modalitas + level (0 = paling kasar).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CodebookKey {
     pub kind: ModalKind,
     pub level: u8,
@@ -347,4 +345,3 @@ const fn align_up(v: u32) -> u32 {
     let a = SPAN_ALIGN as u64;
     ((v as u64).div_ceil(a) * a) as u32
 }
-

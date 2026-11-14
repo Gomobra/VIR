@@ -174,11 +174,7 @@ mod tests {
 
     #[test]
     fn encoder_gambar_beku_dan_anggaran() -> Result<(), VirError> {
-        let enc = DummyVision(EncoderSpec::vision(
-            "siglip",
-            "2026-01",
-            default_patch(),
-        ));
+        let enc = DummyVision(EncoderSpec::vision("siglip", "2026-01", default_patch()));
         assert!(enc.is_frozen());
         assert!(enc.name().contains("siglip/2026-01"));
         let asset = ModalAsset::image("a.png", 384, 384);
@@ -192,7 +188,10 @@ mod tests {
     fn encoder_ucapan_posisi_per_detik() -> Result<(), VirError> {
         let spec = EncoderSpec::speech("whisper", "2026-01", 160, 2, 16_000);
         assert_eq!(spec.positions_per_sec(), 50.0);
-        assert_eq!(spec_budget(&spec, &ModalAsset::audio("a.wav", 10_000, 16_000, 1))?, 500);
+        assert_eq!(
+            spec_budget(&spec, &ModalAsset::audio("a.wav", 10_000, 16_000, 1))?,
+            500
+        );
         assert!(EncoderSpec::vision("x", "", 16).validate().is_err());
         Ok(())
     }

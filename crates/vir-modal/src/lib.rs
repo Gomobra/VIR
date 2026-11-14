@@ -26,6 +26,7 @@
 
 pub mod asset;
 pub mod budget;
+pub mod connector;
 pub mod encoder;
 pub mod kind;
 pub mod sample;
@@ -35,8 +36,8 @@ pub mod token;
 pub use asset::ModalAsset;
 pub use budget::{
     audio_bitrate, audio_codes, audio_understanding_tokens, image_tokens, prefix_budget,
-    snac24k_bitrate, snac24k_codes, video_tokens, DEFAULT_PATCH, SNAC24K_RATES,
-    SNAC_CODEBOOK_BITS, SPEECH_POSITIONS_PER_SEC,
+    snac24k_bitrate, snac24k_codes, video_tokens, DEFAULT_PATCH, SNAC24K_RATES, SNAC_CODEBOOK_BITS,
+    SPEECH_POSITIONS_PER_SEC,
 };
 pub use encoder::{budget_of, spec_budget, EncoderSpec, ModalEncoder};
 pub use kind::ModalKind;
