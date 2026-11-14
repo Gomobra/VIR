@@ -2149,6 +2149,7 @@ name = "vir-agent"
 version = "0.1.0"
 dependencies = [
  "vir-common",
+ "vir-mfs",
  "vir-sandbox",
 ]
 
