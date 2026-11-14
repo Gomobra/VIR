@@ -25,8 +25,10 @@ impl Rvq {
         let k = self.codebooks.len();
         let mut codes = vec![vec![0u32; n]; k];
         let mut residual = z.to_vec();
-        for level in 0..k {
-            let cb = &self.codebooks[level];
+        for (level, level_codes) in codes.iter_mut().enumerate() {
+            let Some(cb) = self.codebooks.get(level) else {
+                continue;
+            };
             for i in 0..n {
                 let row = &residual[i * dim..(i + 1) * dim];
                 let mut best = 0usize;
@@ -42,10 +44,11 @@ impl Rvq {
                         best = j;
                     }
                 }
-                codes[level][i] = best as u32;
-                // update residual
-                for t in 0..dim {
-                    residual[i * dim + t] -= cb[best][t];
+                level_codes[i] = best as u32;
+                if let Some(e) = cb.get(best) {
+                    for t in 0..dim {
+                        residual[i * dim + t] -= e[t];
+                    }
                 }
             }
         }
@@ -56,9 +59,13 @@ impl Rvq {
     pub fn decode(&self, codes: &[Vec<u32>], n: usize, dim: usize) -> Vec<f32> {
         let mut out = vec![0.0f32; n * dim];
         for (level, level_codes) in codes.iter().enumerate() {
-            let cb = &self.codebooks[level];
+            let Some(cb) = self.codebooks.get(level) else {
+                continue;
+            };
             for i in 0..n {
-                let e = &cb[level_codes[i] as usize];
+                let Some(e) = cb.get(level_codes[i] as usize) else {
+                    continue;
+                };
                 for t in 0..dim {
                     out[i * dim + t] += e[t];
                 }

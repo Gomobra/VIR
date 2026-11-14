@@ -37,32 +37,26 @@ impl FsqQuantizer {
         for row in 0..n {
             // proyeksi
             let mut proj = vec![0.0f32; self.n];
-            for j in 0..self.n {
+            for (j, pj) in proj.iter_mut().enumerate() {
                 let mut acc = 0.0f32;
                 for k in 0..self.d {
                     acc += self.proj[j * self.d + k] * z[row * self.d + k];
                 }
-                proj[j] = acc;
+                *pj = acc;
             }
             // bound + round
-            let mut idx = 0u32;
-            let mut mult = 1u32;
-            for j in 0..self.n {
+            for (j, p) in proj.iter().enumerate() {
                 let l = self.levels[j];
                 let half_l = (l as f32 - 1.0) * (1.0 + 1e-3) / 2.0;
                 let offset = if l % 2 == 0 { 0.5 } else { 0.0 };
                 let shift = (offset / half_l).atanh();
-                let bounded = (proj[j] + shift).tanh() * half_l - offset;
+                let bounded = (p + shift).tanh() * half_l - offset;
                 let rounded = bounded.round().clamp(-(half_l - offset), half_l - offset);
                 let code = (rounded + half_l - offset) as u32;
                 codes.push(code);
-                let val = rounded;
-                // simpan nilai terkuantisasi (kembali ke ruang d)
                 for k in 0..self.d {
-                    q[row * self.d + k] += val * self.proj[j * self.d + k];
+                    q[row * self.d + k] += rounded * self.proj[j * self.d + k];
                 }
-                idx += code * mult;
-                mult *= l;
             }
         }
         Ok((codes, q))
