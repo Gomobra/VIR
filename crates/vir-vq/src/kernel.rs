@@ -25,6 +25,17 @@
 //!
 //! Modul ini hanya dikompilasi dengan feature `fused` dan hanya dieksekusi untuk
 //! tensor `f32` pada device CubeCL (lihat [`try_fused_argmin`]).
+//!
+//! # Tuning (F7.1)
+//!
+//! Bentuk peluncuran dipilih dari jumlah baris oleh [`plan_launch`]: baris dibagi
+//! menjadi beberapa peluncuran (≤ [`MAX_ROWS_PER_LAUNCH`] baris tiap peluncuran,
+//! dibulatkan ke kelipatan [`ROWS_PER_CUBE`]). Dengan begitu kunci autotune tetap
+//! sedikit (bentuk berulang) dan grid tidak melewati batas backend pada `N` besar.
+//! Hasil profil dapat menimpa batas itu lewat `VIR_FUSED_ARGMAX_ROWS=<baris>`;
+//! nilainya di-cache sepanjang proses, jadi hint autotune persisten antar
+//! panggilan. Kernel hanya menulis `[N]` `i32`, sehingga chunking tidak menambah
+//! memori puncak.
 
 use burn::backend::Backend;
 use burn::backend::TensorMetadata;
@@ -36,9 +47,10 @@ use burn::tensor::{DType, Shape};
 use burn_cubecl::CubeBackend;
 use burn_cubecl::cubecl::{CubeCount, CubeDim};
 use burn_cubecl::kernel::into_contiguous;
-use burn_cubecl::ops::numeric::empty_device_dtype;
+use burn_cubecl::ops::numeric::{empty_device_dtype, zeros_client};
 use burn_cubecl::tensor::CubeTensor;
 use cube_ops::fused_argmin_kernel;
+use std::sync::OnceLock;
 
 /// Baris `z` per cube. Cukup besar untuk mengamortisasi beban `e` antar-baris.
 pub const ROWS_PER_CUBE: usize = 32;
@@ -54,6 +66,63 @@ pub const D_TILE: usize = 128;
 pub const E_TILE_STRIDE: usize = D_TILE + 1;
 /// Skor "paling buruk" untuk lane tanpa kode valid; hanya perlu < skor nyata mana pun.
 pub const LOWEST_SCORE: f32 = -1.0e30;
+/// Batas baris per peluncuran: 2048 cube, di bawah batas grid backend mana pun.
+pub const MAX_ROWS_PER_LAUNCH: usize = 1 << 16;
+/// Variabel lingkungan untuk menimpa batas baris per peluncuran (hint autotune).
+const ROWS_HINT_ENV: &str = "VIR_FUSED_ARGMAX_ROWS";
+
+/// Rencana peluncuran (F7.1 chunk tuning) untuk `rows` baris.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaunchPlan {
+    /// Baris per cube; tetap karena ukuran tile shared konstan.
+    pub rows_per_cube: usize,
+    /// Baris per peluncuran kernel; kelipatan `rows_per_cube`.
+    pub rows_per_launch: usize,
+    /// Banyak peluncuran; `ceil(rows / rows_per_launch)` (0 bila `rows == 0`).
+    pub launches: usize,
+}
+
+/// Hint autotune: batas baris per peluncuran dari `VIR_FUSED_ARGMAX_ROWS`, di-cache
+/// sepanjang proses supaya hasil profil dipakai ulang di panggilan berikutnya.
+fn rows_hint() -> Option<usize> {
+    static HINT: OnceLock<Option<usize>> = OnceLock::new();
+    *HINT.get_or_init(|| {
+        std::env::var(ROWS_HINT_ENV)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+    })
+}
+
+/// Pilih bentuk peluncuran dari jumlah baris.
+pub fn plan_launch(rows: usize) -> LaunchPlan {
+    let cap = rows_hint().unwrap_or(MAX_ROWS_PER_LAUNCH);
+    let rows_per_launch = rows.min(cap).div_ceil(ROWS_PER_CUBE).max(1) * ROWS_PER_CUBE;
+    LaunchPlan {
+        rows_per_cube: ROWS_PER_CUBE,
+        rows_per_launch,
+        launches: rows.div_ceil(rows_per_launch),
+    }
+}
+
+/// Bentuk, dtype, dan grad cocok untuk kernel? Device diperiksa terpisah.
+///
+/// `rows == 0` (batch kosong) tetap cocok: keluarannya `[0]`, tanpa kerja.
+fn args_compatible(z: &Tensor<2>, e: &Tensor<2>, bias: &Tensor<1>) -> bool {
+    let [_, dim] = z.dims();
+    let [codes, e_dim] = e.dims();
+    let [bias_len] = bias.dims();
+    dim > 0
+        && codes > 0
+        && e_dim == dim
+        && bias_len == codes
+        && z.dtype() == DType::F32
+        && e.dtype() == DType::F32
+        && bias.dtype() == DType::F32
+        && !z.is_require_grad()
+        && !e.is_require_grad()
+        && !bias.is_require_grad()
+}
 
 /// Kernel CubeCL. Dipisah ke modul sendiri karena prelude `cubecl` dan prelude
 /// `burn` sama-sama mengekspor `Tensor`/`Float` (glob yang bertabrakan).
@@ -66,7 +135,8 @@ mod cube_ops {
     use burn_cubecl::cubecl;
     use burn_cubecl::cubecl::prelude::*;
 
-    /// `out[n] = argmax_j (z[n] · e[j] + bias[j])`.
+    /// `out[n] = argmax_j (z[n] · e[j] + bias[j])` untuk baris
+    /// `row_offset <= n < row_offset + num_rows`.
     ///
     /// `z`: `[N, D]`, `e`: `[V, D]`, `bias`: `[V]`, `out`: `[N]`.
     #[cube(launch)]
@@ -78,6 +148,7 @@ mod cube_ops {
         num_rows: usize,
         dim: usize,
         num_codes: usize,
+        row_offset: usize,
         #[define(F, I)] _dtypes: [ElemType; 2],
     ) {
         let cube = CUBE_POS_X as usize;
@@ -141,7 +212,7 @@ mod cube_ops {
 
                 if active {
                     // `z[row][d]` uniform per warp -> broadcast, bukan beban per-lane.
-                    let z_row = row * z_row_stride + d_start;
+                    let z_row = (row_offset + row) * z_row_stride + d_start;
                     let mut d = 0usize;
                     while d < d_len {
                         acc += sm_e[lane * E_TILE_STRIDE + d] * z[z_row + d];
@@ -182,7 +253,7 @@ mod cube_ops {
                 }
                 k += 1;
             }
-            out[row] = I::cast_from(usize::cast_from(sm_idx[base + best]));
+            out[row_offset + row] = I::cast_from(usize::cast_from(sm_idx[base + best]));
         }
     }
 }
@@ -219,7 +290,7 @@ impl FusedArgminOps for CubeBackend {
     }
 }
 
-/// Host: siapkan argumen, jalankan kernel, kembalikan tensor indeks `[N]`.
+/// Host: siapkan argumen, jalankan kernel (per chunk baris), kembalikan `[N]`.
 fn launch_fused_argmin(z: CubeTensor, e: CubeTensor, bias: CubeTensor) -> CubeTensor {
     // Kernel mengindeks baris secara manual, jadi butuh layout physical row-major.
     let z = into_contiguous(z);
@@ -234,34 +305,47 @@ fn launch_fused_argmin(z: CubeTensor, e: CubeTensor, bias: CubeTensor) -> CubeTe
 
     let client = z.client.clone();
     let device = z.device.clone();
-    let out = empty_device_dtype(client, device, Shape::new([rows]), out_dtype);
+    let out = empty_device_dtype(
+        client.clone(),
+        device.clone(),
+        Shape::new([rows]),
+        out_dtype,
+    );
 
     // Pemanggil menjaga `codes > 0` dan `dim > 0`; tanpa baris tidak ada kerja.
-    if rows == 0 || codes == 0 || dim == 0 {
+    if rows == 0 {
         return out;
     }
+    if codes == 0 || dim == 0 {
+        // Jaga-jaga: kernel akan membaca `e`/`z` di luar batas bila salah satunya nol.
+        return zeros_client(client, device, Shape::new([rows]), out_dtype);
+    }
 
-    let cubes = rows.div_ceil(ROWS_PER_CUBE);
-    let cube_count = CubeCount::Static(cubes as u32, 1, 1);
-    let cube_dim = CubeDim::new_1d(THREADS_PER_CUBE as u32);
-
-    let client = out.client.clone();
-    fused_argmin_kernel::launch(
-        &client,
-        cube_count,
-        cube_dim,
-        z.into_tensor_arg(),
-        e.into_tensor_arg(),
-        bias.into_tensor_arg(),
-        out.clone().into_tensor_arg(),
-        rows,
-        dim,
-        codes,
-        [
-            dtype_to_storage_type(z_dtype),
-            dtype_to_storage_type(out_dtype),
-        ],
-    );
+    let plan = plan_launch(rows);
+    let mut start = 0usize;
+    while start < rows {
+        let end = (start + plan.rows_per_launch).min(rows);
+        let chunk_rows = end - start;
+        let cubes = chunk_rows.div_ceil(ROWS_PER_CUBE);
+        fused_argmin_kernel::launch(
+            &client,
+            CubeCount::Static(cubes as u32, 1, 1),
+            CubeDim::new_1d(THREADS_PER_CUBE as u32),
+            z.clone().into_tensor_arg(),
+            e.clone().into_tensor_arg(),
+            bias.clone().into_tensor_arg(),
+            out.clone().into_tensor_arg(),
+            chunk_rows,
+            dim,
+            codes,
+            start,
+            [
+                dtype_to_storage_type(z_dtype),
+                dtype_to_storage_type(out_dtype),
+            ],
+        );
+        start = end;
+    }
 
     out
 }
@@ -269,21 +353,29 @@ fn launch_fused_argmin(z: CubeTensor, e: CubeTensor, bias: CubeTensor) -> CubeTe
 /// Device ini device CubeCL yang bisa menjalankan kernel?
 pub fn is_cube_device(device: &Device) -> bool {
     #[cfg(feature = "cuda")]
-    return matches!(device.as_dispatch(), burn::backend::DispatchDevice::Cube(_));
-    #[cfg(not(feature = "wgpu"))]
+    {
+        matches!(device.as_dispatch(), burn::backend::DispatchDevice::Cube(_))
+    }
+    #[cfg(not(feature = "cuda"))]
     {
         let _ = device;
         false
     }
 }
 
-/// `argmax_j (z · e_j + bias_j)` terfusi, atau `None` bila device/dtype tak cocok.
+/// `argmax_j (z · e_j + bias_j)` terfusi, atau `None` bila tak dapat dijalankan.
 ///
-/// `None` berarti pemanggil harus memakai matmul + argmax biasa: device bukan
-/// CubeCL, dtype bukan `f32`, atau `z` masih membawa graf autodiff (kernel ini tak
-/// bisa dibalik, dan ekstensi backend sengaja tidak mendaftar `Autodiff`).
+/// `None` berarti pemanggil harus memakai matmul + argmax biasa. Dua alasan:
+///
+/// 1. Device bukan CubeCL, atau salah satu tensor bukan `f32`, atau `z` masih
+///    membawa graf autodiff (kernel ini tak bisa dibalik, dan ekstensi backend
+///    sengaja tidak mendaftar `Autodiff`).
+/// 2. Bentuk tak cocok (`dim` `z` ≠ `dim` `e`, `len(bias)` ≠ `len(e)`, atau `dim`/
+///    `codes` nol) atau ketiga tensor berada di device berbeda. Ini jaga-jaga agar
+///    kernel tak pernah membaca memori di luar batas.
 pub fn try_fused_argmin(z: &Tensor<2>, e: &Tensor<2>, bias: &Tensor<1>) -> Option<Tensor<1, Int>> {
-    if z.dtype() != DType::F32 || z.is_require_grad() || !is_cube_device(&z.device()) {
+    let same_device = z.device() == e.device() && z.device() == bias.device();
+    if !same_device || !args_compatible(z, e, bias) || !is_cube_device(&z.device()) {
         return None;
     }
 
@@ -299,12 +391,8 @@ pub fn try_fused_argmin(z: &Tensor<2>, e: &Tensor<2>, bias: &Tensor<1>) -> Optio
 /// `argmin` terfusi untuk `z` `[N, D]` terhadap codebook `e` `[V, D]`.
 ///
 /// Bias `-0.5 * ||e_j||^2` dihitung di sini; untuk pelatihan pakai
-/// [`fused_argmin_bias`] dengan `e_sq` yang sudah di-cache.
-///
-/// # Panics
-///
-/// Panik bila device bukan CubeCL atau dtype bukan `f32`; pakai
-/// [`try_fused_argmin`] bila perlu fallback.
+/// [`fused_argmin_bias`] dengan `e_sq` yang sudah di-cache. Jatuh ke matmul +
+/// argmax biasa bila device bukan CubeCL atau dtype bukan `f32`.
 pub fn fused_argmin(z: Tensor<2>, e: Tensor<2>) -> Tensor<1, Int> {
     let e_sq = (e.clone() * e.clone()).sum_dim(1).reshape([e.dims()[0]]);
     let bias = e_sq.mul_scalar(-0.5);
@@ -313,15 +401,19 @@ pub fn fused_argmin(z: Tensor<2>, e: Tensor<2>) -> Tensor<1, Int> {
 
 /// `argmin` terfusi dengan bias siap pakai (`-0.5 * ||e_j||^2`).
 ///
-/// # Panics
-///
-/// Panik bila device bukan CubeCL atau dtype bukan `f32`.
+/// Bila [`try_fused_argmin`] menolak (device bukan CubeCL, dtype bukan `f32`,
+/// bentuk tak cocok), jatuh ke matmul + `argmax` biasa — hasilnya identik.
 pub fn fused_argmin_bias(z: Tensor<2>, e: Tensor<2>, bias: Tensor<1>) -> Tensor<1, Int> {
     try_fused_argmin(&z, &e, &bias).unwrap_or_else(|| {
         // Jalur cadangan: hanya untuk device non-CubeCL, jadi biaya matmul ekstra
-        // tidak pernah muncul pada target CUDA.
+        // tidak pernah muncul pada target CUDA. `bias` wajib ikut, kalau tidak
+        // hasilnya bukan `argmax_j (z·e_j + bias_j)`.
         let rows = z.dims()[0];
-        z.matmul(e.transpose()).argmax(1).reshape([rows])
+        let codes = e.dims()[0];
+        z.matmul(e.transpose())
+            .add(bias.reshape([1, codes]))
+            .argmax(1)
+            .reshape([rows])
     })
 }
 
@@ -334,6 +426,85 @@ mod tests {
         assert_eq!(THREADS_PER_CUBE, ROWS_PER_CUBE * PLANE);
         assert!(E_TILE_STRIDE > D_TILE);
         assert!(CODES_PER_TILE <= PLANE);
+    }
+
+    /// Rencana tuning harus menutup semua baris, kelipatan ukuran cube, dan tak
+    /// melewati batas baris per peluncuran.
+    #[test]
+    fn plan_covers_every_row() {
+        for rows in [0usize, 1, 31, 32, 33, 1000, 65_536, 65_537, 200_000] {
+            let plan = plan_launch(rows);
+            assert_eq!(plan.rows_per_cube, ROWS_PER_CUBE);
+            assert_eq!(plan.rows_per_launch % ROWS_PER_CUBE, 0);
+            assert_eq!(plan.launches, rows.div_ceil(plan.rows_per_launch));
+            assert!(plan.rows_per_launch <= MAX_ROWS_PER_LAUNCH.max(ROWS_PER_CUBE));
+            if rows > 0 {
+                assert!(plan.launches >= 1, "{plan:?}");
+                assert!(
+                    (plan.launches - 1) * plan.rows_per_launch < rows,
+                    "{plan:?}"
+                );
+            }
+        }
+    }
+
+    /// `N` besar dipecah agar satu peluncuran tak melewati batas baris.
+    #[test]
+    fn plan_chunks_large_row_counts() {
+        let plan = plan_launch(4 * MAX_ROWS_PER_LAUNCH);
+        assert!(plan.launches >= 4, "{plan:?}");
+        assert!(plan.rows_per_launch <= MAX_ROWS_PER_LAUNCH);
+    }
+
+    /// Fallback harus menyertakan `bias`: tanpa bias indeksnya beda.
+    #[test]
+    fn fallback_applies_bias() {
+        let device = Device::default();
+        let z = Tensor::<2>::from_floats([[1.0, 0.0]], &device);
+        let e = Tensor::<2>::from_floats([[1.0, 0.0], [0.0, 3.0]], &device);
+        // skor z·eᵀ = [1, 0]; dengan bias [-2, 0] -> [-1, 0] -> argmax = 1.
+        let bias = Tensor::<1>::from_floats([-2.0, 0.0], &device);
+        let got: Vec<i64> = fused_argmin_bias(z, e, bias)
+            .into_data()
+            .try_to_vec::<i64>()
+            .unwrap_or_default();
+        assert_eq!(got, vec![1], "fallback harus memakai bias");
+    }
+
+    /// Bentuk tak cocok harus ditolak sebelum kernel (jaga-jaga batas memori).
+    /// `try_fused_argmin` menambah syarat device CubeCL; di sini yang diuji
+    /// validasi bentuk/dtype/grad yang berlaku di semua device.
+    #[test]
+    fn shapes_are_validated_before_kernel() {
+        let device = Device::default();
+        let z = Tensor::<2>::zeros([4, 3], &device);
+        let e = Tensor::<2>::zeros([5, 3], &device);
+        let bias = Tensor::<1>::zeros([5], &device);
+        assert!(args_compatible(&z, &e, &bias));
+        // `dim` e salah
+        assert!(!args_compatible(
+            &z,
+            &Tensor::<2>::zeros([5, 4], &device),
+            &bias
+        ));
+        // panjang bias salah
+        assert!(!args_compatible(&z, &e, &Tensor::<1>::zeros([4], &device)));
+        // `dim`/`codes` nol ditolak (config tak valid); `rows` nol tetap cocok.
+        assert!(!args_compatible(
+            &z,
+            &Tensor::<2>::zeros([5, 0], &device),
+            &Tensor::<1>::zeros([5], &device)
+        ));
+        assert!(!args_compatible(
+            &z,
+            &Tensor::<2>::zeros([0, 3], &device),
+            &Tensor::<1>::zeros([0], &device)
+        ));
+        assert!(args_compatible(
+            &Tensor::<2>::zeros([0, 3], &device),
+            &e,
+            &bias
+        ));
     }
 }
 
@@ -381,6 +552,26 @@ mod cuda_tests {
                 "rows={rows} dim={dim} codes={codes}"
             );
         }
+    }
+
+    /// Chunk tuning (`rows > MAX_ROWS_PER_LAUNCH`) harus identik dengan `argmax`:
+    /// menguji `row_offset` dan batas antar-peluncuran.
+    #[test]
+    fn fused_chunked_rows_match_argmax() {
+        let device = device();
+        let rows = MAX_ROWS_PER_LAUNCH + 1000;
+        let (dim, codes) = (48, 96);
+        let z = Tensor::<2>::random([rows, dim], Distribution::Normal(0.0, 1.0), &device);
+        let e = Tensor::<2>::random([codes, dim], Distribution::Normal(0.0, 1.0), &device);
+        let e_sq = (e.clone() * e.clone()).sum_dim(1).reshape([codes]);
+        let bias = e_sq.clone().mul_scalar(-0.5);
+
+        let got = fused_argmin_bias(z.clone(), e.clone(), bias);
+        let expected = (z.matmul(e.transpose()) - e_sq.reshape([1, codes]) * 0.5)
+            .argmax(1)
+            .reshape([rows]);
+
+        assert_eq!(ints(got), ints(expected));
     }
 
     #[test]

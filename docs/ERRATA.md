@@ -42,3 +42,17 @@ Format entri:
 - Perbaikan: PRD F1.4.b diperbarui; ADR-003 dicatat.
 - Tes regresi: N/A (dokumentasi)
 - Commit: a50dcbf
+
+## E-006 — kda_step kehilangan suku rank-1
+- Gejala: `kda_step` lama hanya menerapkan diagonal `I − βkkᵀ`, kehilangan `−βk(α⊙k)ᵀS`.
+- Akar masalah: implementasi tidak sesuai rumus PRD F5.2.
+- Perbaikan: `kda_step` diperbaiki + `kda_step_chunkwise` (UT) + tes kesetaraan.
+- Tes regresi: `kda_chunkwise_matches_naive`
+- Commit: (nn-eng)
+
+## E-007 — fallback fused_argmin_bias mengabaikan bias
+- Gejala: fallback `argmax(z·eᵀ)` bukan `argmax(z·eᵀ − ½‖e‖²)`.
+- Akar masalah: bias tidak ditambahkan di jalur fallback.
+- Perbaikan: `+ bias.reshape([1, codes])` + validasi bentar/device.
+- Tes regresi: `fallback_applies_bias`
+- Commit: (nn-eng)

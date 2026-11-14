@@ -25,6 +25,9 @@
 - **F5.4**: RULER needle/multi-key generator — CI hijau.
 - **F7.2**: PTQ quant scheme config (int8/int4/fp8) — CI hijau.
 - **F5.2/F5.3**: KDA linear attention step + NoPE per-block flag — CI hijau.
+- **F6.0**: ADR-009 (representasi multimodal) + crate `vir-modal` (ModalKind, ModalToken/VocabLayout, ModalAsset, PairedSample+JSONL, trait ModalEncoder, budget) — 30 tes lulus.
+- **F7.1**: kernel tuning (chunk launch, autotune hint) + fallback bias fix — CI hijau.
+- **F5.2**: KDA chunkwise (UT) + naive fix — CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).

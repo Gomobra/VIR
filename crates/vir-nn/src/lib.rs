@@ -214,8 +214,13 @@ pub fn quantize_scale(scheme: QuantScheme) -> f32 {
     }
 }
 
-/// KDA (Kimi Linear) step: S_t = (I - β k kᵀ) Diag(α) S_{t-1} + β k vᵀ.
-/// `s` [d_k, d_v], `k` [d_k], `v` [d_v], `alpha` [d_k], `beta` scalar.
+/// KDA (Kimi Linear) satu langkah: `S_t = (I − β k kᵀ)·Diag(α)·S_{t−1} + β k vᵀ`.
+///
+/// Oracle naif (F5.2): satu iterasi per token, `O(d_k²·d_v)` per langkah.
+/// `s` `[d_k, d_v]`, `k`/`alpha` `[d_k]`, `v` `[d_v]`, `beta` skalar.
+///
+/// Catatan: versi awal modul ini hanya menerapkan suku diagonal `I − β k kᵀ`
+/// (tanpa `−β k (α ⊙ k)ᵀ S`), jadi bukan rekurensi PRD F5.2 langkah 1.
 pub fn kda_step(
     s: &[[f32; 8]; 8],
     k: &[f32; 8],
@@ -226,17 +231,102 @@ pub fn kda_step(
     let mut out = [[0.0f32; 8]; 8];
     for i in 0..8 {
         for j in 0..8 {
-            let mut acc = 0.0f32;
+            // (Diag(α)S)_{ij} − β·k_i·(kᵀ·Diag(α)·S)_j + β·k_i·v_j
+            let mut projected = 0.0f32;
             for l in 0..8 {
-                let decay = if i == l {
-                    1.0 - beta * k[l] * k[l]
-                } else {
-                    0.0
-                };
-                acc += decay * alpha[l] * s[l][j];
+                projected += k[l] * alpha[l] * s[l][j];
             }
-            acc += beta * k[i] * v[j];
-            out[i][j] = acc;
+            out[i][j] = alpha[i] * s[i][j] - beta * k[i] * projected + beta * k[i] * v[j];
+        }
+    }
+    out
+}
+
+/// KDA chunkwise (transformasi UT, F5.2): setara [`kda_step`] untuk satu chunk.
+///
+/// `k`/`alpha` `[L][d_k]`, `v` `[L][d_v]`, `beta` `[L]`; `s` state awal chunk.
+/// Panjang efektif = minimum panjang keempat masukan (pemanggil memberi panjang sama).
+/// Kedua jalur identik secara aljabar; pada regime stabil (`‖k‖ = 1`, `β ≤ 1`)
+/// selisih numerik ≈ 1e-7 (lihat tes).
+pub fn kda_step_chunkwise(
+    s: &[[f32; 8]; 8],
+    k: &[[f32; 8]],
+    v: &[[f32; 8]],
+    alpha: &[[f32; 8]],
+    beta: &[f32],
+) -> [[f32; 8]; 8] {
+    let len = k.len().min(v.len()).min(alpha.len()).min(beta.len());
+    if len == 0 {
+        return *s;
+    }
+    let u = kda_chunk_update(s, k, v, alpha, beta, len);
+    kda_chunk_state(s, k, alpha, beta, &u, len)
+}
+
+/// `U` dari `(I + M)·U = W` (forward substitution), dengan `M` strictly lower.
+fn kda_chunk_update(
+    s: &[[f32; 8]; 8],
+    k: &[[f32; 8]],
+    v: &[[f32; 8]],
+    alpha: &[[f32; 8]],
+    beta: &[f32],
+    len: usize,
+) -> Vec<[f32; 8]> {
+    let mut cum = [1.0f32; 8]; // `cum[i] = Π_{r<=t} α_r[i]`
+    let mut u = vec![[0.0f32; 8]; len];
+    for t in 0..len {
+        for i in 0..8 {
+            cum[i] *= alpha[t][i];
+        }
+        // `W[t] = v_t − S_0ᵀ·(cum ⊙ k_t)`.
+        for j in 0..8 {
+            let mut corr = 0.0f32;
+            for i in 0..8 {
+                corr += s[i][j] * cum[i] * k[t][i];
+            }
+            u[t][j] = v[t][j] - corr;
+        }
+        // `g[i] = Π_{r=c+1..t−1} α_r[i]`; produk kosong = 1 saat `c = t−1`.
+        let mut g = [1.0f32; 8];
+        for c in (0..t).rev() {
+            let mut m = 0.0f32;
+            for i in 0..8 {
+                m += k[c][i] * g[i] * alpha[t][i] * k[t][i];
+            }
+            m *= beta[c];
+            for j in 0..8 {
+                u[t][j] -= m * u[c][j];
+            }
+            for i in 0..8 {
+                g[i] *= alpha[c][i];
+            }
+        }
+    }
+    u
+}
+
+/// `S_L = (Π_r α_r)·S_0 + Σ_t (Π_{r>t} α_r)·β_t·k_t·u_tᵀ`.
+fn kda_chunk_state(
+    s: &[[f32; 8]; 8],
+    k: &[[f32; 8]],
+    alpha: &[[f32; 8]],
+    beta: &[f32],
+    u: &[[f32; 8]],
+    len: usize,
+) -> [[f32; 8]; 8] {
+    let mut suffix = [1.0f32; 8]; // `suffix = Π_{r>t} α_r`
+    let mut out = [[0.0f32; 8]; 8];
+    for t in (0..len).rev() {
+        for i in 0..8 {
+            for j in 0..8 {
+                out[i][j] += suffix[i] * beta[t] * k[t][i] * u[t][j];
+            }
+            suffix[i] *= alpha[t][i];
+        }
+    }
+    for i in 0..8 {
+        for j in 0..8 {
+            out[i][j] += suffix[i] * s[i][j];
         }
     }
     out
@@ -267,6 +357,76 @@ mod tests {
         let alpha = [0.9f32; 8];
         let out = kda_step(&s, &k, &v, &alpha, 0.1);
         assert!(out.iter().all(|row| row.iter().all(|x| x.is_finite())));
+    }
+
+    /// LCG deterministik (tanpa dependensi `rand`): nilai di (-1, 1).
+    fn lcg(state: &mut u32) -> f32 {
+        *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (*state as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+
+    fn max_abs_diff(a: &[[f32; 8]; 8], b: &[[f32; 8]; 8]) -> f32 {
+        let mut diff = 0.0f32;
+        for i in 0..8 {
+            for j in 0..8 {
+                diff = diff.max((a[i][j] - b[i][j]).abs());
+            }
+        }
+        diff
+    }
+
+    /// Chunkwise (UT transform) harus setara oracle naif untuk panjang chunk
+    /// berbeda, termasuk sisa chunk dan `L = 1`.
+    #[test]
+    fn kda_chunkwise_matches_naive() {
+        let mut seed = 0x5EED_1234u32;
+        for len in [1usize, 2, 3, 8, 16, 37] {
+            let mut k = vec![[0.0f32; 8]; len];
+            let mut v = vec![[0.0f32; 8]; len];
+            let mut alpha = vec![[0.0f32; 8]; len];
+            let mut beta = vec![0.0f32; len];
+            for t in 0..len {
+                for i in 0..8 {
+                    k[t][i] = lcg(&mut seed);
+                    v[t][i] = lcg(&mut seed);
+                    alpha[t][i] = 0.75 + 0.25 * lcg(&mut seed); // (0.5, 1): stabil
+                    beta[t] = 0.5 + 0.5 * lcg(&mut seed); // (0, 1)
+                }
+                // L2Norm pada `k` (PRD F5.2): ||k|| = 1 -> regime stabil.
+                let norm = k[t].iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
+                for x in k[t].iter_mut() {
+                    *x /= norm;
+                }
+            }
+
+            let start = [[0.0f32; 8]; 8];
+            let mut naive = start;
+            for t in 0..len {
+                naive = kda_step(&naive, &k[t], &v[t], &alpha[t], beta[t]);
+            }
+
+            let mut chunked = start;
+            let mut at = 0usize;
+            while at < len {
+                let end = (at + 3).min(len); // chunk 3 -> sisa ikut teruji
+                chunked = kda_step_chunkwise(
+                    &chunked,
+                    &k[at..end],
+                    &v[at..end],
+                    &alpha[at..end],
+                    &beta[at..end],
+                );
+                at = end;
+            }
+
+            let diff = max_abs_diff(&naive, &chunked);
+            assert!(diff < 1e-5, "len={len} max_diff={diff}");
+        }
+        // chunk kosong: state dikembalikan apa adanya
+        assert_eq!(
+            kda_step_chunkwise(&[[0.0; 8]; 8], &[], &[], &[], &[]),
+            [[0.0; 8]; 8]
+        );
     }
 
     #[test]

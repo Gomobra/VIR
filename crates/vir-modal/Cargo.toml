@@ -1,0 +1,19 @@
+[package]
+name = "vir-modal"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Tipe data dan trait multimodal (PRD F6.0): kode diskret, aset berpasangan, perluasan vocab"
+
+# Standalone `[workspace]` (pola sama dengan crate Burn): crate ini sengaja
+# tidak menjadi anggota workspace root agar bisa `cargo check` di Termux tanpa
+# menarik Burn. Tidak ada dependensi tensor di sini.
+[workspace]
+
+[dependencies]
+vir-common = { path = "../vir-common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+proptest = "1"
