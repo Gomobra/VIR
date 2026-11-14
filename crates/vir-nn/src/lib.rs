@@ -145,6 +145,7 @@ pub struct Block {
     pub mlp: SwiGluMlp,
     pub num_heads: usize,
     pub head_dim: usize,
+    pub use_rope: bool,
 }
 
 impl Block {
@@ -161,6 +162,7 @@ impl Block {
             mlp: SwiGluMlp::new(dim, hidden, device),
             num_heads,
             head_dim,
+            use_rope: true,
         }
     }
 
@@ -169,12 +171,20 @@ impl Block {
         let h = self.num_heads;
         let hd = self.head_dim;
         let xn = self.ln1.forward(x.clone());
-        let q = apply_rope(self.wq.forward(xn.clone()), 10000.0)
-            .reshape([b, t, h, hd])
-            .swap_dims(1, 2);
-        let k = apply_rope(self.wk.forward(xn.clone()), 10000.0)
-            .reshape([b, t, h, hd])
-            .swap_dims(1, 2);
+        let q = if self.use_rope {
+            apply_rope(self.wq.forward(xn.clone()), 10000.0)
+        } else {
+            self.wq.forward(xn.clone())
+        }
+        .reshape([b, t, h, hd])
+        .swap_dims(1, 2);
+        let k = if self.use_rope {
+            apply_rope(self.wk.forward(xn.clone()), 10000.0)
+        } else {
+            self.wk.forward(xn.clone())
+        }
+        .reshape([b, t, h, hd])
+        .swap_dims(1, 2);
         let v = self.wv.forward(xn).reshape([b, t, h, hd]).swap_dims(1, 2);
         let kt = k.clone().swap_dims(2, 3);
         let scores = q.matmul(kt) / (hd as f32).sqrt();
