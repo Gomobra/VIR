@@ -6,4 +6,5 @@ node_modules/
 *.whl
 proptest-regressions
 # Cargo.lock HARUS dikomit (PRD F0.1)
-!Cargo.lock
+!Cargo.locktarget/
+crates/vir-modal/target/
