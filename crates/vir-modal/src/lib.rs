@@ -28,6 +28,7 @@ pub mod asset;
 pub mod budget;
 pub mod connector;
 pub mod encoder;
+pub mod image;
 pub mod kind;
 pub mod sample;
 pub mod sequence;
