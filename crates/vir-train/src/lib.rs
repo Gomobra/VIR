@@ -187,6 +187,71 @@ pub fn grpo_objective(logp: f32, ref_logp: f32, adv: f32, clip: f32, kl_coef: f3
     policy.min(policy_clipped) - kl_coef * kl
 }
 
+/// Checkpoint sederhana: meta JSON + path bobot.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Checkpoint {
+    pub version: String,
+    pub stage: u32,
+    pub step: u64,
+    pub path: String,
+}
+
+impl Checkpoint {
+    pub fn save(&self, dir: &str) -> Result<(), VirError> {
+        let path = format!("{dir}/checkpoint.json");
+        let s = serde_json::to_string(self).map_err(|e| VirError::Internal(e.to_string()))?;
+        std::fs::write(path, s)?;
+        Ok(())
+    }
+    pub fn load(dir: &str) -> Result<Self, VirError> {
+        let path = format!("{dir}/checkpoint.json");
+        let s = std::fs::read_to_string(path)?;
+        serde_json::from_str(&s).map_err(|e| VirError::Internal(e.to_string()))
+    }
+}
+
+/// Trainer dua tahap (skeleton): tahap 1 VQ, tahap 2 generator.
+pub struct Trainer {
+    pub stage: u32,
+    pub step: u64,
+    pub checkpoint_dir: String,
+}
+
+impl Trainer {
+    pub fn new(checkpoint_dir: &str) -> Self {
+        Self {
+            stage: 1,
+            step: 0,
+            checkpoint_dir: checkpoint_dir.to_string(),
+        }
+    }
+
+    /// Latih `steps` langkah (hook nyata menyusul).
+    pub fn train(&mut self, steps: u64) -> Result<(), VirError> {
+        for _ in 0..steps {
+            self.step += 1;
+            if self.step % 1000 == 0 {
+                let ck = Checkpoint {
+                    version: "Vbeta".into(),
+                    stage: self.stage,
+                    step: self.step,
+                    path: self.checkpoint_dir.clone(),
+                };
+                ck.save(&self.checkpoint_dir)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Resume dari checkpoint terakhir.
+    pub fn resume(&mut self) -> Result<(), VirError> {
+        let ck = Checkpoint::load(&self.checkpoint_dir)?;
+        self.stage = ck.stage;
+        self.step = ck.step;
+        Ok(())
+    }
+}
+
 pub fn train_smoke() -> Result<(), VirError> {
     let levels = vec![1usize, 13, 24, 36];
     let w = level_weight(&levels, 0.0);
@@ -230,5 +295,17 @@ mod tests {
     fn grpo_objective_clipped() {
         let o = grpo_objective(0.0, 0.0, 1.0, 0.2, 0.0);
         assert!((o - 1.0).abs() < 1e-6);
+    }
+    #[test]
+    fn checkpoint_save_load_resume() {
+        let dir = std::env::temp_dir().join("vir_ckpt_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dir = dir.to_str().unwrap();
+        let mut t = Trainer::new(dir);
+        t.train(1000).unwrap();
+        let mut t2 = Trainer::new(dir);
+        t2.resume().unwrap();
+        assert_eq!(t2.step, 1000);
+        assert_eq!(t2.stage, 1);
     }
 }
