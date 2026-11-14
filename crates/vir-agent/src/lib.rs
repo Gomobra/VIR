@@ -105,6 +105,29 @@ impl Drop for Repl {
     }
 }
 
+/// LM berbasis closure (untuk root eksternal / callable Python).
+pub struct FnLm<F> {
+    pub f: F,
+}
+
+impl<F> FnLm<F>
+where
+    F: Fn(&str) -> String,
+{
+    pub fn new(f: F) -> Self {
+        Self { f }
+    }
+}
+
+impl<F> LanguageModel for FnLm<F>
+where
+    F: Fn(&str) -> String,
+{
+    fn generate(&self, prompt: &str) -> Result<String, VirError> {
+        Ok((self.f)(prompt))
+    }
+}
+
 /// RLM: loop root menulis kode, dijalankan di REPL (Python), sampai FINAL(...) atau anggaran habis.
 pub struct RlmConfig {
     pub max_depth: usize,
@@ -189,6 +212,12 @@ mod tests {
         let r = run_rlm(&lm, "ctx", &cfg).unwrap();
         assert!(r.final_answer.is_some());
         assert!(r.final_answer.unwrap().contains("FINAL("));
+    }
+
+    #[test]
+    fn fn_lm_closure() {
+        let lm = FnLm::new(|p: &str| format!("echo:{p}"));
+        assert_eq!(lm.generate("hi").unwrap(), "echo:hi");
     }
 
     #[test]
