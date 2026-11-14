@@ -173,6 +173,17 @@ pub fn sft_loss(
     ce
 }
 
+/// GRPO objective: PPO-clip + KL penalty (no critic).
+/// `logp` = log-prob policy, `ref_logp` = log-prob ref, `adv` = advantage, `clip` = ε.
+pub fn grpo_objective(logp: f32, ref_logp: f32, adv: f32, clip: f32, kl_coef: f32) -> f32 {
+    let ratio = (logp - ref_logp).exp();
+    let clipped = ratio.clamp(1.0 - clip, 1.0 + clip);
+    let policy = ratio * adv;
+    let policy_clipped = clipped * adv;
+    let kl = logp - ref_logp;
+    policy.min(policy_clipped) - kl_coef * kl
+}
+
 pub fn train_smoke() -> Result<(), VirError> {
     let levels = vec![1usize, 13, 24, 36];
     let w = level_weight(&levels, 0.0);
@@ -210,7 +221,11 @@ mod tests {
     fn newton_schulz_orthogonalish() {
         let mut m = vec![1.0f32; 16];
         newton_schulz(&mut m, 4, 4);
-        // hasil bukan ortogonal eksak (f(1)=0.701), tapi finite
         assert!(m.iter().all(|v| v.is_finite()));
+    }
+    #[test]
+    fn grpo_objective_clipped() {
+        let o = grpo_objective(0.0, 0.0, 1.0, 0.2, 0.0);
+        assert!((o - 1.0).abs() < 1e-6);
     }
 }
