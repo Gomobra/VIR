@@ -28,6 +28,8 @@
 - **F6.0**: ADR-009 (representasi multimodal) + crate `vir-modal` (ModalKind, ModalToken/VocabLayout, ModalAsset, PairedSample+JSONL, trait ModalEncoder, budget) — 30 tes lulus.
 - **F7.1**: kernel tuning (chunk launch, autotune hint) + fallback bias fix — CI hijau.
 - **F5.2**: KDA chunkwise (UT) + naive fix — CI hijau.
+- **F6.1/F6.2**: Connector (MLP) + ModalTokenizer trait — CI hijau.
+- **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
