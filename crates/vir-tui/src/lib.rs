@@ -101,7 +101,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('q') => break,
                     KeyCode::Char(c) if c.is_ascii_digit() => {
                         let n = c.to_digit(10).unwrap_or(0) as usize;
-                        if n >= 1 && n <= 8 {
+                        if (1..=8).contains(&n) {
                             screen = Screen::from_index(n - 1);
                         }
                     }
