@@ -188,6 +188,22 @@ impl Block {
     }
 }
 
+/// PTQ config (F7.2): quant scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuantScheme {
+    Int8,
+    Int4,
+    Fp8,
+}
+
+pub fn quantize_scale(scheme: QuantScheme) -> f32 {
+    match scheme {
+        QuantScheme::Int8 => 127.0,
+        QuantScheme::Int4 => 7.0,
+        QuantScheme::Fp8 => 448.0,
+    }
+}
+
 pub fn nn_smoke() -> Result<(), VirError> {
     let device = Device::default();
     let blk = Block::new(64, 4, &device);
