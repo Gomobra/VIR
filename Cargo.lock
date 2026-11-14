@@ -2214,6 +2214,7 @@ version = "0.1.0"
 dependencies = [
  "landlock",
  "libc",
+ "nix 0.29.0",
  "seccompiler",
  "vir-common",
 ]

@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 vir-common = { path = "../vir-common" }
 libc = "0.2"
+nix = { version = "0.29", features = ["resource", "process", "signal"] }
 landlock = { version = "0.4", optional = true }
 seccompiler = { version = "0.4", optional = true }
 

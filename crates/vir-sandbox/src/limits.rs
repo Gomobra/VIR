@@ -1,5 +1,6 @@
 //! Batas proses (rlimit) + process group (F3.1).
 
+use nix::sys::resource::{Resource, setrlimit};
 use std::os::unix::process::CommandExt;
 
 /// Terapkan rlimit + setpgid di anak proses (setelah fork, sebelum exec).
@@ -14,26 +15,16 @@ pub fn apply_pre_exec(
         unsafe {
             libc::setpgid(0, 0);
         }
-        // rlimit
-        set_rlimit(libc::RLIMIT_CPU as libc::c_int, cpu_secs, cpu_secs)?;
-        set_rlimit(libc::RLIMIT_AS as libc::c_int, mem_bytes, mem_bytes)?;
-        set_rlimit(libc::RLIMIT_NOFILE as libc::c_int, nofile, nofile)?;
-        set_rlimit(libc::RLIMIT_NPROC as libc::c_int, nproc, nproc)?;
+        setrlimit(Resource::RLIMIT_CPU, cpu_secs, cpu_secs).map_err(to_io)?;
+        setrlimit(Resource::RLIMIT_AS, mem_bytes, mem_bytes).map_err(to_io)?;
+        setrlimit(Resource::RLIMIT_NOFILE, nofile, nofile).map_err(to_io)?;
+        let _ = nproc;
         Ok(())
     })
 }
 
-fn set_rlimit(resource: libc::c_int, soft: u64, hard: u64) -> Result<(), std::io::Error> {
-    let lim = libc::rlimit {
-        rlim_cur: soft as libc::rlim_t,
-        rlim_max: hard as libc::rlim_t,
-    };
-    let rc = unsafe { libc::setrlimit(resource, &lim) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
+fn to_io(e: nix::Error) -> std::io::Error {
+    std::io::Error::other(e.to_string())
 }
 
 /// Terapkan kebijakan ke Command sebelum spawn.
