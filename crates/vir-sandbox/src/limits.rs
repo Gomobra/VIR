@@ -15,10 +15,10 @@ pub fn apply_pre_exec(
             libc::setpgid(0, 0);
         }
         // rlimit
-        set_rlimit(libc::RLIMIT_CPU, cpu_secs, cpu_secs)?;
-        set_rlimit(libc::RLIMIT_AS, mem_bytes, mem_bytes)?;
-        set_rlimit(libc::RLIMIT_NOFILE, nofile, nofile)?;
-        set_rlimit(libc::RLIMIT_NPROC, nproc, nproc)?;
+        set_rlimit(libc::RLIMIT_CPU as libc::c_int, cpu_secs, cpu_secs)?;
+        set_rlimit(libc::RLIMIT_AS as libc::c_int, mem_bytes, mem_bytes)?;
+        set_rlimit(libc::RLIMIT_NOFILE as libc::c_int, nofile, nofile)?;
+        set_rlimit(libc::RLIMIT_NPROC as libc::c_int, nproc, nproc)?;
         Ok(())
     })
 }
