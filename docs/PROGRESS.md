@@ -20,6 +20,10 @@
 - **F1.8**: `full_smoke` (VQ+generator+loss mini) di vir-model — tes lulus di CI.
 - **F3.2**: REPL stateful (persistent CPython, state persists antar eksekusi) — tes lulus di CI.
 - **F3.6/F3.7**: Python namespaces (vir.text/mfs/agent) + e2e tests (MFS+RLM) — CI hijau.
+- **F3.8**: TUI multi-screen (dashboard/train/generate/memory/rlm/eval/logs/settings) + tabs — CI hijau.
+- **F4.3**: GRPO objective (PPO-clip + KL) — CI hijau.
+- **F5.4**: RULER needle/multi-key generator — CI hijau.
+- **F7.2**: PTQ quant scheme config (int8/int4/fp8) — CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
