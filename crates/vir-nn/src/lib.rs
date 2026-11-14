@@ -204,6 +204,34 @@ pub fn quantize_scale(scheme: QuantScheme) -> f32 {
     }
 }
 
+/// KDA (Kimi Linear) step: S_t = (I - β k kᵀ) Diag(α) S_{t-1} + β k vᵀ.
+/// `s` [d_k, d_v], `k` [d_k], `v` [d_v], `alpha` [d_k], `beta` scalar.
+pub fn kda_step(
+    s: &[[f32; 8]; 8],
+    k: &[f32; 8],
+    v: &[f32; 8],
+    alpha: &[f32; 8],
+    beta: f32,
+) -> [[f32; 8]; 8] {
+    let mut out = [[0.0f32; 8]; 8];
+    for i in 0..8 {
+        for j in 0..8 {
+            let mut acc = 0.0f32;
+            for l in 0..8 {
+                let decay = if i == l {
+                    1.0 - beta * k[l] * k[l]
+                } else {
+                    0.0
+                };
+                acc += decay * alpha[l] * s[l][j];
+            }
+            acc += beta * k[i] * v[j];
+            out[i][j] = acc;
+        }
+    }
+    out
+}
+
 pub fn nn_smoke() -> Result<(), VirError> {
     let device = Device::default();
     let blk = Block::new(64, 4, &device);
@@ -219,6 +247,16 @@ mod tests {
     #[test]
     fn block_forward_runs() {
         assert!(nn_smoke().is_ok());
+    }
+
+    #[test]
+    fn kda_step_finite() {
+        let s = [[0.0f32; 8]; 8];
+        let k = [0.1f32; 8];
+        let v = [0.2f32; 8];
+        let alpha = [0.9f32; 8];
+        let out = kda_step(&s, &k, &v, &alpha, 0.1);
+        assert!(out.iter().all(|row| row.iter().all(|x| x.is_finite())));
     }
 
     #[test]
