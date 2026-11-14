@@ -32,7 +32,7 @@
 - **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
 - **F6.5**: video frame sampler (fixed + scene change) — CI hijau.
 - **F7.3**: release workflow (wheels on tag) + docs/API.md — CI hijau.
-- **Perbaikan audit**: mask block-diagonal/prefix-LM terpasang di attention; poisson RNG deterministik; sft_loss pakai prefix_len; unwrap dihapus dari vir-data/vir-cli; TUI dashboard nyata (JSONL tail + braille loss chart + status); RLM pakai REPL stateful; trainer 2-stage + checkpoint save/load/resume; sandbox rlimit (CPU/AS/NOFILE) + setpgid via nix (portable).
+- **Subagent work**: vir-model (generator/recurrent/block_ar/sampling/loss/scale/smoke modules), vir-cli (cmd_train/generate/eval/mem/rlm/smoke + backend), vir-sandbox (seccomp-bpf + syscalls + limits), vir-py (allow_threads + namespace), TUI full screens. CI hijau.
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
