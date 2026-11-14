@@ -2,7 +2,7 @@
 allow_tf32 = true
 
 [cubecl.autotune]
-level = "balanced"
+level = "extensive"
 
 [fusion]
 logger = { level = "disabled" }
