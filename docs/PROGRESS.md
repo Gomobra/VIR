@@ -32,6 +32,7 @@
 - **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
 - **F6.5**: video frame sampler (fixed + scene change) — CI hijau.
 - **F7.3**: release workflow (wheels on tag) + docs/API.md — CI hijau.
+- **Perbaikan audit**: mask block-diagonal/prefix-LM terpasang di attention; poisson RNG deterministik; sft_loss pakai prefix_len; unwrap dihapus dari vir-data/vir-cli; TUI dashboard nyata (JSONL tail + braille loss chart + status).
 
 ## Bukti
 - CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
