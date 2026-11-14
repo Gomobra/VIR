@@ -80,4 +80,3 @@ pub fn encode_video(
     out.push(markers.close);
     Ok(out)
 }
-

@@ -1,21 +1,27 @@
-//! Trait encoder modalitas (ADR-009 §1 jalur fitur, §7 pemisahan tensor).
+//! Trait encoder modalitas (ADR-009 §1 jalur fitur, §7 pemisahan tensor),
+//! spesifikasi encoder beku, dan prefix bersama (F6.1/F6.2).
 //!
-//! Crate ini **tidak** memuat tensor: implementor (nanti di `vir-nn`/
-//! `vir-model`) memilih tipe `Output` sendiri, mis. `Tensor<3>` fitur atau
-//! `Vec<Vec<u32>>` kode. Yang dijamin trait ini: spesifikasi encoder dapat
-//! direproduksi, anggaran token bisa dihitung lebih dulu, dan encoder
-//! pemahaman **beku** secara bawaan.
+//! Crate ini **tidak** memuat tensor: encoder beku menghasilkan satu vektor
+//! fitur per posisi, lalu [`crate::connector::Connector`] yang terlatih
+//! memetakannya menjadi prefix. Yang dijamin modul ini: spesifikasi encoder
+//! dapat direproduksi, anggaran token bisa dihitung **sebelum** encoder
+//! dijalankan (PRD F6.1 langkah 2), dan encoder pemahaman **beku** secara
+//! bawaan (ADR-009 §1).
+//!
+//! Encoder gambar ([`crate::vision::ImageEncoder`]) dan audio
+//! ([`crate::speech::AudioEncoder`]) mengimplementasikan trait ini; keduanya
+//! menghasilkan [`Prefix`] yang sama bentuknya.
 
-use serde::{Deserialize, Serialize};
 use vir_common::VirError;
 
 use crate::asset::ModalAsset;
 use crate::budget::{self, DEFAULT_PATCH, SPEECH_POSITIONS_PER_SEC};
+
 use crate::kind::ModalKind;
 
 /// Spesifikasi encoder beku: keluarga, revisi, dan parameter yang menentukan
 /// anggaran token. Disimpan bersama checkpoint agar eksperimen dapat diulang.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EncoderSpec {
     pub kind: ModalKind,
     /// Keluarga model (mis. `siglip`, `whisper`). Verifikasi di F6.1/F6.2.
@@ -65,6 +71,16 @@ impl EncoderSpec {
         }
     }
 
+    /// Encoder visi SigLIP-style 224/16 (196 token) — kandidat F6.1.
+    pub fn siglip(patch: u32) -> Self {
+        Self::vision("siglip", "webli-en-patch16", patch)
+    }
+
+    /// Encoder ucapan Whisper-style 16 kHz, hop 160, stride 2 (50 posisi/s).
+    pub fn whisper() -> Self {
+        Self::speech("whisper", "large-v3-turbo", 160, 2, 16_000)
+    }
+
     pub fn validate(&self) -> Result<(), VirError> {
         if self.family.trim().is_empty() || self.revision.trim().is_empty() {
             return Err(VirError::Config(
@@ -102,6 +118,22 @@ impl EncoderSpec {
         f64::from(self.sample_rate) as f32 / (f64::from(self.patch) * f64::from(self.stride)) as f32
     }
 
+    /// Jumlah frame keluaran untuk `duration_ms` audio pada `sample_rate` aset.
+    pub fn frames(&self, duration_ms: u32, sample_rate: u32) -> Result<usize, VirError> {
+        if self.kind != ModalKind::Audio {
+            return Err(VirError::Config("frames hanya untuk encoder audio".into()));
+        }
+        if duration_ms == 0 || sample_rate == 0 {
+            return Err(VirError::Config("durasi/sample rate audio 0".into()));
+        }
+        if self.patch == 0 || self.stride == 0 {
+            return Err(VirError::Config("hop/stride encoder audio 0".into()));
+        }
+        let samples = u64::from(duration_ms) * u64::from(sample_rate) / 1_000;
+        let frames = samples / u64::from(self.patch);
+        Ok(frames.div_ceil(u64::from(self.stride)) as usize)
+    }
+
     /// Label singkat untuk log dan manifest.
     pub fn describe(&self) -> String {
         format!(
@@ -111,7 +143,50 @@ impl EncoderSpec {
     }
 }
 
-/// Encoder satu modalitas. `Output` ditentukan implementor (tensor/kode).
+/// Prefix hasil konektor: `tokens` baris berdimensi `d_model` (row-major).
+///
+/// Ini keluaran bersama jalur fitur gambar ([`crate::vision::ImageEncoder`])
+/// dan audio ([`crate::speech::AudioEncoder`]): ADR-009 §1 menjanjikan satu
+/// bentuk prefix untuk semua encoder beku.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Prefix {
+    pub rows: Vec<f32>,
+    pub tokens: usize,
+    pub d_model: usize,
+}
+
+impl Prefix {
+    pub fn new(rows: Vec<f32>, tokens: usize, d_model: usize) -> Self {
+        Self {
+            rows,
+            tokens,
+            d_model,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tokens == 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.tokens
+    }
+
+    /// Baris ke-`i`, atau `None` bila di luar jangkauan.
+    pub fn row(&self, i: usize) -> Option<&[f32]> {
+        if i >= self.tokens {
+            return None;
+        }
+        Some(&self.rows[i * self.d_model..(i + 1) * self.d_model])
+    }
+
+    /// Total elemen (untuk alokasi buffer di sisi tensor).
+    pub fn elements(&self) -> usize {
+        self.tokens * self.d_model
+    }
+}
+
+/// Encoder satu modalitas. `Output` ditentukan implementor.
 pub trait ModalEncoder {
     type Output;
 
@@ -121,8 +196,11 @@ pub trait ModalEncoder {
     /// Anggaran token prefix untuk aset ini, dihitung tanpa menjalankan encoder.
     fn token_budget(&self, asset: &ModalAsset) -> Result<usize, VirError>;
 
-    /// Bangun representasi aset (jalur fitur: vektor konektor; jalur kode: ID).
-    fn encode(&self, asset: &ModalAsset) -> Result<Self::Output, VirError>;
+    /// Panjang data mentah yang dibutuhkan aset (piksel `H·W·c` atau PCM mono).
+    fn raw_len(&self, asset: &ModalAsset) -> Result<usize, VirError>;
+
+    /// Bangun prefix dari data mentah aset (jalur fitur).
+    fn encode(&self, asset: &ModalAsset, data: &[f32]) -> Result<Self::Output, VirError>;
 
     /// Encoder pemahaman beku secara bawaan (ADR-009 §1).
     fn is_frozen(&self) -> bool {
@@ -149,4 +227,3 @@ pub fn spec_budget(spec: &EncoderSpec, asset: &ModalAsset) -> Result<usize, VirE
 pub const fn default_patch() -> u32 {
     DEFAULT_PATCH
 }
-

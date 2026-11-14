@@ -131,4 +131,3 @@ pub fn prefix_budget(spec: &EncoderSpec, asset: &ModalAsset) -> Result<usize, Vi
         )),
     }
 }
-

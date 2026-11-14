@@ -256,4 +256,3 @@ pub fn read_jsonl(input: &str, allow_unknown_license: bool) -> Result<Vec<Paired
     }
     Ok(out)
 }
-

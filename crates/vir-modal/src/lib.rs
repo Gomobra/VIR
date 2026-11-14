@@ -1,9 +1,11 @@
-//! Tipe data dan trait multimodal (PRD F6.0, ADR-009).
+//! Tipe data dan trait multimodal (PRD F6.0–F6.5, ADR-009).
 //!
-//! Crate ini adalah **landasan data** untuk Fase 6: ia mendefinisikan
-//! representasi modalitas yang dipakai bersama oleh generator, tokenizer, codec,
-//! dan loader data. Tidak ada tensor di sini (aturan R1/R7 + Termux): encoder
-//! dan decoder nyata mengimplementasikan [`ModalEncoder`] di crate tensor.
+//! Crate ini adalah **landasan data + algoritma ringan** untuk Fase 6: ia
+//! mendefinisikan representasi modalitas yang dipakai bersama oleh generator,
+//! tokenizer, codec, dan loader data. Tidak ada tensor dan tidak ada Burn
+//! (aturan R1/R7 + Termux): semua numerik memakai `Vec<f32>` row-major, dan
+//! jaringan berat (SigLIP, Whisper penuh, vocoder SNAC) tinggal di crate tensor
+//! dengan bobot `safetensors`.
 //!
 //! | Modul | Isi |
 //! |---|---|
@@ -12,7 +14,17 @@
 //! | [`sequence`] | perakitan urutan level-major + penanda waktu video |
 //! | [`asset`] | [`ModalAsset`] — referensi file + metadata anggaran token |
 //! | [`sample`] | [`PairedSample`] — JSONL berpasangan + lisensi |
-//! | [`encoder`] | trait [`ModalEncoder`] + [`EncoderSpec`] (encoder beku) |
+//! | [`encoder`] | trait [`ModalEncoder`] + [`EncoderSpec`] + [`Prefix`] |
+//! | [`vision`] | [`ImageEncoder`] — patchify + konektor (F6.1) |
+//! | [`speech`] | [`AudioEncoder`] Whisper-style: log-mel + konektor (F6.2) |
+//! | [`mel`] | front-end log-mel + FFT radix-2 (tanpa dependensi) |
+//! | [`image`] | [`FsqQuantizer`] + [`ModalTokenizer`] (F6.3) |
+//! | [`multiscale`] | [`MultiScaleTokenizer`] — level 0 kasar → halus (F6.3) |
+//! | [`decode`] | trait [`ImageDecoder`] + [`LinearImageDecoder`] (F6.3) |
+//! | [`audio`] | [`Rvq`] residual (F6.4) |
+//! | [`snac`] | [`SnacCodec`] + pemeriksaan bitrate 984 bps (F6.4) |
+//! | [`pool`] | operator `Down_k`/`R_k` (average pooling, nearest) |
+//! | [`video`] | sampler frame + prefix per frame (F6.5) |
 //! | [`budget`] | rumus anggaran token (196/576, 500, 820, bitrate SNAC) |
 //!
 //! Keputusan yang sudah dikunci (ADR-009):
@@ -28,28 +40,45 @@ pub mod asset;
 pub mod audio;
 pub mod budget;
 pub mod connector;
+pub mod decode;
 pub mod encoder;
 pub mod image;
 pub mod kind;
+pub mod mel;
+pub mod multiscale;
+pub mod pool;
 pub mod sample;
 pub mod sequence;
+pub mod snac;
+pub mod speech;
 pub mod token;
 pub mod video;
+pub mod vision;
 
 pub use asset::ModalAsset;
+pub use audio::Rvq;
 pub use budget::{
-    audio_bitrate, audio_codes, audio_understanding_tokens, image_tokens, prefix_budget,
-    snac24k_bitrate, snac24k_codes, video_tokens, DEFAULT_PATCH, SNAC24K_RATES, SNAC_CODEBOOK_BITS,
-    SPEECH_POSITIONS_PER_SEC,
+    DEFAULT_PATCH, SNAC_CODEBOOK_BITS, SNAC24K_RATES, SPEECH_POSITIONS_PER_SEC, audio_bitrate,
+    audio_codes, audio_understanding_tokens, image_tokens, prefix_budget, snac24k_bitrate,
+    snac24k_codes, video_tokens,
 };
-pub use encoder::{budget_of, spec_budget, EncoderSpec, ModalEncoder};
+pub use connector::{Connector, Linear, ModalTokenizer};
+pub use decode::{ImageDecoder, LinearImageDecoder};
+pub use encoder::{EncoderSpec, ModalEncoder, Prefix, budget_of, spec_budget};
+pub use image::FsqQuantizer;
 pub use kind::ModalKind;
-pub use sample::{read_jsonl, PairedSample, Segment, SegmentRole, UNKNOWN_LICENSE};
+pub use mel::{MelSpec, log_mel};
+pub use multiscale::MultiScaleTokenizer;
+pub use sample::{PairedSample, Segment, SegmentRole, UNKNOWN_LICENSE, read_jsonl};
 pub use sequence::{encode_codes, encode_video};
+pub use snac::{SnacCodec, SnacConfig};
+pub use speech::AudioEncoder;
 pub use token::{
-    build_layout, CodebookKey, Markers, ModalToken, Region, Span, VocabLayout, DEFAULT_CODEBOOK,
-    SPAN_ALIGN, TIME_MARKERS,
+    CodebookKey, DEFAULT_CODEBOOK, Markers, ModalToken, Region, SPAN_ALIGN, Span, TIME_MARKERS,
+    VocabLayout, build_layout,
 };
+pub use video::{FrameSelection, encode_frames, sample_fixed, sample_scene_change, select_frames};
+pub use vision::ImageEncoder;
 
 use vir_common::VirError;
 
@@ -71,3 +100,15 @@ pub fn layout_smoke() -> Result<usize, VirError> {
     Ok(ids.len())
 }
 
+/// Uji asap F6.3/F6.4: tokenizer gambar FSQ → decoder, dan codec audio SNAC.
+pub fn modal_smoke() -> Result<(usize, usize), VirError> {
+    let fsq = FsqQuantizer::identity(vec![8; 4]);
+    let lengths = MultiScaleTokenizer::grid_lengths(16, 2)?;
+    let tokenizer = MultiScaleTokenizer::new(fsq, lengths)?;
+    let latent = vec![0.1f32; 16 * 4];
+    let levels = tokenizer.encode(&latent)?;
+    let back = tokenizer.decode(&levels)?;
+    let codec = SnacCodec::snac24k()?;
+    let codes = codec.encode(&vec![0.0f32; codec.cfg.dim * 12])?;
+    Ok((back.len(), codes.len()))
+}

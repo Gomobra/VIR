@@ -91,4 +91,3 @@ impl FromStr for ModalKind {
         }
     }
 }
-
