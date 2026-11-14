@@ -3,7 +3,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use vir_common::VirError;
-use vir_sandbox::{Policy, RunResult, run};
 
 pub trait LanguageModel {
     fn generate(&self, prompt: &str) -> Result<String, VirError>;
@@ -166,6 +165,7 @@ pub fn run_rlm(
     let mut calls = 0usize;
     let mut steps = 0usize;
     let mut final_answer = None;
+    let mut repl = Repl::start()?;
 
     while calls < cfg.max_calls && final_answer.is_none() {
         calls += 1;
@@ -173,9 +173,10 @@ pub fn run_rlm(
         let code = root.generate(&prompt)?;
         steps += 1;
 
-        let res: RunResult = run("python3", &["-c", &code], &Policy::default())?;
-        if let Some(pos) = res.stdout.find("FINAL(") {
-            final_answer = Some(res.stdout[pos..].to_string());
+        // jalankan di REPL stateful (variabel bertahan antar langkah)
+        let out = repl.exec(&code)?;
+        if let Some(pos) = out.find("FINAL(") {
+            final_answer = Some(out[pos..].to_string());
             break;
         }
         if steps >= cfg.max_depth {
