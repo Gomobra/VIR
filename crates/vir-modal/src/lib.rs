@@ -25,6 +25,7 @@
 //! 4. Data berpasangan = JSONL, `license` wajib (`unknown` ditolak bawaan).
 
 pub mod asset;
+pub mod audio;
 pub mod budget;
 pub mod connector;
 pub mod encoder;
