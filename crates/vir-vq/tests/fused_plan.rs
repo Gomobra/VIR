@@ -10,7 +10,7 @@ fn device() -> burn::tensor::Device {
 }
 
 fn read_int(t: &Tensor<1, Int>) -> Vec<i32> {
-    t.to_data().to_vec::<i32>().expect("i32")
+    t.to_data().try_to_vec::<i32>().expect("i32")
 }
 
 fn cb_4x2() -> Codebook {

@@ -3,7 +3,7 @@
 mod support;
 
 use burn::tensor::Tensor;
-use support::{read_int1, read2, tensor2};
+use support::{read_int1, tensor2};
 use vir_vq::fsq::{Fsq, FsqConfig, Rfsq, RfsqNorm};
 use vir_vq::quantizer::Quantizer;
 
@@ -62,8 +62,8 @@ fn fsq_roundtrip_depan_belakang_konsisten() {
     let u = tensor2(5, 4, &data);
     let q = fsq.quantize(u);
     let back = fsq.lookup(q.indices);
-    let a = read2(&q.quantized.reshape([60]));
-    let b = read2(&back.reshape([60]));
+    let a = support::read1(&q.quantized.reshape([60]));
+    let b = support::read1(&back.reshape([60]));
     for (x, y) in a.iter().zip(b.iter()) {
         assert!((x - y).abs() < 1e-3, "lookup(quantize) beda: {x} vs {y}");
     }

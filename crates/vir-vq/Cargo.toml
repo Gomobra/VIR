@@ -12,6 +12,10 @@ burn-cuda = { version = "0.22", optional = true, features = ["autotune", "fusion
 # `cuda`, dan `burn-cuda` yang membawa `cubecl/cuda` lewat `burn-backend`.
 burn-cubecl = { version = "0.22", optional = true, default-features = false, features = ["std", "fusion"] }
 rand = "0.8"
+
+[dev-dependencies]
+rand_core = "0.6"
+
 [workspace]
 
 [features]

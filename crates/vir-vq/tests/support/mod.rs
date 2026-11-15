@@ -8,6 +8,26 @@ use burn::tensor::{Int, Tensor, TensorData};
 /// RNG linear congruential sederhana (deterministik, tanpa dependensi).
 pub struct Lcg(u64);
 
+impl rand_core::RngCore for Lcg {
+    fn next_u32(&mut self) -> u32 {
+        self.next_u64() as u32
+    }
+    fn next_u64(&mut self) -> u64 {
+        Lcg::next_u64(self)
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        for chunk in dest.chunks_mut(8) {
+            let v = self.next_u64().to_le_bytes();
+            let n = chunk.len().min(8);
+            chunk.copy_from_slice(&v[..n]);
+        }
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
 impl Lcg {
     pub fn new(seed: u64) -> Self {
         Self(seed.max(1))
@@ -61,10 +81,15 @@ pub fn int1(data: &[i32]) -> Tensor<1, Int> {
 
 /// Baca tensor 2D float ke `Vec<f32>`.
 pub fn read2(t: &Tensor<2>) -> Vec<f32> {
-    t.to_data().to_vec::<f32>().expect("f32")
+    t.to_data().try_to_vec::<f32>().expect("f32")
+}
+
+/// Baca tensor 1D float ke `Vec<f32>`.
+pub fn read1(t: &Tensor<1>) -> Vec<f32> {
+    t.to_data().try_to_vec::<f32>().expect("f32")
 }
 
 /// Baca tensor 1D Int ke `Vec<i32>`.
 pub fn read_int1(t: &Tensor<1, Int>) -> Vec<i32> {
-    t.to_data().to_vec::<i32>().expect("i32")
+    t.to_data().try_to_vec::<i32>().expect("i32")
 }
