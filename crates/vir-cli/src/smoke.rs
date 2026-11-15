@@ -72,21 +72,14 @@ fn report(
     }
 }
 
-/// Skor rekonstruksi kumulatif per level (monoton naik, 0..=1).
+/// Galat rekonstruksi VQ per level (apa adanya, tanpa pembulatan).
 ///
-/// `q_k = 1 / (1 + ε_k)` memetakan galat rekonstruksi VQ ke mutu (menurun bila
-/// galat naik). VQ pada irisan mini **beku** (codebook acak), sehingga galat
-/// kumulatif belum tentu turun; `recon` diambil sebagai *running max* — yakni
-/// rekonstruksi terbaik yang dicapai sejauh level `k` — agar sumpit G1
-/// ("rekonstruksi tidak menurun saat `k` naik") terpenuhi secara jujur.
+/// VQ pada irisan mini **beku** (codebook acak), jadi galat rekonstruksi
+/// kumulatif belum tentu turun per level — itulah yang dilaporkan apa adanya.
+/// Gerbang G1 **tidak** mensyaratkan rekonstruksi VQ membaik (itu tugas F1.4);
+/// gerbang dipegang oleh **loss CE turun** dan **reproduksi persis** 8 sampel.
 fn recon_scores(err: &[f32]) -> Vec<f64> {
-    err.iter()
-        .scan(0.0f64, |best, &e| {
-            let quality = 1.0 / (1.0 + f64::from(e));
-            *best = best.max(quality);
-            Some(*best)
-        })
-        .collect()
+    err.iter().map(|&e| f64::from(e)).collect()
 }
 
 /// Nilai `levels` (satu objek per level, `k` 1-based).
