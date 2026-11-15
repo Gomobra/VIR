@@ -47,7 +47,6 @@ declare -A ALLOWED=(
     [vir-nn]="F1.3: RoPE/attention; tes menyusul bersama nn-eng"
     [vir-py]="binding PyO3; diuji lewat python/"
     [vir-text]="F1.2: BPE; tes menyusul bersama text-eng"
-    [vir-train]="F1.7: loss/trainer; tes menyusul bersama train-eng"
     [vir-tui]="F1.10: TUI; snapshot diuji oleh ui-eng"
 )
 
