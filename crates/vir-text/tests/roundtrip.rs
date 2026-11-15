@@ -197,7 +197,10 @@ fn vocab_susut_saat_korpus_kecil() {
     let texts = ["abab abab".to_string()];
     let mut encoder = BpeEncoder::new();
     encoder.train(&texts, 300);
-    assert!(encoder.table().merge_count() >= 10);
+    // "abab abab" hanya 8 byte: setelah (97,98) lalu (271,271) tak ada lagi
+    // pasangan berfrekuensi >= 2, jadi 2 merge wajar (ERRATA E-009). Ambang lama
+    // (>= 10) hanya mungkin dicapai bila frekuensi pasangan salah hitung.
+    assert!(encoder.table().merge_count() >= 2);
     assert!(encoder.vocab_size() <= 300);
 }
 

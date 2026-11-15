@@ -89,3 +89,31 @@ Format entri:
   `merge_tak_berurutan_ditolak`, `ekspor_impor_tiktoken_setara` (baris token vs
   baris merge), `pipeline_tokenizer_ke_shard_stream_fim` (batas satu epoch).
 - Commit: b0a97c9
+
+## E-009 — train_bpe: `positions` kehilangan indeks kata (frekuensi & hasil latih salah)
+- Gejala: `vir-text::roundtrip latih_deterministik_dan_tidak_bergantung_urutan` gagal
+  setelah E-008 diperbaiki (job nextest run 43688617560). Latih korpus KORPUS = 85
+  merge; korpus yang sama dengan urutan kalimat dibalik = 40 merge.
+- Akar masalah: `PairIndex::positions` menyimpan `(node_kiri, node_kanan)` dari
+  `LocalIndex` (yang per kata) tanpa indeks kata, tetapi `apply` membacanya sebagai
+  `(indeks_kata, node_kiri)` dan `merge_at` mencatat posisi baru sebagai `(p, i)`
+  (dua indeks node). Akibatnya merge diterapkan ke kata yang salah (atau ditolak),
+  frekuensi pasangan tidak pernah turun, pasangan yang sudah di-merge bisa muncul
+  lagi (`push_merge` gagal → latih berhenti dini), dan hasilnya bergantung urutan
+  korpus. Reproduksi: `repro_train.rs` (salinan struktur train.rs + pretok asli,
+  `rustc` satu berkas) → 85 vs 40 merge; setelah `positions` menyimpan
+  `(kata, kiri)` → 60 vs 60 merge, identik.
+- Perbaikan: `crates/vir-text/src/train.rs` (text-eng) — `positions` menyimpan
+  `(indeks kata, node kiri)`; alternatif yang dipakai text-eng: buang indeks
+  inkremental, hitung ulang frekuensi tiap iterasi (`count_pairs` + `apply_merge`).
+  Kedua jalur terverifikasi memberi angka sama: KORPUS 60 merge (maju = mundur),
+  `synth_corpus(8)` 49, `synth_corpus(6)` 29, `synth_sentences(4)` 15,
+  `"abab abab"` 2, `"ab ab ab"` 2, KORPUS banana 6.
+  Catatan: `best_pair` versi in-progress memakai `max_by(|a, b| b.1.cmp(a.1)...)` —
+  komparatornya terbalik (memilih frekuensi terkecil) sehingga latih berhenti di
+  iterasi pertama; arah yang benar `a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))`.
+- Tes regresi: `latih_deterministik_dan_tidak_bergantung_urutan` (sudah ada, kini
+  benar-benar menguji), `vocab_susut_saat_korpus_kecil` (ambang `>= 10` → `>= 2`:
+  korpus 8 byte maksimal 2 merge nyata; ambang lama hanya tercapai bila frekuensi
+  salah hitung), `indeks_pasangan_sesuai_hitung_ulang`.
+- Commit: (debugger, tes) + (text-eng, train.rs)
