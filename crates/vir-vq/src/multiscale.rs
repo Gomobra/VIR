@@ -115,6 +115,14 @@ fn pooling_matrix(in_len: usize, out_len: usize) -> Vec<Vec<f32>> {
 /// Bobot interpolasi linear (`align_corners = true`); `in_len == 1` menyiarkan.
 fn interp_matrix(in_len: usize, out_len: usize) -> Vec<Vec<f32>> {
     // up: [L, ℓ] — tiap baris (posisi L) punya bobot interpolasi atas ℓ.
+    //
+    // `in_len == 1` harus menghasilkan matriks `[1, ℓ]` berisi satu (siaran satu
+    // posisi ke semua posisi). Versi sebelumnya mengembalikan `[[1.0]]` sehingga
+    // `rows_to_tensor(.., out_len)` menerima 1 nilai untuk ℓ kolom → panik
+    // (E-013).
+    if in_len == 1 {
+        return vec![vec![1.0f32; out_len]];
+    }
     if out_len == 1 {
         return vec![vec![1.0f32]; in_len];
     }

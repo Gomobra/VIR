@@ -37,10 +37,7 @@ fi
 #    Allowlist = crate yang sah tanpa tes CPU, dengan alasan tertulis. Crate baru
 #    tanpa tes dan tanpa alasan di sini akan menggagalkan CI.
 declare -A ALLOWED=(
-    [vir-agent]="F4.x: agen RLM; tes menyusul bersama agent-eng"
     [vir-cli]="CLI (bind-eng); jalur pakai diuji lewat tests/e2e dan vir-eval"
-    [vir-modal]="Fase 6: multimodal; belum diaktifkan"
-    [vir-model]="F1.5/F1.6: generator; gerbang F1.8 dijalankan lewat vir smoke"
     [vir-py]="binding PyO3; diuji lewat python/"
 )
 

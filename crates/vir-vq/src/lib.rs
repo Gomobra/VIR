@@ -13,6 +13,7 @@
 //! | [`loss`] | F1.4.d — loss R4 (CE + komitmen + kuantisasi laten) |
 //! | [`metrics`] | F1.4.e — akurasi per level, kategori kesalahan, JSON |
 //! | [`fsq`] | F1.4.f — FSQ / RFSQ / iFSQ di belakang trait yang sama |
+//! | [`fused_plan`] | F7.1 — sisi host kernel terfusi (rencana luncur, cadangan argmin) |
 //! | [`kernel`] | F7.1 — kernel terfusi matmul + argmax (feature `fused`) |
 //!
 //! Catatan ADR (PRD F1.4.b langkah 4): `Down_k` = average pooling area tanpa
@@ -24,6 +25,7 @@ pub mod codebook;
 pub mod decoder;
 pub mod dropout;
 pub mod fsq;
+pub mod fused_plan;
 #[cfg(feature = "fused")]
 pub mod kernel;
 pub mod loss;

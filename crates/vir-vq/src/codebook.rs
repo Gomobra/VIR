@@ -125,6 +125,11 @@ impl Codebook {
     ///
     /// Dipakai untuk inisialisasi dari k-means dan untuk mengunci invarian pada
     /// tes (codebook yang merepresentasikan data secara tepat).
+    ///
+    /// State EMA ikut disetel ke nilai baru (`sum = e`, `count = 1`). Tanpa itu
+    /// pembaruan EMA pertama mencampur init acak lama dengan batch
+    /// (`γ·e_acak + (1−γ)·Σz`), sehingga hasil k-means terbuang pada langkah
+    /// pertama latihan (E-012).
     pub fn set_entries(&mut self, rows: &[f32]) -> Result<(), VirError> {
         if rows.len() != self.num_entries * self.dim {
             return Err(VirError::Config(format!(
@@ -134,7 +139,10 @@ impl Codebook {
             )));
         }
         let device = self.weight.val().device();
-        self.set_weight(crate::quantizer::rows_to_tensor(rows, self.dim, &device));
+        let weight = crate::quantizer::rows_to_tensor(rows, self.dim, &device);
+        self.ema_sum = weight.clone();
+        self.ema_count = Tensor::ones([self.num_entries], &device);
+        self.set_weight(weight);
         Ok(())
     }
 

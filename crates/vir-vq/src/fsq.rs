@@ -107,6 +107,10 @@ pub struct Fsq {
     pub levels: Vec<usize>,
     #[module(skip)]
     pub activation: FsqActivation,
+    /// Dimensi laten penuh `d` yang diterima dan dikembalikan quantizer
+    /// (bukan `n = levels.len()`; lihat [`Quantizer::dim`]).
+    #[module(skip)]
+    dim: usize,
     #[module(skip)]
     half_l: Tensor<1>,
     #[module(skip)]
@@ -153,6 +157,7 @@ impl Fsq {
             unproj: LinearConfig::new(n, dim).init(device),
             levels: cfg.levels.clone(),
             activation: cfg.activation,
+            dim,
             half_l: vec_to_tensor(&half_l, device),
             half_exact: vec_to_tensor(&half_exact, device),
             shift: vec_to_tensor(&shift, device),
@@ -232,7 +237,10 @@ impl Quantizer for Fsq {
     }
 
     fn dim(&self) -> usize {
-        self.proj.weight.val().dims()[1]
+        // Dimensi laten `d`, bukan jumlah dimensi kode `n`. Memakai `n` membuat
+        // `MultiscaleVq<Fsq>` membentuk `Phi`/kode pada dimensi yang salah
+        // (E-014).
+        self.dim
     }
 
     fn quantize(&self, u: Tensor<2>) -> Quantized {

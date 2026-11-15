@@ -138,3 +138,49 @@ Format entri:
   `pty_no_color_mematikan_warna_truecolor`, `ctrl_p_tidak_mengetik_p_ke_query`,
   `no_color_selalu_menang_atas_setelan`.
 - Commit: (ui-eng)
+
+## E-011 — vir-vq tidak punya tes CPU yang berjalan (klaim "50+ tes" palsu)
+- Gejala: `docs/PROGRESS.md` mengklaim "F1.4 vir-vq lengkap ... 50+ tes lulus di
+  CI", padahal satu-satunya berkas tes (`src/kernel.rs`) memakai
+  `#[cfg(all(test, feature = "cuda"))]`; job CI `vir-vq` menjalankan
+  `cargo test` (default, tanpa cuda) sehingga **0 tes** berjalan. Gerbang R7
+  (crate punya tes yang dijalankan) tidak terpenuhi.
+- Akar masalah: logika host kernel terfusi (`plan_launch`, `naive_argmin`,
+  `output_shape`, `output_dtype`, `args_compatible`) bercampur dengan modul
+  `#[cfg(feature = "fused")]` yang tak bisa dikompilasi di CPU tanpa cuda.
+- Perbaikan: `src/fused_plan.rs` memisahkan logika sisi-host (selalu dikompilasi)
+  dari `src/kernel.rs` (feature `fused`); `crates/vir-vq/tests/`
+  (codebook, multiscale, fsq, metrics, fused_plan) — puluhan tes CPU nyata.
+  `scripts/forbid_stubs.sh`: `vir-vq` tidak lagi di-allowlist "tanpa tes".
+- Tes regresi: `naive_argmin_sama_dengan_quantize_reference`,
+  `argmin_memilih_entri_terdekat`, `fsq_indices_dalam_rentang`,
+  `ukuran_codebook_adalah_produk_level`, `akurasi_token_numerik`,
+  `broadcast_dari_satu_posisi`.
+- Commit: (vq-eng)
+
+## E-012 — `Codebook::set_entries` tidak menyetel ulang state EMA
+- Gejala: inisialisasi codebook dari k-means / nilai tetap (`set_entries`) langsung
+  rusak pada pembaruan EMA pertama, karena `ema_sum`/`ema_count` masih menyimpan
+  init acak `N(0,1)` sehingga `e = m/N` mencampur bobot lama dan baru.
+- Akar masalah: `set_entries` hanya mengganti `weight`, tidak mereset buffer EMA.
+- Perbaikan: `set_entries` kini menyetel `ema_sum = e` dan `ema_count = 1`.
+- Tes regresi: `set_entries_menepati_ema_state`, `ema_update_av_trigger_count_hitung_developer`.
+- Commit: (vq-eng)
+
+## E-013 — `multiscale::interp_matrix` panik saat `in_len == 1`
+- Gejala: `ScaleOps::new(1, ℓ)` (broadcast satu posisi ke ℓ) panik di
+  `TensorData` karena `interp_matrix(1, ℓ)` mengembalikan `[[1.0]]` (panjang 1),
+  bukan `[1, ℓ]`.
+- Akar masalah: kasus `in_len == 1` tidak ditangani khusus di `interp_matrix`.
+- Perbaikan: `interp_matrix` mengembalikan `[1, ℓ]` berisi satu saat `in_len == 1`.
+- Tes regresi: `broadcast_dari_satu_posisi`.
+- Commit: (vq-eng)
+
+## E-014 — `Fsq::dim()` mengembalikan jumlah level, bukan dimensi laten
+- Gejala: `Quantizer::dim()` pada `Fsq` mengembalikan `n = levels.len()` (mis. 5),
+  sehingga `MultiscaleVq<Fsq>` membentuk `Phi`/kode pada dimensi salah dan
+  `Fsq::new(cfg, d)` mengabaikan `d`.
+- Akar masalah: `dim()` salah kembalikan panjang `levels`.
+- Perbaikan: `Fsq` menyimpan `dim: usize` dan `Quantizer::dim()` mengembalikan `d`.
+- Tes regresi: `fsq_dim_adalah_dimensi_laten`, `fsq_roundtrip_depan_belakang_konsisten`.
+- Commit: (vq-eng)
