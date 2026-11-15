@@ -184,3 +184,47 @@ fn fail_report(message: &str, json: bool) -> Result<(), Box<dyn std::error::Erro
     }
     Err(Box::new(std::io::Error::other(message)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recon_scores_adalah_identitas_apa_adanya() {
+        // Bukan running-max: galat apa adanya (E-010 pelaporan jujur).
+        let v = recon_scores(&[1.0, 0.5, 2.0]);
+        assert_eq!(v, vec![1.0, 0.5, 2.0]);
+    }
+
+    #[test]
+    fn total_menjumlahkan_loss() {
+        assert_eq!(total(&[1.0, 2.0, 3.5]), 6.5);
+        assert_eq!(total(&[]), 0.0);
+    }
+
+    #[test]
+    fn payload_json_memuat_field_g1() {
+        let result = vir_model::SmokeResult {
+            levels: vec![1, 4, 8],
+            total_positions: 13,
+            loss_before: vec![3.0, 3.0, 3.0],
+            loss_after: vec![2.0, 2.0, 2.0],
+            acc_before: vec![0.0, 0.0, 0.0],
+            acc_after: vec![1.0, 1.0, 1.0],
+            recon_error: vec![0.1, 0.2, 0.3],
+            exact_codes: true,
+            exact_tokens: true,
+            generated_tokens: vec![1, 2, 3],
+            positions: 13,
+            ok: true,
+            failures: vec![],
+        };
+        let text = payload(&result, 280, true, true, true);
+        let v: serde_json::Value = serde_json::from_str(&text).expect("json valid");
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["vocab_size"], 280);
+        assert_eq!(v["exact_match"], true);
+        assert_eq!(v["total_positions"], 13);
+        assert_eq!(v["levels"].as_array().expect("levels").len(), 3);
+    }
+}

@@ -47,3 +47,27 @@ impl fmt::Display for BackendUnavailable {
 }
 
 impl std::error::Error for BackendUnavailable {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_muat_command_backend_dan_status() {
+        let b = BackendUnavailable::new("train", TRAIN_BACKEND);
+        let text = b.json();
+        let v: serde_json::Value = serde_json::from_str(&text).expect("json valid");
+        assert_eq!(v["command"], "train");
+        assert_eq!(v["status"], "unavailable");
+        assert_eq!(v["backend"], TRAIN_BACKEND);
+        assert!(v["build"].is_string());
+    }
+
+    #[test]
+    fn display_menjelaskan_backend_yang_dibutuhkan() {
+        let b = BackendUnavailable::new("generate", MODEL_BACKEND);
+        let msg = b.to_string();
+        assert!(msg.contains("generate"));
+        assert!(msg.contains(MODEL_BACKEND));
+    }
+}
