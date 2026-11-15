@@ -1,11 +1,10 @@
 //! `vir mem` — operasi memori MFS (PRD F3.3).
 
-use clap::Args;
 use vir_mfs::MemoryStore;
 
 use crate::error::CliError;
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub(crate) struct Args {
     /// Path basis data (`:memory:` untuk toko sementara)
     #[arg(long)]

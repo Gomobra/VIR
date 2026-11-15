@@ -5,12 +5,10 @@
 
 use std::path::Path;
 
-use clap::Args;
-
 use crate::backend::{BackendUnavailable, MODEL_BACKEND};
 use crate::error::CliError;
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub(crate) struct Args {
     /// Checkpoint model (`state.json` + `tensors.bin`)
     #[arg(long)]

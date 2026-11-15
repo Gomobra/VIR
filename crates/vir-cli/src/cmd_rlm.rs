@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-use clap::Args;
 use serde_json::Value as JsonValue;
 use vir_agent::{CommandLm, LanguageModel, MemBridge, RlmConfig, RlmRun, ScriptedLm, run_rlm};
 use vir_common::VirError;
@@ -20,7 +19,7 @@ const DEFAULT_PYTHON: &str = "python3";
 /// Jembatan memori; `None` bila `--mem` tidak diberikan.
 type Bridge = Option<MemBridge>;
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub(crate) struct Args {
     /// Ringkasan tugas untuk root RLM
     #[arg(long)]

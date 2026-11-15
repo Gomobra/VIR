@@ -6,11 +6,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use clap::{Args, Subcommand};
+use clap::Subcommand;
 
 use crate::error::CliError;
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub(crate) struct Args {
     #[command(subcommand)]
     pub mode: Mode,

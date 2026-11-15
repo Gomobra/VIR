@@ -5,12 +5,10 @@
 
 use std::path::Path;
 
-use clap::Args;
-
 use crate::backend::{BackendUnavailable, TRAIN_BACKEND};
 use crate::error::CliError;
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub(crate) struct Args {
     /// Korpus token (shard biner vir-data)
     #[arg(long)]
