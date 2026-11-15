@@ -28,7 +28,9 @@ pub fn recurrent_forward(
     e: Tensor<3>,
     r: usize,
 ) -> Tensor<3> {
-    let mut s = prelude.iter().fold(e.clone(), |acc, block| block.forward(acc));
+    let mut s = prelude
+        .iter()
+        .fold(e.clone(), |acc, block| block.forward(acc));
     for _ in 0..r.max(1) {
         // Injeksi ulang keluaran prelude di tiap iterasi (F2.1 langkah 1).
         let cat = Tensor::cat(vec![s.clone(), e.clone()], 2);

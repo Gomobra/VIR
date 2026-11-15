@@ -10,6 +10,8 @@
 //! | [`loss`] | F1.6/R6 — loss berbobot level, masukan teacher forcing |
 //! | [`block_ar`] | F2.3 — loop blok, EOS, batas blok/token, biaya posisi |
 //! | [`smoke`] | F1.8 — gerbang mini: loss turun, determinisme, loop blok |
+//! | [`smoke_host`] | F1.8 — kepala host: Adam + kuadrat terkecil |
+//! | [`smoke_mini`] | F1.8 — irisan penuh: VQ→generator→dekode, memorisasi 8 sampel |
 //!
 //! Catatan ADR (PRD F1.4.b langkah 4): `Down_k` = *average pooling* area tanpa
 //! tumpang tindih, `R_k` = interpolasi linear + konvolusi residual `Phi`
@@ -23,11 +25,12 @@ pub mod recurrent;
 pub mod sampling;
 pub mod scale;
 pub mod smoke;
+pub mod smoke_host;
+pub mod smoke_mini;
+mod smoke_mini_impl;
 
-pub use block_ar::{block_ar, BlockArConfig, BlockArCost, BlockMeta};
-pub use generator::{
-    GenerateOutput, Generator, GeneratorConfig, replace_head,
-};
+pub use block_ar::{BlockArConfig, BlockArCost, BlockMeta, block_ar};
+pub use generator::{GenerateOutput, Generator, GeneratorConfig, replace_head};
 pub use loss::{level_losses, ncm_loss, teacher_inputs};
 pub use recurrent::{EntropyHalter, FixedHalter, Halter, entropy, recurrent_forward, sample_r};
 pub use sampling::{
@@ -36,3 +39,5 @@ pub use sampling::{
 };
 pub use scale::LevelScales;
 pub use smoke::{full_smoke, model_smoke};
+pub use smoke_host::{fit_heads, fit_heads_exact, solve_lstsq};
+pub use smoke_mini::{MiniSmokeConfig, SmokeResult, run_mini_smoke, synth_samples};

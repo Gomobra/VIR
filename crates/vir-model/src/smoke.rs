@@ -1,11 +1,10 @@
 //! Gerbang mini (PRD F1.8): tokenizer VQ multiscale → generator → kepala dilatih
 //! di host sampai loss turun → generate deterministik → loop blok.
 //!
-//! Gerbang ini menggantikan uji asap lama yang hanya memeriksa `loss >= 0`.
-//! Kepala tiap level dilatih dengan Adam di host (gradien softmax CE batch
-//! penuh) lalu bobotnya ditulis kembali ke `Param`, sehingga gerbang mengukur
-//! "model ini bisa menurunkan loss pada data kecil" tanpa feature `train` dan
-//! tanpa optimizer Burn; trainer sebenarnya ada di `vir-train` (F1.7).
+//! Kepala tiap level dilatih di host ([`crate::smoke_host`]) lalu bobotnya
+//! ditulis kembali ke `Param`, sehingga gerbang mengukur "model ini bisa
+//! menurunkan loss pada data kecil" tanpa feature `train` dan tanpa optimizer
+//! Burn; trainer sebenarnya ada di `vir-train` (F1.7).
 //!
 //! Batas tugas yang diperiksa:
 //!
@@ -14,17 +13,21 @@
 //! → loss turun + akurasi naik → generate deterministik (F1.6 langkah 4)
 //! → loop blok (F2.3)
 //! ```
+//!
+//! Untuk gerbang G1 yang menuntut reproduksi **persis** 8 sampel, pakai
+//! [`crate::smoke_mini::run_mini_smoke`] (kepala kuadrat terkecil + prompt).
 
 use burn::prelude::*;
-use burn::tensor::{Device, Distribution, TensorData};
+use burn::tensor::{Device, Distribution};
 use vir_common::VirError;
 use vir_vq::quantizer::indices_to_vec;
 use vir_vq::{Codebook, CodebookConfig, Decoder, MultiscaleVq};
 
-use crate::block_ar::{block_ar, BlockArConfig, BlockMeta};
+use crate::block_ar::{BlockArConfig, BlockMeta, block_ar};
 use crate::generator::{Generator, GeneratorConfig};
 use crate::loss::{ncm_loss, teacher_inputs};
 use crate::sampling::Sampler;
+use crate::smoke_host::{accuracy, decode_tokens, fit_heads};
 
 /// Level gerbang (naik ketat, berakhir `L = 16`).
 const LEVELS: [usize; 4] = [2, 4, 8, 16];
@@ -40,13 +43,11 @@ const SAMPLES: usize = 8;
 const LEN: usize = 16;
 /// Langkah Adam host untuk kepala.
 const HEAD_STEPS: usize = 300;
-/// Laju belajar Adam host.
-const HEAD_LR: f32 = 0.02;
 /// Faktor penurunan loss minimum yang lulus gerbang.
 const MIN_DROP: f32 = 0.9;
 
 /// Device uji asap: CUDA bila feature menyala, selain itu default.
-fn smoke_device() -> Device {
+pub(crate) fn smoke_device() -> Device {
     #[cfg(feature = "cuda")]
     {
         Device::cuda(0)
@@ -58,199 +59,11 @@ fn smoke_device() -> Device {
 }
 
 /// Bobot level rata: `1/K` (F1.7 α = 1).
-fn uniform_weights(levels: usize) -> Vec<f32> {
+pub(crate) fn uniform_weights(levels: usize) -> Vec<f32> {
     if levels == 0 {
         return Vec::new();
     }
     vec![1.0 / levels as f32; levels]
-}
-
-/// Akurasi argmax rata-rata atas semua level dan posisi.
-fn accuracy(logits: &[Tensor<3>], targets: &[Tensor<2, Int>]) -> f32 {
-    let mut hit = 0usize;
-    let mut total = 0usize;
-    for (lg, target) in logits.iter().zip(targets.iter()) {
-        let [b, l, _] = lg.dims();
-        let pred = indices_to_vec(&lg.clone().argmax(2).reshape([b * l]));
-        let want = indices_to_vec(&target.clone().reshape([b * l]));
-        for (p, w) in pred.iter().zip(want.iter()) {
-            total += 1;
-            if p == w {
-                hit += 1;
-            }
-        }
-    }
-    if total == 0 {
-        0.0
-    } else {
-        hit as f32 / total as f32
-    }
-}
-
-/// Token hasil dekode `ẑ^(K)` lewat decoder tokenizer.
-fn decode_tokens(decoder: &Decoder, z: &Tensor<3>) -> Vec<u32> {
-    let tokens = decoder.argmax_tokens(z.clone());
-    let [b, l] = tokens.dims();
-    indices_to_vec(&tokens.reshape([b * l]))
-        .into_iter()
-        .map(|v| v.max(0) as u32)
-        .collect()
-}
-
-/// Adam mini di host (tanpa feature `train`).
-#[derive(Debug, Clone)]
-struct HostAdam {
-    m: Vec<f32>,
-    v: Vec<f32>,
-    t: u32,
-    lr: f32,
-}
-
-impl HostAdam {
-    fn new(len: usize, lr: f32) -> Self {
-        Self {
-            m: vec![0.0; len],
-            v: vec![0.0; len],
-            t: 0,
-            lr,
-        }
-    }
-
-    /// Satu langkah Adam (`β₁ = 0,9`, `β₂ = 0,999`).
-    fn step(&mut self, w: &mut [f32], grad: &[f32]) {
-        const B1: f32 = 0.9;
-        const B2: f32 = 0.999;
-        const EPS: f32 = 1e-8;
-        self.t = self.t.saturating_add(1);
-        let c1 = 1.0 - B1.powi(self.t as i32);
-        let c2 = 1.0 - B2.powi(self.t as i32);
-        for i in 0..w.len() {
-            self.m[i] = B1 * self.m[i] + (1.0 - B1) * grad[i];
-            self.v[i] = B2 * self.v[i] + (1.0 - B2) * grad[i] * grad[i];
-            let mh = self.m[i] / c1;
-            let vh = self.v[i] / c2;
-            w[i] -= self.lr * mh / (vh.sqrt() + EPS);
-        }
-    }
-}
-
-/// Softmax in-place satu baris logit.
-fn softmax_in_place(row: &mut [f32]) {
-    if row.is_empty() {
-        return;
-    }
-    let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut sum = 0.0f32;
-    for v in row.iter_mut() {
-        *v = (*v - max).exp();
-        sum += *v;
-    }
-    if sum > 0.0 {
-        for v in row.iter_mut() {
-            *v /= sum;
-        }
-    }
-}
-
-/// Latih satu kepala linear (`logits = x·Wᵀ`) dengan Adam batch penuh.
-///
-/// Mengembalikan CE rata-rata akhir. `x` `[N, h]` baris-major, `w` `[V, h]`.
-fn fit_head(x: &[f32], targets: &[i64], w: &mut [f32], vocab: usize, steps: usize) -> f32 {
-    let rows = targets.len();
-    let hidden = if rows == 0 { 0 } else { x.len() / rows };
-    if rows == 0 || hidden == 0 || vocab == 0 || w.len() != vocab * hidden {
-        return f32::NAN;
-    }
-    let mut opt = HostAdam::new(w.len(), HEAD_LR);
-    let mut probs = vec![0.0f32; vocab];
-    let mut grad = vec![0.0f32; w.len()];
-    let mut loss = 0.0f32;
-    for _ in 0..steps {
-        for g in grad.iter_mut() {
-            *g = 0.0;
-        }
-        loss = 0.0;
-        for row in 0..rows {
-            let xr = &x[row * hidden..(row + 1) * hidden];
-            for v in 0..vocab {
-                let wr = &w[v * hidden..(v + 1) * hidden];
-                let mut z = 0.0f32;
-                for j in 0..hidden {
-                    z += wr[j] * xr[j];
-                }
-                probs[v] = z;
-            }
-            softmax_in_place(&mut probs);
-            let target = targets[row];
-            if target >= 0 && (target as usize) < vocab {
-                loss -= probs[target as usize].max(1e-9).ln();
-            }
-            for v in 0..vocab {
-                let p = probs[v] - if v as i64 == target { 1.0 } else { 0.0 };
-                if p == 0.0 {
-                    continue;
-                }
-                let scale = p / rows as f32;
-                let gr = &mut grad[v * hidden..(v + 1) * hidden];
-                for j in 0..hidden {
-                    gr[j] += scale * xr[j];
-                }
-            }
-        }
-        opt.step(w, &grad);
-    }
-    loss / rows as f32
-}
-
-/// Latih kepala semua level di host; kembalikan CE per level (tanpa bobot).
-fn fit_heads(
-    model: &mut Generator,
-    inputs: &[Tensor<3>],
-    targets: &[Tensor<2, Int>],
-    steps: usize,
-) -> Result<Vec<f32>, VirError> {
-    let features = model.forward_features(inputs, model.num_loops());
-    let n = features.len().min(targets.len()).min(model.heads.len());
-    let mut out = Vec::with_capacity(n);
-    for k in 0..n {
-        let [b, l, h] = features[k].dims();
-        let rows = b * l;
-        let vocab = model.heads[k].weight.val().dims()[0];
-        let x = features[k]
-            .clone()
-            .reshape([rows, h])
-            .to_data()
-            .try_to_vec::<f32>()
-            .unwrap_or_default();
-        let want = targets[k]
-            .clone()
-            .reshape([rows])
-            .to_data()
-            .try_to_vec::<i64>()
-            .unwrap_or_default();
-        if x.len() != rows * h || want.len() != rows {
-            return Err(VirError::Internal(format!(
-                "data kepala level {k} tidak dapat dibaca"
-            )));
-        }
-        let device = model.heads[k].weight.val().device();
-        let mut w = model.heads[k]
-            .weight
-            .val()
-            .to_data()
-            .try_to_vec::<f32>()
-            .unwrap_or_default();
-        if w.len() != vocab * h {
-            return Err(VirError::Internal(format!(
-                "bobot kepala level {k} berukuran {}, butuh {}",
-                w.len(),
-                vocab * h
-            )));
-        }
-        out.push(fit_head(&x, &want, &mut w, vocab, steps));
-        crate::generator::replace_head(&mut model.heads[k], w, vocab, h, &device)?;
-    }
-    Ok(out)
 }
 
 /// Gerbang mini F1.8.
@@ -271,7 +84,9 @@ pub fn full_smoke() -> Result<(), VirError> {
     let targets = encoded.indices.clone();
 
     // 2. Generator dengan codebook dan `Phi` tokenizer (F1.7 tahap 2).
-    let mut model = Generator::new(&GeneratorConfig::new(DIM, HEADS, levels.clone()), &device)?;
+    let mut gcfg = GeneratorConfig::new(DIM, HEADS, levels.clone());
+    gcfg.codebook_size = CODEBOOK;
+    let mut model = Generator::new(&gcfg, &device)?;
     model.load_tokenizer(&vq)?;
     let inputs = teacher_inputs(&encoded.z_hat, SAMPLES, LEN, DIM, &device);
 
@@ -313,22 +128,8 @@ pub fn full_smoke() -> Result<(), VirError> {
     let sampler = Sampler::new(0.9, 8, 7);
     let first = model.generate(None, &sampler)?;
     let second = model.generate(None, &sampler)?;
-    for k in 0..first.codes.len() {
-        let a: Vec<i64> = first.codes[k]
-            .clone()
-            .into_data()
-            .try_to_vec::<i64>()
-            .unwrap_or_default();
-        let b: Vec<i64> = second.codes[k]
-            .clone()
-            .into_data()
-            .try_to_vec::<i64>()
-            .unwrap_or_default();
-        if a != b {
-            return Err(VirError::Internal(format!(
-                "generate level {k} tidak deterministik"
-            )));
-        }
+    if !codes_equal(&first.codes, &second.codes) {
+        return Err(VirError::Internal("generate tidak deterministik".into()));
     }
     let expected_positions: usize = levels.iter().sum();
     if first.positions != expected_positions {
@@ -374,6 +175,20 @@ pub fn full_smoke() -> Result<(), VirError> {
     Ok(())
 }
 
+/// Bandingkan dua daftar indeks kode level (bit demi bit).
+pub(crate) fn codes_equal(a: &[Tensor<2, Int>], b: &[Tensor<2, Int>]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).all(|(x, y)| {
+        let [bx, lx] = x.dims();
+        let [by, ly] = y.dims();
+        let xv = indices_to_vec(&x.clone().reshape([bx * lx]));
+        let yv = indices_to_vec(&y.clone().reshape([by * ly]));
+        xv == yv
+    })
+}
+
 /// Uji asap kecil: forward, generate, dan loss berjalan pada model mini.
 pub fn model_smoke() -> Result<(), VirError> {
     let device = smoke_device();
@@ -407,3 +222,6 @@ pub fn model_smoke() -> Result<(), VirError> {
     }
     Ok(())
 }
+// Alias gerbang G1 di modul `smoke` (API yang dipakai CLI/bind-eng):
+// `vir_model::smoke::run_mini_smoke`.
+pub use crate::smoke_mini::{MiniSmokeConfig, SmokeResult, run_mini_smoke, synth_samples};

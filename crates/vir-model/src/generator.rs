@@ -303,7 +303,9 @@ impl Generator {
     pub fn embed_codes(&self, k: usize, idx: Tensor<2, Int>) -> Tensor<3> {
         let [b, l] = idx.dims();
         let table = self.codebooks[k].weight.val();
-        table.select(0, idx.reshape([b * l])).reshape([b, l, self.dim])
+        table
+            .select(0, idx.reshape([b * l]))
+            .reshape([b, l, self.dim])
     }
 
     /// Masukan level k: `proj(Down_k(ẑ^(k−1)))` (F1.6 langkah 2).
@@ -343,10 +345,24 @@ impl Generator {
 
     /// Hidden state sebelum head tiap level (untuk probing dan gerbang mini).
     pub fn forward_features(&self, z_hats: &[Tensor<3>], r: usize) -> Vec<Tensor<3>> {
+        self.forward_features_with(&self.scales, z_hats, r)
+    }
+
+    /// Sama dengan [`Self::forward_features`] dengan operator skala eksplisit.
+    ///
+    /// Irisan mini (F1.8) memakai konteks `prefix + L`, jadi `Down_k`/`R_k`
+    /// dibangun untuk panjang konteks itu; operator yang sama dipakai saat
+    /// latihan dan generasi agar fitur identik bit demi bit.
+    pub fn forward_features_with(
+        &self,
+        scales: &LevelScales,
+        z_hats: &[Tensor<3>],
+        r: usize,
+    ) -> Vec<Tensor<3>> {
         let n = z_hats.len().min(self.heads.len());
         let mut out = Vec::with_capacity(n);
         for k in 0..n {
-            let x = self.level_input(k, z_hats[k].clone());
+            let x = self.level_input_with(scales, k, z_hats[k].clone());
             out.push(recurrent_forward(
                 &self.prelude,
                 &self.core,
@@ -359,6 +375,11 @@ impl Generator {
         out
     }
 
+    /// Operator skala untuk konteks `ctx_len` (mis. `prefix + L`).
+    pub fn scales_for(&self, ctx_len: usize) -> LevelScales {
+        LevelScales::new(&self.levels, ctx_len, &self.device())
+    }
+
     /// Forward latihan (Algoritma 1): satu lintasan untuk semua level, `r` tetap.
     pub fn forward(&self, z_hats: &[Tensor<3>]) -> Vec<Tensor<3>> {
         self.forward_loops(z_hats, self.num_loops)
@@ -369,6 +390,14 @@ impl Generator {
         let n = z_hats.len().min(self.heads.len());
         let features = self.forward_features(z_hats, r);
         (0..n)
+            .map(|k| self.heads[k].forward(features[k].clone()))
+            .collect()
+    }
+
+    /// Forward dengan operator skala eksplisit (konteks `prefix + L`).
+    pub fn forward_with(&self, scales: &LevelScales, z_hats: &[Tensor<3>]) -> Vec<Tensor<3>> {
+        let features = self.forward_features_with(scales, z_hats, self.num_loops);
+        (0..features.len())
             .map(|k| self.heads[k].forward(features[k].clone()))
             .collect()
     }
@@ -390,7 +419,47 @@ impl Generator {
         prefix: Option<Tensor<3>>,
         sampler: &Sampler,
     ) -> Result<GenerateOutput, VirError> {
-        let (mut cur, scales, batch, prefix_len) = self.init_context(prefix)?;
+        let (cur, scales, batch, prefix_len) = self.init_context(prefix)?;
+        self.run_levels(cur, scales, batch, prefix_len, sampler)
+    }
+
+    /// Algoritma 2 dengan konteks awal eksplisit (prompt + benih blok).
+    ///
+    /// Irisan mini (F1.8) memakai ini: level 0 bersyarat pada `ẑ^(−1) = 0`,
+    /// jadi tanpa konteks awal semua sampel identik. Konteks `[B, P+L, d]`
+    /// memberi identitas per (sampel, posisi) sehingga kepala dapat menghafal.
+    pub fn generate_from(
+        &self,
+        init: Tensor<3>,
+        prefix_len: usize,
+        sampler: &Sampler,
+    ) -> Result<GenerateOutput, VirError> {
+        let [batch, ctx_len, dim] = init.dims();
+        if dim != self.dim {
+            return Err(VirError::Config(format!(
+                "init d={dim}, butuh d={}",
+                self.dim
+            )));
+        }
+        if ctx_len < self.total_len() {
+            return Err(VirError::Config(format!(
+                "init ctx={ctx_len} < L={}",
+                self.total_len()
+            )));
+        }
+        let scales = LevelScales::new(&self.levels, ctx_len, &self.device());
+        self.run_levels(init, scales, batch, prefix_len, sampler)
+    }
+
+    /// Loop Algoritma 2 di atas konteks dan operator skala yang sudah siap.
+    fn run_levels(
+        &self,
+        mut cur: Tensor<3>,
+        scales: LevelScales,
+        batch: usize,
+        prefix_len: usize,
+        sampler: &Sampler,
+    ) -> Result<GenerateOutput, VirError> {
         let mut codes = Vec::with_capacity(self.levels.len());
         let mut positions = 0usize;
         for k in 0..self.levels.len() {
@@ -440,10 +509,15 @@ impl Generator {
         if let Some(p) = &prefix {
             let [_, pl, pd] = p.dims();
             if pd != self.dim {
-                return Err(VirError::Config(format!("prefix d={pd}, butuh d={}", self.dim)));
+                return Err(VirError::Config(format!(
+                    "prefix d={pd}, butuh d={}",
+                    self.dim
+                )));
             }
             if pl == 0 {
-                return Err(VirError::Config("prefix harus [B, P, d] dengan P > 0".into()));
+                return Err(VirError::Config(
+                    "prefix harus [B, P, d] dengan P > 0".into(),
+                ));
             }
         }
         let scales = if prefix_len == 0 {
@@ -467,27 +541,33 @@ fn blocks(count: usize, dim: usize, num_heads: usize, device: &Device) -> Vec<Bl
         .collect()
 }
 
-/// Tulis bobot kepala linear dari data host (`[out, in]`, baris-major).
+/// Tulis bobot kepala linear dari data host (`[d_in, d_out]`, baris-major).
 ///
-/// Dipakai gerbang mini dan pemulihan bobot; `ParamId` dipertahankan agar
+/// Burn 0.22 menyimpan bobot `Linear` sebagai `[d_input, d_output]` dan
+/// menghitung `y = x·W` (lihat `burn-nn` `linear.rs`). Bias ditulis nol agar
+/// `logits = x·W` murni, sehingga pembelajaran host (Adam atau kuadrat terkecil)
+/// dan jalur Burn menghasilkan angka yang sama. `ParamId` dipertahankan agar
 /// optimizer dan checkpoint tetap cocok.
 pub fn replace_head(
     head: &mut Linear,
     weight: Vec<f32>,
-    out: usize,
-    inp: usize,
+    d_in: usize,
+    d_out: usize,
     device: &Device,
 ) -> Result<(), VirError> {
-    if weight.len() != out * inp {
+    if weight.len() != d_in * d_out {
         return Err(VirError::Config(format!(
             "bobot kepala butuh {} nilai, diberi {}",
-            out * inp,
+            d_in * d_out,
             weight.len()
         )));
     }
     replace_param(
         &mut head.weight,
-        Tensor::<2>::from_floats(TensorData::new(weight, [out, inp]), device),
+        Tensor::<2>::from_floats(TensorData::new(weight, [d_in, d_out]), device),
     );
+    if let Some(bias) = head.bias.as_mut() {
+        replace_param(bias, Tensor::<1>::zeros([d_out], device));
+    }
     Ok(())
 }

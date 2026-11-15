@@ -18,10 +18,12 @@ pub fn level_losses(
     let mut out = Vec::with_capacity(n);
     for k in 0..n {
         let [b, l, v] = logits[k].dims();
-        let ce = CrossEntropyLossConfig::new().init(&logits[k].device()).forward(
-            logits[k].clone().reshape([b * l, v]),
-            targets[k].clone().reshape([b * l]),
-        );
+        let ce = CrossEntropyLossConfig::new()
+            .init(&logits[k].device())
+            .forward(
+                logits[k].clone().reshape([b * l, v]),
+                targets[k].clone().reshape([b * l]),
+            );
         out.push(ce * weights[k]);
     }
     out
