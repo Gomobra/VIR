@@ -20,7 +20,11 @@
 //! (proses tidak boleh memasang filter baru).
 
 /// Syscall yang diizinkan pada semua arsitektur yang didukung crate.
-#[cfg(feature = "sandbox")]
+///
+/// Tersedia juga tanpa fitur `sandbox` pada Linux: isinya data murni, sehingga
+/// kebijakan syscall dapat diuji di job CI bawaan (lihat
+/// `crates/vir-sandbox/tests/allowlist.rs`).
+#[cfg(any(feature = "sandbox", target_os = "linux"))]
 const COMMON: &[i64] = &[
     libc::SYS_accept,
     libc::SYS_accept4,
@@ -88,6 +92,9 @@ const COMMON: &[i64] = &[
     libc::SYS_gettimeofday,
     libc::SYS_getuid,
     libc::SYS_getxattr,
+    // `ioctl` wajib: libc memakainya untuk `isatty` dan hampir semua runtime
+    // memanggilnya saat inisialisasi (tanpa ini proses gagal dengan EPERM).
+    libc::SYS_ioctl,
     libc::SYS_lgetxattr,
     libc::SYS_linkat,
     libc::SYS_listen,
@@ -208,12 +215,13 @@ const COMMON: &[i64] = &[
 /// Setiap kombinasi arsitektur/SCM memilih daftarnya sendiri karena nama
 /// konstanta berbeda antar libc (mis. Bionic tidak punya `newfstatat`).
 #[cfg(all(
-    feature = "sandbox",
+    any(feature = "sandbox", target_os = "linux"),
     target_arch = "x86_64",
     not(target_os = "android")
 ))]
 const ARCH_EXTRA: &[i64] = &[
     libc::SYS_access,
+    libc::SYS_arch_prctl,
     libc::SYS_chmod,
     libc::SYS_chown,
     libc::SYS_creat,
@@ -245,9 +253,15 @@ const ARCH_EXTRA: &[i64] = &[
 ];
 
 /// Syscall lama pada Bionic x86_64 (nama 32-bit yang tetap ada).
-#[cfg(all(feature = "sandbox", target_arch = "x86_64", target_os = "android"))]
+#[cfg(all(
+    any(feature = "sandbox", target_os = "linux"),
+    target_arch = "x86_64",
+    target_os = "android"
+))]
 const ARCH_EXTRA: &[i64] = &[
     libc::SYS_access,
+    // TLS glibc/Bionic di x86_64 dipasang lewat `arch_prctl`.
+    libc::SYS_arch_prctl,
     libc::SYS_chmod,
     libc::SYS_chown,
     libc::SYS_creat,
@@ -273,7 +287,7 @@ const ARCH_EXTRA: &[i64] = &[
 
 /// Syscall aarch64 yang tidak disediakan Bionic.
 #[cfg(all(
-    feature = "sandbox",
+    any(feature = "sandbox", target_os = "linux"),
     target_arch = "aarch64",
     not(target_os = "android")
 ))]
@@ -289,14 +303,30 @@ const ARCH_EXTRA: &[i64] = &[
 ];
 
 /// Bionic aarch64 tidak memerlukan syscall tambahan.
-#[cfg(all(feature = "sandbox", target_arch = "aarch64", target_os = "android"))]
+#[cfg(all(
+    any(feature = "sandbox", target_os = "linux"),
+    target_arch = "aarch64",
+    target_os = "android"
+))]
+const ARCH_EXTRA: &[i64] = &[];
+
+/// Arsitektur Linux lain (bukan x86_64/aarch64): `seccompiler` tidak
+/// mendukungnya, jadi tidak ada syscall arsitektur-spesifik yang ditambahkan.
+#[cfg(all(
+    any(feature = "sandbox", target_os = "linux"),
+    not(target_arch = "x86_64"),
+    not(target_arch = "aarch64")
+))]
 const ARCH_EXTRA: &[i64] = &[];
 
 /// Gabungkan daftar umum dan tambahan arsitektur menjadi satu allowlist.
 ///
 /// Diurutkan dan bebas duplikat agar hasilnya deterministik; filter seccomp
 /// hanya butuh himpunan, tetapi urutan tetap memudahkan pengujian.
-#[cfg(feature = "sandbox")]
+///
+/// Tersedia juga tanpa fitur `sandbox` pada Linux (data murni); tesnya di
+/// `crates/vir-sandbox/tests/allowlist.rs`.
+#[cfg(any(feature = "sandbox", target_os = "linux"))]
 pub fn allowlist() -> Vec<i64> {
     let mut list: Vec<i64> = COMMON.to_vec();
     list.extend_from_slice(ARCH_EXTRA);
@@ -305,33 +335,5 @@ pub fn allowlist() -> Vec<i64> {
     list
 }
 
-#[cfg(all(test, feature = "sandbox"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn allowlist_terurut_tanpa_duplikat() {
-        let list = allowlist();
-        assert!(!list.is_empty(), "allowlist tidak boleh kosong");
-        let mut sorted = list.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(list, sorted, "allowlist harus terurut dan bebas duplikat");
-    }
-
-    #[test]
-    fn syscall_inti_ada() {
-        let list = allowlist();
-        for required in [
-            libc::SYS_execve,
-            libc::SYS_openat,
-            libc::SYS_read,
-            libc::SYS_write,
-        ] {
-            assert!(
-                list.contains(&required),
-                "syscall {required} wajib diizinkan"
-            );
-        }
-    }
-}
+// Tes kebijakan syscall ada di `crates/vir-sandbox/tests/allowlist.rs` (bukan
+// di sini) agar berjalan di job CI bawaan tanpa fitur `sandbox`.

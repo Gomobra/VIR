@@ -337,3 +337,43 @@ fn wire_seccomp(cmd: &mut Command, policy: &Policy) {
 fn wire_seccomp(_cmd: &mut Command, _policy: &Policy) {
     // Filter syscall tidak tersedia tanpa fitur `sandbox`.
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::path::Path;
+    use std::process::Stdio;
+
+    fn command_for(policy: &Policy) -> Command {
+        build_command("vir-uji", &["-c", "nilai"], policy, Stdio::null())
+    }
+
+    #[test]
+    fn argv_dan_cwd_sesuai_kebijakan() {
+        let policy = Policy::default().with_workdir("/srv/vir");
+        let cmd = command_for(&policy);
+        assert_eq!(cmd.get_program(), OsStr::new("vir-uji"));
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        assert_eq!(args, vec![OsStr::new("-c"), OsStr::new("nilai")]);
+        assert_eq!(cmd.get_current_dir(), Some(Path::new("/srv/vir")));
+    }
+
+    #[test]
+    fn cwd_tidak_dipasang_bila_kebijakan_tanpa_workdir() {
+        let cmd = command_for(&Policy::default());
+        assert!(cmd.get_current_dir().is_none());
+    }
+
+    #[test]
+    fn env_kebijakan_dipasang_ke_anak() {
+        let cmd = command_for(&Policy::default().with_env("VIR_UJI", "1"));
+        let envs: Vec<(Option<&OsStr>, Option<&OsStr>)> = cmd.get_envs().collect();
+        let vir = envs
+            .iter()
+            .find(|(key, _)| *key == Some(OsStr::new("VIR_UJI")))
+            .map(|(_, value)| *value);
+        assert_eq!(vir, Some(Some(OsStr::new("1"))));
+        assert!(envs.iter().any(|(key, _)| *key == Some(OsStr::new("HOME"))));
+    }
+}

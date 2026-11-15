@@ -69,6 +69,30 @@ jobs:
       - run: cargo install cargo-deny --locked
       - run: cargo deny check licenses bans sources
 
+  vir-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: vir-sandbox
+      # Tes CPU bawaan (tanpa fitur): `Policy`, `ResourceLimits`, perakitan
+      # `Command`, `run`/`spawn` dengan rlimit + timeout, dan kebijakan
+      # allowlist syscall. Job `nextest` juga menjalankannya; langkah ini
+      # membuat kegagalan crate terlihat langsung pada jobnya sendiri.
+      - run: cargo test -p vir-sandbox
+      # Kode konfinemen kernel (Landlock + seccomp) wajib tetap kompilasi dan
+      # lolos clippy di Linux walau tidak dijalankan di job ini.
+      # `cargo test --features sandbox` sengaja tidak dipasang: dengan filter
+      # seccomp aktif, program uji (mis. `/bin/sh`) bergantung pada allowlist
+      # yang diaudit terhadap kernel nyata (F3.1 butir 7, `tests/isolation.rs`).
+      - run: cargo clippy -p vir-sandbox --all-targets --features sandbox -- -D warnings
+      - run: cargo build -p vir-sandbox --features sandbox
+
   vir-vq:
     runs-on: ubuntu-latest
     steps:
