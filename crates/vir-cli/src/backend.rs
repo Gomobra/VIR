@@ -7,8 +7,6 @@
 
 use std::fmt;
 
-/// Kode keluar saat backend berat tidak tersedia di build ini.
-pub(crate) const EXIT_UNAVAILABLE: u8 = 3;
 /// Backend latihan.
 pub(crate) const TRAIN_BACKEND: &str = "vir-train (Burn)";
 /// Backend model.
