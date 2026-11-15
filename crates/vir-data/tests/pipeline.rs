@@ -1,5 +1,6 @@
 //! Tes integrasi pipeline data: shard → pack → stream → mix → FIM (PRD F1.3).
 
+use proptest::prelude::*;
 use vir_data::{
     FimMarkers, FimMode, FimParts, MixConfig, PackConfig, ShardReader, ShardWriter, SourceMix,
     SplitMix64, StreamConfig, TokenStream, fim_psm, fim_spm, load_repo_sources, mix_blocks,

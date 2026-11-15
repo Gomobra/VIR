@@ -1,8 +1,9 @@
 //! Round-trip encode/decode byte-level dan invariant F1.2 (PRD F1.2).
 
+use proptest::prelude::*;
 use vir_text::{
-    BYTE_VOCAB, BpeEncoder, CharClass, Encoder, PreTokenizer, SPECIAL_TOKENS, SpecialIds,
-    TrainConfig, classify, export_tiktoken, load_tiktoken, pretokenize, resolve_backend, train_bpe,
+    BYTE_VOCAB, BpeEncoder, CharClass, PreTokenizer, SPECIAL_TOKENS, SpecialIds, TrainConfig,
+    classify, export_tiktoken, load_tiktoken, pretokenize, resolve_backend, train_bpe,
 };
 
 /// RNG kecil deterministik; cukup untuk data uji tanpa dependensi tambahan.
@@ -177,6 +178,7 @@ fn vocab_susut_saat_korpus_kecil() {
     let table = train_bpe(["abab abab"], &TrainConfig::default());
     assert!(table.vocab_size() > table.base_len() as usize);
     assert!(table.merge_count() > 0);
+    let texts = ["abab abab".to_string()];
     let mut encoder = BpeEncoder::new();
     encoder.train(&texts, 300);
     assert!(encoder.table().merge_count() >= 10);
