@@ -15,6 +15,7 @@ VIR memakai Burn 0.22. Risiko: throughput training bisa jauh di bawah PyTorch (l
 | fp32 optimized (tanpa z_sq/gather) | 802.080 | 1.116.389 | 0,72× |
 | fp32 + autotune/fusion (burn-cuda) | 806.976 | 1.063.044 | 0,76× |
 | fp32 + fused kernel (F7.1, scalar FMA) | 832.018 | 1.079.248 | 0,77× |
+| fp32 + autotune extensive (fused) | 834.402 | 1.113.478 | 0,75× |
 | fp16 tensor core | 1.059.822 | 2.341.472 | 0,45× |
 
 - Burn CUDA terbukti jalan. G2 **LULUS** (borderline untuk fp32 optimized 0,72–0,77×).
