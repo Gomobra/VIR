@@ -252,7 +252,7 @@ impl SnacCodec {
                 self.cfg.strides.len()
             )));
         }
-        let finest = self.finest_from_codes(codes, dim)?;
+        let finest = self.finest_from_codes(codes)?;
         let mut out = vec![0.0f32; finest * dim];
         for (level, (level_codes, stride)) in codes.iter().zip(self.cfg.strides.iter()).enumerate()
         {
@@ -279,18 +279,20 @@ impl SnacCodec {
         Ok(elements / dim)
     }
 
-    fn finest_from_codes(&self, codes: &[Vec<u32>], dim: usize) -> Result<usize, VirError> {
+    /// Jumlah **baris** level terhalus: panjang `Vec<u32>` level terakhir
+    /// adalah jumlah posisi (bukan elemen), sama dengan keluaran
+    /// [`SnacCodec::encode`] dan masukan `decode_level`.
+    fn finest_from_codes(&self, codes: &[Vec<u32>]) -> Result<usize, VirError> {
         let finest_level = codes.len() - 1;
         if self.cfg.strides[finest_level] != 1 {
             return Err(VirError::Config("level terhalus harus berstride 1".into()));
         }
         let count = codes[finest_level].len();
-        if count == 0 || count % dim != 0 {
-            return Err(VirError::Config(format!(
-                "kode level terhalus {count} tidak valid untuk dim {dim}"
-            )));
+        if count == 0 {
+            return Err(VirError::Config(
+                "kode level terhalus kosong (tidak bisa menentukan panjang)".into(),
+            ));
         }
         Ok(count)
     }
 }
-

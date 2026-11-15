@@ -9,7 +9,7 @@
 use vir_common::VirError;
 
 use crate::connector::Linear;
-use crate::image::MultiScaleTokenizer;
+use crate::multiscale::MultiScaleTokenizer;
 
 /// Decoder gambar: kode per level (level 0 = kasar) → piksel.
 pub trait ImageDecoder {
@@ -207,4 +207,3 @@ fn identity_weights(n: usize) -> Vec<f32> {
     }
     w
 }
-
