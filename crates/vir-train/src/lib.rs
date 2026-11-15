@@ -15,6 +15,10 @@
 //! | [`metrics`] | utilisasi/perplexity codebook per level |
 //! | [`rng`] | RNG xoshiro256++ yang bisa diserialisasi (resume identik) |
 //! | [`burn_bridge`] | optimizer Burn: AdamW + grup Muon |
+//! | [`data`] | F2.5.a — `BatchSource` dari shard vir-data (seed, resume) |
+//! | [`model`] | `VirTrainModel`: VQ + decoder + generator NCM (F2.5.b) |
+//! | [`params`] | jembatan `ParamStore` ↔ parameter modul Burn |
+//! | [`burn_step`] | F2.5.b — `VirStepFn` (forward + loss + grad → store) |
 //!
 //! Contoh alur (pemanggil menyediakan `StepFn` yang memegang model):
 //!
@@ -27,27 +31,33 @@ pub mod burn_bridge;
 pub mod burn_step;
 pub mod checkpoint;
 pub mod corruption;
+pub mod data;
 pub mod logging;
 pub mod loss;
 pub mod metrics;
+pub mod model;
 pub mod optim;
+pub mod params;
 pub mod rng;
 pub mod schedule;
 pub mod trainer;
 
 pub use checkpoint::{Checkpoint, CheckpointFile, Progress, build as build_checkpoint};
 pub use corruption::{CorruptBatch, Corruption, RateShape, level_rates};
+pub use data::{BatchSource, ShardBatchSource};
 pub use logging::{EventRecord, JsonlLogger, StepRecord};
 pub use loss::{
     LossBreakdown, code_weight, grpo_advantage, grpo_objective, level_loss_terms, level_weight,
     masked_level_loss, ncm_loss, nll_per_position, pass_at_k, sft_loss,
 };
 pub use metrics::{LevelStat, histogram, level_stats, perplexity, utilization};
+pub use model::{VirTrainConfig, VirTrainModel, VqEncoded, train_device};
 pub use optim::{
     AdamState, AdamW, Hybrid, MUON_SCALE, MomState, Muon, MuonParams, NS_COEFFS, NS_STEPS,
     OptGroup, OptimSettings, ParamRole, ParamSlot, ParamStore, classify, clip_grad_norm,
     newton_schulz, newton_schulz_steps,
 };
+pub use params::{build_store, collect_grads, copy_back, load_store, sync_frozen, write_grads};
 pub use rng::Rng;
 pub use schedule::{LrKind, LrSchedule};
 pub use trainer::{

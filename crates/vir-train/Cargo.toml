@@ -6,8 +6,14 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 vir-common = { path = "../vir-common" }
+vir-data = { path = "../vir-data" }
 vir-model = { path = "../vir-model" }
+vir-vq = { path = "../vir-vq" }
 burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "train", "autotune", "fusion", "persistence"] }
+# `Codebook::ema_update` menerima `&mut dyn rand::RngCore` (rand 0.8 dipakai
+# vir-vq). vir-train memasok RNG-nya sendiri yang bisa di-checkpoint lewat
+# adaptor tipis di `burn_step`.
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 [workspace]

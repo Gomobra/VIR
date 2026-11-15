@@ -35,6 +35,10 @@ pub enum ParamRole {
     Vq,
     /// Bagian generator (tahap 2).
     Generator,
+    /// Tokenizer: bobot codebook (diperbarui EMA) dan salinan tokenizer di
+    /// generator (F1.7 tahap 2). Beku terhadap optimizer, tetapi ikut
+    /// checkpoint karena nilainya berubah di luar jalur gradien.
+    Tokenizer,
 }
 
 /// Grup optimizer: Muon untuk matriks, AdamW untuk sisanya.
