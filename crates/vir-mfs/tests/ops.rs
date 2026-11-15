@@ -2,8 +2,8 @@
 //! forget/restore benar-benar berjalan di atas toko nyata.
 
 use vir_mfs::{
-    LinkKind, MemoryStore, ReadTarget, diff, find, forget, history, link, links, ls, neighbors,
-    read, restore, tag, tree, untag, write,
+    LinkKind, MemoryStore, ReadTarget, SearchMode, SearchOptions, diff, find, forget, history,
+    link, links, ls, neighbors, read, restore, tag, tree, untag, write,
 };
 
 fn tulis(store: &MemoryStore, path: &str, content: &str) -> i64 {
@@ -210,9 +210,13 @@ fn find_mengembalikan_hasil_ber_skor() {
     assert!(!hits.is_empty());
     assert!(hits.iter().all(|h| h.score > 0.0));
     assert!(hits.iter().any(|h| h.path == "/semantik/c"));
+    let kosong = SearchOptions {
+        query: "kata-yang-tak-ada".to_string(),
+        mode: SearchMode::Keyword,
+        ..SearchOptions::default()
+    };
     assert!(
-        find(&store, "kata-yang-tak-ada", 5)
-            .expect("cari")
-            .is_empty()
+        store.search(&kosong).expect("cari").is_empty(),
+        "kata yang tak ada pada satu dokumen pun tak boleh cocok"
     );
 }
