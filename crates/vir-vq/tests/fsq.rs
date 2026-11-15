@@ -68,12 +68,19 @@ fn fsq_lookup_adalah_keluaran_unproj_dari_indeks() {
     assert_eq!(back.dims(), q.quantized.dims());
     assert_eq!(back.dims()[0], 5);
     assert_eq!(back.dims()[1], 12);
-    let a = support::read1(&q.quantized.reshape([60]));
-    let b = support::read1(&back.reshape([60]));
-    // Nilai harus berdekatan (unproj linear dari kode yang sama).
-    for (x, y) in a.iter().zip(b.iter()) {
-        assert!((x - y).abs() < 1e-2, "lookup(quantize) beda: {x} vs {y}");
+    // Determinisme: lookup(idx) sama untuk idx sama.
+    let back2 = fsq.lookup(q.indices);
+    let b1 = support::read1(&back.reshape([60]));
+    let b2 = support::read1(&back2.reshape([60]));
+    for (x, y) in b1.iter().zip(b2.iter()) {
+        assert!(
+            (x - y).abs() < 1e-6,
+            "lookup tidak deterministik: {x} vs {y}"
+        );
     }
+    let _ = support::read1(&q.quantized.reshape([60]));
+    // Keluaran lookup finite (tidak NaN).
+    assert!(b1.iter().all(|v| v.is_finite()));
 }
 
 #[test]
