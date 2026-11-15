@@ -46,7 +46,8 @@ fn linear_randomized_is_deterministic_and_scaled() {
 #[test]
 fn linear_forward_shapes_and_errors() {
     let lin = Linear::randomized(7, 2, 3).expect("linear");
-    assert_eq!(lin.forward(&[0.0; 6]).expect("forward").len(), 6);
+    // 6 elemen / d_in 2 = 3 baris, tiap baris → d_out 3 = 9 keluaran.
+    assert_eq!(lin.forward(&[0.0; 6]).expect("forward").len(), 9);
     assert!(lin.forward(&[0.0; 5]).is_err());
 }
 
