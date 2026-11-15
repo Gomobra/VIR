@@ -209,10 +209,11 @@ impl VirStepFn {
             perplexity.push(ce.exp());
         }
         let (utilization, _) = codebook_stats(&model.vq, &clean);
+        let loss_total = loss.clone().into_scalar::<f32>();
         Ok((
             loss,
             StepOut {
-                loss_total: loss.clone().into_scalar::<f32>(),
+                loss_total,
                 per_level,
                 level_tokens: level_tokens(&self.cfg, shape[0]),
                 utilization,
