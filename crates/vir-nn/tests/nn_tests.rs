@@ -113,16 +113,20 @@ fn block_diagonal_mask_is_block_structure() {
     let total: usize = lengths.iter().sum();
     assert_eq!(mask.len(), total);
     assert!(mask.iter().all(|r| r.len() == total));
+    // Petakan tiap posisi ke indeks bloknya secara terpisah.
+    let mut block_of = vec![0usize; total];
     let mut start = 0usize;
-    for &len in &lengths {
-        let end = start + len;
-        for i in 0..total {
-            for j in 0..total {
-                let same = (start..end).contains(&i) && (start..end).contains(&j);
-                assert_eq!(mask[i][j], same, "i={i} j={j}");
-            }
+    for (b, &len) in lengths.iter().enumerate() {
+        for i in start..start + len {
+            block_of[i] = b;
         }
-        start = end;
+        start += len;
+    }
+    for i in 0..total {
+        for j in 0..total {
+            let same = block_of[i] == block_of[j];
+            assert_eq!(mask[i][j], same, "i={i} j={j}");
+        }
     }
 }
 
