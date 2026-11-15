@@ -15,8 +15,9 @@ fn overfit_eight_samples_reproduce_exactly() {
     assert!(r.exact_codes, "kode generate != kode target");
     assert!(r.exact_tokens, "token dekode != token masukan");
 
-    // Σℓ_k = 1 + 5 + 8 dan posisi generator sama.
-    assert_eq!(r.total_positions, 14);
+    // Σℓ_k = 1 + 4 + 8 (jadwal linear L=8 K=3, round-half-even) dan posisi
+    // generator sama.
+    assert_eq!(r.total_positions, 13);
     assert_eq!(r.positions, r.total_positions);
 
     // Loss turun dan akurasi 1 di tiap level.
