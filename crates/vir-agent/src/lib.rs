@@ -15,7 +15,7 @@ pub mod mem_bridge;
 pub mod repl;
 pub mod rlm;
 
-pub use lm::{FailingLm, FnLm, LanguageModel};
+pub use lm::{FailingLm, FnLm, LanguageModel, ResLm};
 pub use lm_command::CommandLm;
 pub use lm_scripted::ScriptedLm;
 pub use mem_bridge::{MemBridge, MemOp};

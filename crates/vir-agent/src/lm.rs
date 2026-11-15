@@ -52,3 +52,26 @@ impl LanguageModel for FailingLm {
         Err(VirError::Internal(self.message.clone()))
     }
 }
+
+/// LM berbasis closure yang bisa gagal (mis. pemanggilan callable eksternal).
+pub struct ResLm<F> {
+    f: F,
+}
+
+impl<F> ResLm<F>
+where
+    F: Fn(&str) -> Result<String, VirError>,
+{
+    pub fn new(f: F) -> Self {
+        Self { f }
+    }
+}
+
+impl<F> LanguageModel for ResLm<F>
+where
+    F: Fn(&str) -> Result<String, VirError>,
+{
+    fn generate(&self, prompt: &str) -> Result<String, VirError> {
+        (self.f)(prompt)
+    }
+}

@@ -11,7 +11,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
-use vir_agent::{run_rlm, FnLm, RlmConfig, RlmRun};
+use vir_agent::{run_rlm, ResLm, RlmConfig, RlmRun};
 use vir_common::VirError;
 
 use crate::err;
@@ -47,7 +47,7 @@ impl Rlm {
         let (max_depth, max_calls, max_steps) = (self.max_depth, self.max_calls, self.max_steps);
         let task = context.to_string();
         py.allow_threads(move || {
-            let lm = FnLm::new(move |prompt: &str| call_generate(&generate, prompt));
+            let lm = ResLm::new(move |prompt: &str| call_generate(&generate, prompt));
             let cfg = config(max_depth, max_calls, max_steps);
             run_rlm(&lm, &task, &cfg, &mut |payload: &Value| {
                 call_mem(&mem, payload)
