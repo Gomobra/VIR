@@ -54,21 +54,26 @@ fn roundtrip_multibahasa_byte_persis() {
 fn roundtrip_byte_utf8_acak() {
     let mut rng = SplitMix(0x5EED);
     let encoder = BpeEncoder::trained(KORPUS.iter().copied(), &TrainConfig::default());
-    let mut checked = 0;
+    // Byte acak hampir tak pernah UTF-8 sah (peluang ~2^-n; terukur 20 dari 300),
+    // jadi sampel dirangkai dari aksara acak lintas skrip: tujuannya menguji
+    // potongan multibyte (Jepang, Rusia, emoji, aksara Thai/Ibrani).
+    const AKSARA: &[char] = &[
+        'a', 'Z', '7', ' ', 'é', 'Ж', '猫', '😀', '\n', '\t', 'ก', 'א',
+    ];
+    let mut multibyte = 0usize;
     for _ in 0..300 {
         let len = rng.below(48);
-        let mut bytes = Vec::with_capacity(len);
-        for _ in 0..len {
-            bytes.push(rng.below(256) as u8);
-        }
-        let Ok(text) = String::from_utf8(bytes) else {
-            continue;
-        };
-        checked += 1;
+        let text: String = (0..len).map(|_| AKSARA[rng.below(AKSARA.len())]).collect();
         let ids = encoder.encode(&text);
         assert_eq!(encoder.decode_bytes(&ids), text.as_bytes());
+        if text.chars().any(|c| c.len_utf8() > 1) {
+            multibyte += 1;
+        }
     }
-    assert!(checked > 100, "terlalu sedikit sampel UTF-8 sah: {checked}");
+    assert!(
+        multibyte > 100,
+        "terlalu sedikit sampel multibyte: {multibyte}"
+    );
 }
 
 #[test]
