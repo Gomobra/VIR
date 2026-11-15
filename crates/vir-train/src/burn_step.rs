@@ -22,7 +22,8 @@ impl MiniModel {
     }
 }
 
-/// StepFn konkret: forward + MSE + backward, tulis grad ke ParamStore.
+/// StepFn konkret: forward + MSE + backward, tulis grad ke ParamStore,
+/// dan sync bobot dari ParamStore sebelum forward.
 pub struct BurnStepFn {
     pub model: MiniModel,
     pub x: Tensor<2>,
@@ -56,17 +57,24 @@ impl BurnStepFn {
 
 impl StepFn for BurnStepFn {
     fn compute(&mut self, _ctx: StepCtx<'_>, store: &mut ParamStore) -> Result<StepOut, VirError> {
-        // forward
+        // sync bobot dari ParamStore (setelah optimizer step sebelumnya)
+        if let Some(slot) = store.slots.first() {
+            let dev = self.model.fc.weight.val().device();
+            let w = Tensor::<2>::from_floats(
+                burn::tensor::TensorData::new(slot.data.clone(), [self.in_dim, self.out_dim]),
+                &dev,
+            );
+            self.model.fc.weight = burn::module::Param::from_tensor(w);
+        }
+
         let pred = self.model.fc.forward(self.x.clone());
         let diff = pred - self.y.clone();
         let loss = (diff.clone() * diff).mean();
         let loss_val = loss.clone().into_scalar::<f32>();
 
-        // backward (autodiff)
         let grads = loss.backward();
         let w = self.model.fc.weight.val();
         let grad_w = w.grad(&grads).unwrap_or_else(|| Tensor::zeros_like(&w));
-        // tulis ke ParamStore (slot 0)
         let flat: Vec<f32> = grad_w.into_data().try_to_vec::<f32>().unwrap_or_default();
         if let Some(slot) = store.slots.first_mut() {
             slot.grad = flat;
