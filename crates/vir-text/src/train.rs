@@ -2,13 +2,19 @@
 //!
 //! Algoritmanya: potong korpus per byte (pra-tokenisasi), hitung frekuensi
 //! pasangan secara paralel dengan rayon, lalu gabungkan pasangan paling sering
-//! berulang kali. Indeks pasangan diperbarui bertahap: hanya kata yang memuat
-//! pasangan terpilih yang disentuh, jadi biaya total sebanding dengan jumlah
-//! token di korpus. Hasil latih tidak bergantung pada urutan kata (agregat
-//! frekuensi + tie-break pasangan terkecil), sehingga resume dan CI deterministik.
+//! berulang kali. Setiap iterasi menghitung ulang frekuensi dari kata yang
+//! tersisa; inkremental (ind per pasangan) salah pada pasangan yang tumpang
+//! tindih seperti `aaa` (tiap kemunculan dihitung sekali, tetapi tiap merge
+//! mengurangi satu per posisi), sehingga sisa langkah bisa macet atau berbeda
+//! menurut urutan. Dengan hitung-ulang, hasilnya fungsi murni dari multiset
+//! kata, jadi **tidak bergantung urutan korpus**.
+//!
+//! Pemilihan memakai orde total: `freq` turun, lalu pasangan `(kiri, kanan)`
+//! menurut byte naik. Karena `counts` adalah agregat (bukan posisi) dan
+//! pemilihan hanya bergantung pada nilai pasangan, dua urutan korpus memberi
+//! tabel merge identik. Biaya `M` merge adalah `O(M · token)`; pada korpus
+//! uji (puluhan ribu token) ini beberapa detik di CPU CI.
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::collections::HashMap;
 
 use rayon::prelude::*;
@@ -50,12 +56,11 @@ struct Node {
     next: u32,
 }
 
-/// Kata sebagai daftar terhubung; merge menimpa node kiri sehingga indeks node
-/// tetap stabil dan entri indeks pasangan tidak pernah kedaluwarsa.
+/// Kata sebagai daftar terhubung; merge menimpa node kiri dan menandai node
+/// kanan mati (id `NIL`), sehingga lintasan kiri→kanan hanya melewati node hidup.
 #[derive(Debug, Clone)]
 struct Word {
     nodes: Vec<Node>,
-    head: u32,
 }
 
 impl Word {
@@ -70,7 +75,7 @@ impl Word {
                 next: if i + 1 < len { i as u32 + 1 } else { NIL },
             })
             .collect();
-        Self { nodes, head: 0 }
+        Self { nodes }
     }
 
     /// Kumpulkan pasangan hidup `(pair, kiri, kanan)` ke `out` (dikosongkan dulu).
@@ -79,184 +84,94 @@ impl Word {
         if self.nodes.is_empty() {
             return;
         }
-        let mut i = self.head;
-        while i != NIL {
+        let mut i = 0u32;
+        loop {
             let node = self.nodes[i as usize];
-            if node.next != NIL {
-                let right = self.nodes[node.next as usize];
-                out.push(((node.id, right.id), i, node.next));
-                i = node.next;
-            } else {
+            if node.next == NIL {
                 break;
             }
+            let right = self.nodes[node.next as usize];
+            out.push(((node.id, right.id), i, node.next));
+            i = node.next;
         }
     }
-}
 
-/// Indeks pasangan lokal satu kumpulan kata.
-#[derive(Debug, Default)]
-struct LocalIndex {
-    counts: HashMap<Pair, u32>,
-    positions: HashMap<Pair, Vec<(u32, u32)>>,
-}
-
-impl LocalIndex {
-    fn add_word(&mut self, word: &Word, scratch: &mut Vec<(Pair, u32, u32)>) {
-        word.collect_pairs(scratch);
-        for (pair, left, right) in scratch.iter().copied() {
-            *self.counts.entry(pair).or_insert(0) += 1;
-            self.positions.entry(pair).or_default().push((left, right));
-        }
-    }
-}
-
-/// Entri heap: jumlah kemunculan + pasangan. Memori lebih besar = lebih dulu.
-#[derive(Debug, PartialEq, Eq)]
-struct HeapEntry {
-    count: u32,
-    pair: Pair,
-}
-
-impl PartialOrd for HeapEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for HeapEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.count
-            .cmp(&other.count)
-            .then_with(|| other.pair.0.cmp(&self.pair.0))
-            .then_with(|| other.pair.1.cmp(&self.pair.1))
-    }
-}
-
-/// Frekuensi pasangan + posisi kemunculannya, dengan pembaruan bertahap.
-#[derive(Debug, Default)]
-struct PairIndex {
-    counts: HashMap<Pair, u32>,
-    positions: HashMap<Pair, Vec<(u32, u32)>>,
-    heap: BinaryHeap<HeapEntry>,
-}
-
-impl PairIndex {
-    /// Hitung frekuensi seluruh kata secara paralel.
-    fn build(words: &[Word]) -> Self {
-        let locals: Vec<LocalIndex> = words
-            .par_iter()
-            .map(|word| {
-                let mut local = LocalIndex::default();
-                let mut scratch = Vec::new();
-                local.add_word(word, &mut scratch);
-                local
-            })
-            .collect();
-        let mut counts: HashMap<Pair, u32> = HashMap::new();
-        let mut positions: HashMap<Pair, Vec<(u32, u32)>> = HashMap::new();
-        for local in locals {
-            for (pair, count) in local.counts {
-                *counts.entry(pair).or_insert(0) += count;
-            }
-            for (pair, mut pos) in local.positions {
-                positions.entry(pair).or_default().append(&mut pos);
+    /// Gabungkan setiap kemunculan `pair` pada kata ini, kiri→kanan.
+    fn apply(&mut self, pair: Pair, new_id: u32, scratch: &mut Vec<(Pair, u32, u32)>) {
+        self.collect_pairs(scratch);
+        for (candidate, left, _) in scratch.iter().copied() {
+            if candidate == pair {
+                self.merge_at(left as usize, pair, new_id);
             }
         }
-        let heap = counts
-            .iter()
-            .map(|(pair, count)| HeapEntry {
-                count: *count,
-                pair: *pair,
-            })
-            .collect();
-        Self {
-            counts,
-            positions,
-            heap,
-        }
     }
 
-    /// Pasangan dengan frekuensi tertinggi (tie-break: pasangan terkecil).
-    fn best(&mut self) -> Option<(Pair, u32)> {
-        while let Some(entry) = self.heap.pop() {
-            if entry.count > 0 && self.counts.get(&entry.pair) == Some(&entry.count) {
-                return Some((entry.pair, entry.count));
-            }
-        }
-        None
-    }
-
-    /// Ubah frekuensi satu pasangan; hapus bila habis, catat bila bertambah.
-    fn bump(&mut self, pair: Pair, delta: i64) {
-        let next = i64::from(self.counts.get(&pair).copied().unwrap_or(0)) + delta;
-        if next <= 0 {
-            self.counts.remove(&pair);
+    /// Gabungkan pasangan pada posisi `left` bila masih sah.
+    fn merge_at(&mut self, left: usize, pair: Pair, new_id: u32) {
+        if left >= self.nodes.len() || self.nodes[left].id != pair.0 {
             return;
         }
-        let next = next as u32;
-        self.counts.insert(pair, next);
-        self.heap.push(HeapEntry { count: next, pair });
-    }
-
-    /// Terapkan merge ke seluruh kata yang memuat pasangan tersebut.
-    fn apply(&mut self, words: &mut [Word], pair: Pair, new_id: u32) {
-        let Some(positions) = self.positions.remove(&pair) else {
+        let right = self.nodes[left].next as usize;
+        if right >= self.nodes.len() || self.nodes[right].id != pair.1 {
             return;
-        };
-        for (word, left) in positions {
-            if self.merge_at(words, word, left, pair, new_id) {
-                self.bump(pair, -1);
-            }
+        }
+        let next = self.nodes[right].next;
+        self.nodes[left].id = new_id;
+        self.nodes[left].next = next;
+        self.nodes[right].id = NIL;
+        if next != NIL {
+            self.nodes[next as usize].prev = left as u32;
         }
     }
+}
 
-    /// Gabungkan pasangan pada satu posisi; `true` bila posisi masih sah.
-    fn merge_at(&mut self, words: &mut [Word], w: u32, left: u32, pair: Pair, new_id: u32) -> bool {
-        let Some(word) = words.get_mut(w as usize) else {
-            return false;
-        };
-        let i = left as usize;
-        if i >= word.nodes.len() || word.nodes[i].id != pair.0 {
-            return false;
+/// Frekuensi pasangan satu kumpulan kata (paralel, lalu digabung).
+fn count_pairs(words: &[Word]) -> HashMap<Pair, u32> {
+    let partials: Vec<HashMap<Pair, u32>> = words
+        .par_iter()
+        .map(|word| {
+            let mut counts: HashMap<Pair, u32> = HashMap::new();
+            let mut scratch = Vec::new();
+            word.collect_pairs(&mut scratch);
+            for (pair, _, _) in &scratch {
+                *counts.entry(*pair).or_insert(0) += 1;
+            }
+            counts
+        })
+        .collect();
+    merge_counts(&partials)
+}
+
+/// Gabungkan peta frekuensi per potongan menjadi satu agregat.
+fn merge_counts(partials: &[HashMap<Pair, u32>]) -> HashMap<Pair, u32> {
+    let mut counts: HashMap<Pair, u32> = HashMap::new();
+    for partial in partials {
+        for (pair, count) in partial {
+            *counts.entry(*pair).or_insert(0) += count;
         }
-        let j = word.nodes[i].next as usize;
-        if j >= word.nodes.len() || word.nodes[j].id != pair.1 {
-            return false;
-        }
-        let p = word.nodes[i].prev;
-        let q = word.nodes[j].next;
-        if p != NIL {
-            let id = word.nodes[p as usize].id;
-            self.bump((id, pair.0), -1);
-        }
-        if q != NIL {
-            let id = word.nodes[q as usize].id;
-            self.bump((pair.1, id), -1);
-        }
-        word.nodes[i].id = new_id;
-        word.nodes[i].next = q;
-        // Node kanan mati: id NIL membuat posisi lama di indeks otomatis kedaluwarsa.
-        word.nodes[j].id = NIL;
-        if q != NIL {
-            word.nodes[q as usize].prev = i as u32;
-        }
-        if p != NIL {
-            let id = word.nodes[p as usize].id;
-            self.bump((id, new_id), 1);
-            self.positions
-                .entry((id, new_id))
-                .or_default()
-                .push((p, i as u32));
-        }
-        if q != NIL {
-            let id = word.nodes[q as usize].id;
-            self.bump((new_id, id), 1);
-            self.positions
-                .entry((new_id, id))
-                .or_default()
-                .push((i as u32, q));
-        }
-        true
+    }
+    counts
+}
+
+/// Pasangan dengan frekuensi tertinggi; seri diputus orde total byte.
+///
+/// `max_by` memilih elemen terbesar menurut urutan ini: `count` naik (jadi
+/// frekuensi tertinggi menang), lalu `(kiri, kanan)` mengecil (jadi pasangan
+/// byte terkecil menang). Ini orde total yang sama dengan tumpukan lama, tetapi
+/// dihitung dari agregat sehingga tidak bergantung urutan kemunculan.
+fn best_pair(counts: &HashMap<Pair, u32>) -> Option<(Pair, u32)> {
+    counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        .map(|(pair, count)| (*pair, *count))
+}
+
+/// Terapkan satu merge ke seluruh kata, kiri→kanan.
+fn apply_merge(words: &mut [Word], pair: Pair, new_id: u32) {
+    let mut scratch = Vec::new();
+    for word in words.iter_mut() {
+        word.apply(pair, new_id, &mut scratch);
     }
 }
 
@@ -282,10 +197,9 @@ where
 {
     let texts: Vec<S> = texts.into_iter().collect();
     let mut words = collect_words(&texts, cfg.max_word_bytes);
-    let mut index = PairIndex::build(&words);
     let mut table = MergeTable::new();
     while table.vocab_size() < cfg.target_vocab {
-        let Some((pair, count)) = index.best() else {
+        let Some((pair, count)) = best_pair(&count_pairs(&words)) else {
             break;
         };
         if count < cfg.min_frequency {
@@ -294,7 +208,7 @@ where
         let Some(new_id) = table.push_merge(pair) else {
             break;
         };
-        index.apply(&mut words, pair, new_id);
+        apply_merge(&mut words, pair, new_id);
     }
     table
 }
@@ -316,25 +230,22 @@ mod tests {
     }
 
     #[test]
-    fn indeks_pasangan_sesuai_hitung_ulang() {
+    fn frekuensi_instan_sepadan_dengan_hitung_ulang() {
         let corpus = ["banana bandana", "abracadabra", "abababab"];
         let mut words = collect_words(&corpus, DEFAULT_MAX_WORD_BYTES);
-        let mut index = PairIndex::build(&words);
         let mut table = MergeTable::new();
-        let mut merges = 0;
-        while merges < 12 {
-            let Some((pair, _)) = index.best() else {
+        while table.merge_count() < 12 {
+            let Some((pair, _)) = best_pair(&count_pairs(&words)) else {
                 break;
             };
             let Some(new_id) = table.push_merge(pair) else {
                 break;
             };
-            index.apply(&mut words, pair, new_id);
-            assert_eq!(index.counts, recount(&words), "frekuensi menyimpang");
-            merges += 1;
+            apply_merge(&mut words, pair, new_id);
+            assert_eq!(recount(&words), count_pairs(&words), "frekuensi menyimpang");
         }
-        assert!(merges > 0);
-        assert_eq!(table.vocab_size(), 271 + merges);
+        assert!(table.merge_count() > 0);
+        assert_eq!(table.vocab_size(), 271 + table.merge_count());
     }
 
     #[test]
@@ -343,6 +254,13 @@ mod tests {
         assert!(table.vocab_size() > 271);
         assert!(table.vocab_size() < 300);
         assert!(table.merge_count() > 0);
+    }
+
+    #[test]
+    fn pasangan_tumpang_tindih_tidak_macet() {
+        // `aaa` punya pasangan yang tumpang tindih; hitung-ulang harus tetap maju.
+        let table = train_bpe(["aaa aaa", "aaaa aaaa"], &TrainConfig::default());
+        assert!(table.merge_count() >= 2);
     }
 
     #[test]
