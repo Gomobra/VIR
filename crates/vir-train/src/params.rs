@@ -11,7 +11,8 @@
 //! | store → model | [`load_store`] | `ModuleMapper` |
 //! | model → grads | [`collect_grads`] | `ModuleVisitor` + `Gradients` |
 //!
-//! Nama slot adalah path modul berbatas titik (mis. `gen.core.0.wq.weight`),
+//! Nama slot adalah path modul berbatas titik (mis.
+//! `generator.core.0.wq.weight`),
 //! sehingga checkpoint bisa diinspeksi dan peran tahap diturunkan dari path.
 
 use std::collections::HashSet;
@@ -38,16 +39,20 @@ struct Found {
 ///
 /// - `codebook`/`quantizer`/`phis` → [`ParamRole::Tokenizer`] (dibekukan;
 ///   codebook belajar EMA, salinan tokenizer di generator tidak dilatih).
-/// - `gen.*` → [`ParamRole::Generator`].
+/// - `generator.*` (mis. `generator.core.0.wq.weight`) → [`ParamRole::Generator`].
 /// - sisanya (embed, `vq.*.phi`, decoder) → [`ParamRole::Vq`].
+///
+/// Segmen pertama path adalah nama field pada [`VirTrainModel`], jadi generator
+/// dikenali dari radix `generator` — bukan dari potongan `gen.` yang tidak
+/// pernah muncul pada path nyata.
 fn role_for(path: &str) -> ParamRole {
     if path.contains("codebook") || path.contains("quantizer") || path.contains("phis") {
         return ParamRole::Tokenizer;
     }
-    if path == "gen" || path.starts_with("gen.") || path.contains("gen.") {
-        return ParamRole::Generator;
+    match path.split('.').next().unwrap_or_default() {
+        "generator" => ParamRole::Generator,
+        _ => ParamRole::Vq,
     }
-    ParamRole::Vq
 }
 
 /// Kumpulan parameter dari satu jelajah `Module`.
@@ -142,6 +147,10 @@ pub fn build_store(model: &VirTrainModel, stage: Stage) -> Result<ParamStore, Vi
 }
 
 /// Muat parameter model dari store.
+///
+/// Slot beku dimuat tanpa gradien (leaf `Requirement::None`) sehingga tidak
+/// ikut graf autodiff; slot terlatih dimuat sebagai leaf `Grad` — `require_grad`
+/// hanya sah pada leaf, dan `Param::from_tensor` di jalur EMA menolak non-leaf.
 struct Loader<'a> {
     store: &'a ParamStore,
     index: usize,
@@ -156,7 +165,6 @@ impl ModuleMapper for Loader<'_> {
         };
         self.index += 1;
         let tensor = param.val();
-        let req = tensor.is_require_grad();
         let shape = tensor.dims();
         if slot.data.len() != shape.iter().product::<usize>() {
             self.bad += 1;
@@ -164,9 +172,11 @@ impl ModuleMapper for Loader<'_> {
         }
         let device = tensor.device();
         let value = Tensor::<D>::from_floats(TensorData::new(slot.data.clone(), shape), &device);
-        // `Param::map` mempertahankan flag latih, tetapi tensor nilai harus
-        // membawa flag itu sendiri agar `backward` menghasilkan gradien.
-        let value = if req { value.require_grad() } else { value };
+        let value = if slot.frozen {
+            value
+        } else {
+            value.require_grad()
+        };
         param.map(|_| value)
     }
 }

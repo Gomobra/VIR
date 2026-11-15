@@ -111,19 +111,31 @@ impl VirStepFn {
         self.copied_slots
     }
 
-    /// SINKRON: state tahap (beku), tokenizer, dan posisi batch.
+    /// SINKRON: posisi batch dan status beku store menurut tahap aktif.
+    ///
+    /// Salinan tokenizer di generator tidak dimuat di sini: ia harus menimpa
+    /// nilai dari store (lihat [`Self::sync_tokenizer`]), bukan ditimpa olehnya.
     fn prepare(&mut self, step: u64, stage: Stage, store: &mut ParamStore) -> Result<(), VirError> {
         if step != self.consumed {
             self.source.seek_step(step)?;
         }
-        if stage == Stage::Generator && !self.tokenizer_loaded {
-            let model = self.model.as_mut().ok_or_else(missing)?;
-            let vq = &model.vq;
-            let generator = &mut model.generator;
-            generator.load_tokenizer(vq)?;
-            self.tokenizer_loaded = true;
-        }
         params::sync_frozen(stage, store);
+        Ok(())
+    }
+
+    /// Salin tokenizer VQ ke generator sekali per `VirStepFn` (F1.7 tahap 2).
+    ///
+    /// Dijalankan *setelah* `load_store` agar generator memakai codebook/Phi
+    /// tokenizer hasil EMA, bukan bobot awal store; tanpa ini salinan tokenizer
+    /// di generator tidak pernah berubah dan `copy_back` tak punya nilai baru.
+    fn sync_tokenizer(&mut self, model: &mut VirTrainModel, stage: Stage) -> Result<(), VirError> {
+        if stage != Stage::Generator || self.tokenizer_loaded {
+            return Ok(());
+        }
+        let vq = &model.vq;
+        let generator = &mut model.generator;
+        generator.load_tokenizer(vq)?;
+        self.tokenizer_loaded = true;
         Ok(())
     }
 
@@ -255,6 +267,7 @@ impl StepFn for VirStepFn {
         self.prepare(step, ctx.stage, store)?;
         let model = self.model.take().ok_or_else(missing)?;
         let mut model = params::load_store(model, store)?;
+        self.sync_tokenizer(&mut model, ctx.stage)?;
         let outcome = self.step_once(&mut model, ctx.stage, store, &mut ctx);
         self.model = Some(model);
         let out = outcome?;
@@ -344,6 +357,11 @@ fn level_ce(logits: &Tensor<3>, target: &Tensor<2, Int>) -> f32 {
 ///
 /// `z̃^(k) = z̃^(k−1) + R_k(e_k(r̃_k))` dengan `z̃^(−1) = 0`; operator `R_k`
 /// milik generator agar identik dengan loop `generate`.
+///
+/// Rekonstruksi kumulatif hidup pada **panjang konteks penuh** `L`: `R_k`
+/// memetakan `[B, ℓ_k, d] → [B, L, d]` (naik/in interpolasi `LevelScales`), jadi
+/// `ẑ^(k)` tidak boleh dialokasikan pada `ℓ_k` — menjumlahkannya dengan kontribusi
+/// level berikutnya akan gagal bentuk (`ℓ_k != ℓ_{k+1}`).
 fn teacher_inputs(
     model: &VirTrainModel,
     idx: &[Tensor<2, Int>],
@@ -351,8 +369,8 @@ fn teacher_inputs(
     device: &Device,
 ) -> Vec<Tensor<3>> {
     let batch = idx.first().map_or(0, |t| t.dims()[0]);
-    let len = idx.first().map_or(0, |t| t.dims()[1]);
-    let mut cur = Tensor::<3>::zeros([batch, len, dim], device);
+    let ctx = model.total_len();
+    let mut cur = Tensor::<3>::zeros([batch, ctx, dim], device);
     let mut out = Vec::with_capacity(idx.len());
     for (k, codes) in idx.iter().enumerate() {
         out.push(cur.clone());

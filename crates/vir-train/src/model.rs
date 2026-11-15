@@ -258,9 +258,15 @@ impl VirTrainModel {
             let [db, dl, dd] = down.dims();
             let flat = down.reshape([db * dl, dd]);
             let idx = out.indices.clone().reshape([db * dl]);
+            // EMA adalah pembaruan state di luar graf: `detach` saja tidak cukup
+            // karena leaf hasil detach tetap `Grad`, sehingga `sum`/`weight`
+            // menjadi tensor non-leaf dan `Param::from_tensor` (`set_weight`)
+            // panik "Can't convert a non leaf tensor into a tracked tensor".
+            // `set_require_grad(false)` memutus total ke autodiff.
+            let plain = flat.detach().set_require_grad(false);
             self.vq.levels[k]
                 .quantizer
-                .update(&idx, &flat, &mut adapter);
+                .update(&idx, &plain, &mut adapter);
             z_hat = z_hat + out.contribution;
             residual = z.clone() - z_hat.clone();
             levels.push(z_hat.clone());
