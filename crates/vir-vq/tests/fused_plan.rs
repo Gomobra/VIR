@@ -55,6 +55,13 @@ fn output_shape_satu_indeks_per_baris() {
     assert_eq!(s.as_slice(), &[3]);
 }
 
+fn neg_half_sq_norm(cb: &Codebook) -> Tensor<1> {
+    // bias = -0.5*||e_j||^2: argmax(z·e + bias) == argmin ||z-e||^2.
+    let w = cb.weight.val();
+    let sq = (w.clone() * w).sum_dim(1).reshape([4]);
+    sq.mul_scalar(-0.5)
+}
+
 #[test]
 fn naive_argmin_sama_dengan_quantize_reference() {
     let cb = cb_4x2();
@@ -62,11 +69,8 @@ fn naive_argmin_sama_dengan_quantize_reference() {
         TensorData::new(vec![0.1f32, 0.1, 0.9, 0.9, 0.4, 0.6], [3, 2]),
         &device(),
     );
-    let naive = read_int(&naive_argmin(
-        z.clone(),
-        cb.weight.val(),
-        Tensor::<1>::from_floats(TensorData::new(vec![0.0f32; 4], [4]), &device()),
-    ));
+    let bias = neg_half_sq_norm(&cb);
+    let naive = read_int(&naive_argmin(z.clone(), cb.weight.val(), bias));
     let reference = read_int(&cb.quantize_idx_reference(z));
     assert_eq!(naive, reference, "kernel setara matmul+argmax");
 }
