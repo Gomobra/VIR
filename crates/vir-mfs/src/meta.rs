@@ -174,18 +174,17 @@ impl MemoryStore {
         )
     }
 
-    /// Jumlah akses tercatat untuk satu versi.
+    /// Jumlah akses tercatat untuk satu versi; 0 bila belum pernah dibaca.
     pub fn access_count(&self, version_id: i64) -> Result<u32> {
-        let total: Option<i64> = self
+        let total: i64 = self
             .conn
             .query_row(
-                "SELECT SUM(count) FROM access_log WHERE version_id = ?1",
+                "SELECT COALESCE(SUM(count), 0) FROM access_log WHERE version_id = ?1",
                 params![version_id],
                 |r| r.get(0),
             )
-            .optional()
             .map_err(sql_err)?;
-        Ok(total.unwrap_or(0).max(0) as u32)
+        Ok(total.max(0) as u32)
     }
 
     /// Peta jumlah akses semua versi.

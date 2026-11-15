@@ -39,6 +39,9 @@ mod search;
 mod store;
 mod vec_index;
 
+#[cfg(test)]
+mod tests;
+
 pub use catalog::{FileEntry, VersionInfo};
 pub use consolidate::{ConsolidationReport, HeadlineSummarizer, Summarizer};
 pub use diff::{Diff, DiffKind, DiffLine};
