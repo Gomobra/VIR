@@ -17,3 +17,4 @@ vir-data = { path = "../vir-data" }
 vir-tui = { path = "../vir-tui" }
 vir-mfs = { path = "../vir-mfs" }
 vir-agent = { path = "../vir-agent" }
+vir-model = { path = "../vir-model" }

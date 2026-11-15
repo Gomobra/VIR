@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 use vir_agent::{RlmConfig, ScriptedLm, run_rlm};
 use vir_common::build_info;
-use vir_data::synth_arithmetic;
 use vir_mfs::MemoryStore;
-use vir_text::BpeTokenizer;
+
+mod smoke;
 
 #[derive(Parser)]
 #[command(name = "vir", version, about = "VIR Vbeta CLI")]
@@ -39,33 +39,7 @@ enum Commands {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Smoke { json } => {
-            let texts: Vec<String> = synth_arithmetic(50).into_iter().collect();
-            let mut tok = BpeTokenizer::new();
-            tok.train(&texts, 280);
-            let sample = "1 + 2 = 3";
-            let enc = tok.encode(sample);
-            let dec = tok.decode(&enc);
-            let roundtrip_ok = dec == sample;
-            if json {
-                println!(
-                    "{{\"status\":\"{}\",\"vocab_size\":{},\"roundtrip_ok\":{},\"build\":\"{}\"}}",
-                    if roundtrip_ok { "ok" } else { "fail" },
-                    tok.vocab_size(),
-                    roundtrip_ok,
-                    build_info()
-                );
-            } else {
-                println!(
-                    "smoke: vocab_size={} roundtrip_ok={}",
-                    tok.vocab_size(),
-                    roundtrip_ok
-                );
-            }
-            if !roundtrip_ok {
-                std::process::exit(1);
-            }
-        }
+        Commands::Smoke { json } => smoke::run(json)?,
         Commands::Tui => {
             vir_tui::run()?;
         }
