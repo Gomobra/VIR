@@ -42,9 +42,9 @@ fn fsq_indices_dalam_rentang() {
     let cfg = FsqConfig::new(vec![7, 5, 5, 5, 5]);
     let fsq = Fsq::new(&cfg, 16, &device()).expect("fsq");
     let mut rng = support::Lcg::new(9);
-    let data: Vec<f32> = (0..40).map(|_| rng.unit() * 4.0 - 2.0).collect();
-    let u = tensor2(8, 5, &data[..40]);
-    // Catatan: proj: d->n. Kita uji pada n=5 (jumlah level) lewat jalur internal.
+    // proj: d(16) -> n(5); masukan harus berdimensi d.
+    let data: Vec<f32> = (0..128).map(|_| rng.unit() * 4.0 - 2.0).collect();
+    let u = tensor2(8, 16, &data);
     let q = fsq.quantize(u);
     let idx = read_int1(&q.indices);
     for i in idx {
@@ -58,8 +58,9 @@ fn fsq_roundtrip_depan_belakang_konsisten() {
     let cfg = FsqConfig::new(vec![8, 8, 6, 5]);
     let fsq = Fsq::new(&cfg, 12, &device()).expect("fsq");
     let mut rng = support::Lcg::new(11);
+    // dim 12, 5 baris.
     let data: Vec<f32> = (0..60).map(|_| rng.unit() * 3.0 - 1.5).collect();
-    let u = tensor2(5, 4, &data);
+    let u = tensor2(5, 12, &data);
     let q = fsq.quantize(u);
     let back = fsq.lookup(q.indices);
     let a = support::read1(&q.quantized.reshape([60]));
@@ -74,7 +75,14 @@ fn ifsq_tanpa_commitment() {
     let cfg = FsqConfig::ifsq(vec![16, 16, 16]);
     let mut fsq = Fsq::new(&cfg, 8, &device()).expect("ifsq");
     let before = fsq.updates();
-    let u = tensor2(2, 3, &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+    // dim 8, 2 baris.
+    let u = tensor2(
+        2,
+        8,
+        &[
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6,
+        ],
+    );
     let q = fsq.quantize(u.clone());
     fsq.update(&q.indices, &u, &mut support::Lcg::new(1));
     assert_eq!(
