@@ -62,10 +62,10 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         max_calls: args.max_calls,
         max_steps: args.max_steps,
     };
-    let out = run_rlm(&lm, &context, &cfg, &mut |payload: &JsonValue| {
+    let out = run_rlm(lm.as_ref(), &context, &cfg, &mut |payload: &JsonValue| {
         dispatch(&bridge, payload)
     })?;
-    report(&out, &lm, &bridge, args.json);
+    report(&out, lm.as_ref(), &bridge, args.json);
     Ok(())
 }
 
