@@ -39,14 +39,9 @@ fi
 declare -A ALLOWED=(
     [vir-agent]="F4.x: agen RLM; tes menyusul bersama agent-eng"
     [vir-cli]="CLI (bind-eng); jalur pakai diuji lewat tests/e2e dan vir-eval"
-    [vir-common]="F1.1: config/schedule; tes menyusul bersama arsitek"
-    [vir-data]="F1.1: data/shard; tes menyusul bersama text-eng"
-    [vir-mfs]="F3.4: memori file manager; tes menyusul bersama mem-eng"
     [vir-modal]="Fase 6: multimodal; belum diaktifkan"
     [vir-model]="F1.5/F1.6: generator; gerbang F1.8 dijalankan lewat vir smoke"
-    [vir-nn]="F1.3: RoPE/attention; tes menyusul bersama nn-eng"
     [vir-py]="binding PyO3; diuji lewat python/"
-    [vir-text]="F1.2: BPE; tes menyusul bersama text-eng"
     [vir-tui]="F1.10: TUI; snapshot diuji oleh ui-eng"
 )
 
