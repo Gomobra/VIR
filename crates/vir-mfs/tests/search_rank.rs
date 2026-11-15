@@ -133,6 +133,13 @@ fn dedup_di_bawah_ambang_tidak_menaut() {
         .write_version("/episodik/b", "resep kue lapis", None)
         .expect("tulis 2");
     assert!(out.duplicate_of.is_none());
-    assert!(store.dedup_check("resep kue lapis").expect("cek").is_none());
+    // `dedup_check` dipakai untuk konten yang BELUM ditulis (mencari kembar di
+    // toko); memakainya pada konten yang sudah tertulis akan cocok dengan dirinya.
+    assert!(
+        store
+            .dedup_check("kalimat yang benar-benar baru dan berbeda")
+            .expect("cek")
+            .is_none()
+    );
     assert!(store.links_from(out.version_id).expect("tautan").is_empty());
 }
