@@ -98,6 +98,9 @@ pub fn ls(store: &MemoryStore, prefix: &str) -> Result<Vec<FileEntry>> {
 
 /// Cocokkan path dengan prefiks segmen (bukan sekadar awalan teks).
 pub(crate) fn under_prefix(path: &str, prefix: &str) -> bool {
+    if prefix == "/" {
+        return path.starts_with('/');
+    }
     path == prefix
         || path
             .strip_prefix(prefix)
