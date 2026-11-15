@@ -211,8 +211,8 @@ fn layout_codebooks_tile_without_gaps_or_overlap() {
 
     for key in layout.codebook_keys() {
         let span = layout.codebook_span(key).expect("codebook");
-        assert_eq!(span.len(), DEFAULT_CODEBOOK, "{key} ukuran");
-        assert_eq!(span.len() % SPAN_ALIGN, 0, "{key} sejajar 64");
+        assert_eq!(span.len, DEFAULT_CODEBOOK, "{key} ukuran");
+        assert_eq!(span.len % SPAN_ALIGN, 0, "{key} sejajar 64");
     }
 }
 
