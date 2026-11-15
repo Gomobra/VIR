@@ -13,6 +13,9 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "CC0-1.0",
+    # MPL-2.0: copyleft file-level (OSI/FSF). Diperlukan oleh `colored` yang
+    # ditarik `burn-tensor` (F1.8/G1); bukan pengecualian gerbang, hanya lisensi.
+    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 
