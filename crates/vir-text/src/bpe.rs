@@ -9,7 +9,6 @@ use std::collections::HashMap;
 
 use vir_common::VirError;
 
-use crate::encoder::{Scratch, encode_chunk};
 use crate::special::{MODAL_RESERVE, SPECIAL_TOKENS, SpecialIds};
 
 /// Pasangan id yang digabung menjadi satu token.
@@ -110,12 +109,26 @@ impl MergeTable {
         Some(id)
     }
 
-    /// Bangun tabel dari vocab lalu pulihkan merge dari peringkat.
+    /// Bangun tabel dari vocab yang sudah berurutan, tanpa merge.
     ///
-    /// Pemulihan menjalankan encoder pada byte tiap token: merge terakhir yang
-    /// dihasilkan adalah merge yang membentuk token itu, sehingga
-    /// `from_vocab(export(t)) == t`.
+    /// Berkas tiktoken pihak lain hanya menyimpan byte tiap token, bukan merge,
+    /// sehingga tabel hasil impor bekerja pada tingkat byte (tetap lossless).
+    /// Ekspor VIR menulis blok merge, jadi impornya tepat; lihat
+    /// [`from_vocab_merges`](Self::from_vocab_merges).
     pub fn from_vocab(vocab: Vec<Vec<u8>>) -> Result<Self, VirError> {
+        Self::validated(vocab, Vec::new())
+    }
+
+    /// Bangun tabel dari vocab plus daftar merge (impor ekspor VIR).
+    ///
+    /// Peringkat = posisi merge, dan token hasil merge harus persis byte kedua
+    /// token sumbernya; pelanggaran berarti berkas tidak konsisten.
+    pub fn from_vocab_merges(vocab: Vec<Vec<u8>>, merges: Vec<Pair>) -> Result<Self, VirError> {
+        Self::validated(vocab, merges)
+    }
+
+    /// Validasi tata letak blok dasar lalu terapkan merge bila ada.
+    fn validated(vocab: Vec<Vec<u8>>, merges: Vec<Pair>) -> Result<Self, VirError> {
         let specials = SpecialIds::new();
         let base_len = specials.base_len() as usize;
         if vocab.len() < base_len {
@@ -155,35 +168,27 @@ impl MergeTable {
             rank_of: HashMap::new(),
             base_len: specials.base_len(),
         };
-        table.recover_merges()?;
+        table.apply_merges(merges)?;
         Ok(table)
     }
 
-    /// Pulihkan merge satu per satu dari peringkat vocab.
-    fn recover_merges(&mut self) -> Result<(), VirError> {
-        let mut scratch = Scratch::new();
-        let mut ids: Vec<u32> = Vec::new();
-        let mut trace: Vec<Pair> = Vec::new();
-        let merge_count = self.vocab.len() as u32 - self.base_len;
-        for rank in 0..merge_count {
-            let id = self.base_len + rank;
-            let Some(bytes) = self.vocab.get(id as usize).cloned() else {
-                return Err(VirError::Internal(format!("vocab tanpa id {id}")));
-            };
-            ids.clear();
-            trace.clear();
-            encode_chunk(self, &bytes, &mut scratch, &mut ids, &mut trace);
-            let Some(pair) = trace.last().copied() else {
+    /// Terapkan merge berurutan; peringkat `r` harus menghasilkan id `base_len + r`.
+    fn apply_merges(&mut self, merges: Vec<Pair>) -> Result<(), VirError> {
+        for (rank, pair) in merges.into_iter().enumerate() {
+            let expected = self.base_len + rank as u32;
+            if pair.0.max(pair.1) >= expected {
                 return Err(VirError::Internal(format!(
-                    "merge token {id} tidak dapat dipulihkan"
+                    "merge peringkat {rank} memakai id di luar vocab"
+                )));
+            }
+            let Some(id) = self.push_merge(pair) else {
+                return Err(VirError::Internal(format!(
+                    "merge peringkat {rank} ganda atau tidak sah"
                 )));
             };
-            let Some(new_id) = self.push_merge(pair) else {
-                return Err(VirError::Internal(format!("merge ganda pada token {id}")));
-            };
-            if new_id != id || self.token(id) != Some(bytes.as_slice()) {
+            if id != expected || self.vocab.len() != expected as usize + 1 {
                 return Err(VirError::Internal(format!(
-                    "merge token {id} tidak cocok dengan vocab"
+                    "merge peringkat {rank} tidak cocok dengan vocab"
                 )));
             }
         }

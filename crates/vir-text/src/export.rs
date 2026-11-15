@@ -1,10 +1,15 @@
 //! Ekspor dan pemuat format tiktoken (PRD F1.2 langkah 4).
 //!
 //! Varian VIR: satu baris per token `<base64> <id>`, dengan `id` = peringkat,
-//! sehingga id hasil impor identik dengan id asal. Token khusus dan slot cadangan
-//! modalitas ikut ditulis (slot cadangan sebagai baris kosong) agar tata letak id
-//! blok dasar tetap presisi. Merge tidak disimpan; ia dipulihkan dengan menjalankan
-//! encoder pada byte tiap token (lihat [`crate::bpe::MergeTable::from_vocab`]).
+//! sehingga id hasil impor identik dengan id asal. Token kosong (slot cadangan
+//! modalitas) ditulis sebagai baris `<kosong> <id>` — awalan spasi wajib
+//! dipertahankan saat impor, karena `trim` akan menghapusnya dan mematahkan
+//! peringkat. Token khusus ikut ditulis agar tata letak id blok dasar presisi.
+//!
+//! Merge tidak dapat disimpulkan dari byte token saja (split bisa ambigu), jadi
+//! ekspor menambahkan blok merge `<id_kiri> <id_kanan>` berawalan `#merge` di
+//! akhir berkas. Tanpa blok itu (berkas tiktoken pihak lain) impor menghasilkan
+//! tabel tanpa merge: tetap lossless, tetapi `encode` bekerja pada tingkat byte.
 
 use std::fs;
 use std::io::Write;
@@ -12,12 +17,15 @@ use std::path::Path;
 
 use vir_common::VirError;
 
-use crate::bpe::MergeTable;
+use crate::bpe::{MergeTable, Pair};
 use crate::special::{SPECIAL_TOKENS, SpecialIds};
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Ekspor vocab ke format tiktoken (satu baris per token).
+/// Awalan baris merge pada ekspor VIR.
+pub const MERGE_LINE: &str = "#merge";
+
+/// Ekspor vocab ke format tiktoken (satu baris per token) + blok merge.
 pub fn export_tiktoken(table: &MergeTable) -> String {
     let mut out = String::new();
     for (id, bytes) in table.vocab().iter().enumerate() {
@@ -26,36 +34,70 @@ pub fn export_tiktoken(table: &MergeTable) -> String {
         out.push_str(&id.to_string());
         out.push('\n');
     }
+    for (pair, _) in table.merges() {
+        out.push_str(MERGE_LINE);
+        out.push(' ');
+        out.push_str(&pair.0.to_string());
+        out.push(' ');
+        out.push_str(&pair.1.to_string());
+        out.push('\n');
+    }
     out
 }
 
-/// Impor vocab dari format tiktoken lalu pulihkan merge.
+/// Impor vocab dari format tiktoken lalu pulihkan merge dari blok `#merge`.
 pub fn load_tiktoken(text: &str) -> Result<MergeTable, VirError> {
     let mut vocab: Vec<Vec<u8>> = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let line = line.trim();
+    let mut merges: Vec<Pair> = Vec::new();
+    for (index, raw) in text.lines().enumerate() {
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
         if line.is_empty() {
             continue;
         }
         let line_no = index + 1;
-        let Some((token, rank)) = line.rsplit_once(' ') else {
-            return Err(VirError::Internal(format!(
-                "tiktoken baris {line_no}: '{line}' tanpa peringkat"
-            )));
-        };
-        let rank: usize = rank.parse().map_err(|_| {
-            VirError::Internal(format!(
-                "tiktoken baris {line_no}: peringkat '{rank}' bukan angka"
-            ))
-        })?;
-        if rank != vocab.len() {
-            return Err(VirError::Internal(format!(
-                "tiktoken baris {line_no}: peringkat {rank} tidak berurutan"
-            )));
+        if let Some(rest) = line.strip_prefix(MERGE_LINE) {
+            let pair = parse_merge(rest).ok_or_else(|| {
+                VirError::Internal(format!(
+                    "tiktoken baris {line_no}: merge '{line}' tidak sah"
+                ))
+            })?;
+            merges.push(pair);
+            continue;
         }
-        vocab.push(base64_decode(token)?);
+        vocab.push(parse_token_line(line, vocab.len(), line_no)?);
     }
-    MergeTable::from_vocab(vocab)
+    MergeTable::from_vocab_merges(vocab, merges)
+}
+
+/// Satu baris token: `<base64> <peringkat>`; token kosong ditulis sebagai ` <id>`.
+fn parse_token_line(line: &str, next_id: usize, line_no: usize) -> Result<Vec<u8>, VirError> {
+    let Some((token, rank)) = line.rsplit_once(' ') else {
+        return Err(VirError::Internal(format!(
+            "tiktoken baris {line_no}: '{line}' tanpa peringkat"
+        )));
+    };
+    let rank: usize = rank.parse().map_err(|_| {
+        VirError::Internal(format!(
+            "tiktoken baris {line_no}: peringkat '{rank}' bukan angka"
+        ))
+    })?;
+    if rank != next_id {
+        return Err(VirError::Internal(format!(
+            "tiktoken baris {line_no}: peringkat {rank} tidak berurutan"
+        )));
+    }
+    base64_decode(token)
+}
+
+/// Dua id merge dipisah spasi; lebih dari dua dianggap tidak sah.
+fn parse_merge(rest: &str) -> Option<Pair> {
+    let mut parts = rest.split_whitespace();
+    let left = parts.next()?.parse().ok()?;
+    let right = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((left, right))
 }
 
 /// Peta token khusus dalam JSON untuk interoperabilitas dengan tiktoken.
@@ -216,8 +258,34 @@ mod tests {
         let text = export_tiktoken(table);
         let back = load_tiktoken(&text).ok();
         assert_eq!(back.as_ref(), Some(table));
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.starts_with(MERGE_LINE))
+                .count(),
+            table.merge_count()
+        );
         let specials = export_specials(table);
         assert!(specials.contains("\"<pad>\":256"));
         assert!(specials.contains("\"<eos>\":258"));
+    }
+
+    #[test]
+    fn token_kosong_tidak_terpotong_saat_impor() {
+        let table = MergeTable::new();
+        let text = export_tiktoken(&table);
+        assert!(
+            text.lines().any(|line| line.starts_with(' ')),
+            "slot cadangan harus jadi baris token kosong"
+        );
+        assert_eq!(load_tiktoken(&text).expect("impor"), table);
+    }
+
+    #[test]
+    fn merge_tak_berurutan_ditolak() {
+        let table = MergeTable::new();
+        let text = export_tiktoken(&table);
+        let rusak = format!("{text}{MERGE_LINE} 300 65\n");
+        assert!(load_tiktoken(&rusak).is_err());
+        assert!(load_tiktoken(&format!("{text}{MERGE_LINE} 65\n")).is_err());
     }
 }

@@ -206,12 +206,20 @@ fn pipeline_tokenizer_ke_shard_stream_fim() {
         },
     )
     .expect("stream");
+    // Stream tidak pernah habis (epoch berulang): batasi satu epoch secara
+    // eksplisit. `while let Some(..)` di sini menggantung selamanya (ERRATA E-008).
+    let epoch = stream.epoch_len();
     let mut produced = 0usize;
-    while let Some(block) = stream.next_block() {
-        produced += block.len();
+    for _ in 0..epoch {
+        produced += stream.next_block().expect("blok").len();
     }
     let padded = tokens.len().div_ceil(32) * 32;
+    assert_eq!(epoch, tokens.len().div_ceil(32));
     assert_eq!(produced, padded);
+    assert!(
+        stream.next_block().is_some(),
+        "epoch berikutnya harus tetap mengalir"
+    );
 
     let markers = FimMarkers::defaults();
     let third = tokens.len() / 3;

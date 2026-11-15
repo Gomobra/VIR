@@ -1,0 +1,7 @@
+# Ambang tes lambat + penghenti paksa.
+#
+# Tanpa `terminate-after`, satu tes yang menggantung menahan seluruh job sampai
+# batas waktu GitHub (ERRATA E-008: 25 menit terbuang). Dengan ini, tes yang
+# melewati 2x60 detik dihentikan dan dilaporkan sebagai gagal beserta namanya.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 2, grace-period = "10s" }

@@ -2,8 +2,8 @@
 
 use proptest::prelude::*;
 use vir_text::{
-    BYTE_VOCAB, BpeEncoder, CharClass, PreTokenizer, SPECIAL_TOKENS, SpecialIds, TrainConfig,
-    classify, export_tiktoken, load_tiktoken, pretokenize, resolve_backend, train_bpe,
+    BYTE_VOCAB, BpeEncoder, CharClass, MERGE_LINE, PreTokenizer, SPECIAL_TOKENS, SpecialIds,
+    TrainConfig, classify, export_tiktoken, load_tiktoken, pretokenize, resolve_backend, train_bpe,
 };
 
 /// RNG kecil deterministik; cukup untuk data uji tanpa dependensi tambahan.
@@ -106,8 +106,23 @@ fn ekspor_impor_tiktoken_setara() {
     let text = export_tiktoken(&table);
     let back = load_tiktoken(&text).ok();
     assert_eq!(back.as_ref(), Some(&table));
-    assert_eq!(text.lines().count(), table.vocab_size());
+    assert_eq!(token_lines(&text), table.vocab_size());
+    assert_eq!(merge_lines(&text), table.merge_count());
     assert!(text.lines().next().unwrap_or("").ends_with(" 0"));
+}
+
+/// Jumlah baris token (di luar blok merge `#merge`).
+fn token_lines(text: &str) -> usize {
+    text.lines()
+        .filter(|line| !line.starts_with(MERGE_LINE))
+        .count()
+}
+
+/// Jumlah baris merge pada ekspor.
+fn merge_lines(text: &str) -> usize {
+    text.lines()
+        .filter(|line| line.starts_with(MERGE_LINE))
+        .count()
 }
 
 #[test]

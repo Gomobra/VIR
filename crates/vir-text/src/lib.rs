@@ -22,7 +22,7 @@ mod train;
 
 pub use bpe::{MergeTable, Pair};
 pub use encoder::{BackendKind, BpeEncoder, Encoder, resolve_backend};
-pub use export::{export_specials, export_tiktoken, load, load_tiktoken, save};
+pub use export::{MERGE_LINE, export_specials, export_tiktoken, load, load_tiktoken, save};
 pub use pretok::{CharClass, DEFAULT_MAX_WORD_BYTES, PreTokenizer, classify, pretokenize};
 pub use special::{
     BOS, BYTE_VOCAB, EOS, FIM_MIDDLE, FIM_PREFIX, FIM_SUFFIX, MASK, MODAL_RESERVE, PAD,
