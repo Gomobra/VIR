@@ -22,8 +22,8 @@ fn scale_ops_identitas_ketika_panjang_sama() {
     let x = tensor3(1, 4, 2, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     let d = ops.down(x.clone());
     let up = ops.up(d);
-    let orig = read2(&x.reshape([8]));
-    let back = read2(&up.reshape([8]));
+    let orig = support::read1(&x.reshape([8]));
+    let back = support::read1(&up.reshape([8]));
     for (a, b) in orig.iter().zip(back.iter()) {
         assert!((a - b).abs() < 1e-4, "identitas down/up: {a} vs {b}");
     }
@@ -52,7 +52,7 @@ fn broadcast_dari_satu_posisi() {
     let ops = ScaleOps::new(1, 4, &device());
     let x = tensor3(1, 1, 1, &[5.0]);
     let u = ops.up(x);
-    let vals = read2(&u.reshape([4]));
+    let vals = support::read1(&u.reshape([4]));
     assert_eq!(vals.len(), 4);
     for v in &vals {
         assert!((v - 5.0).abs() < 1e-4, "broadcast 5 -> {v}");
@@ -64,7 +64,7 @@ fn down_average_pooling_numerik() {
     // L=4, ℓ=2: blok [0,1] dan [2,3]; rata-rata 1,2 -> 1.5; 3,4 -> 3.5.
     let ops = ScaleOps::new(4, 2, &device());
     let x = tensor3(1, 4, 1, &[1.0, 2.0, 3.0, 4.0]);
-    let d = read2(&ops.down(x).reshape([2]));
+    let d = support::read1(&ops.down(x).reshape([2]));
     assert!((d[0] - 1.5).abs() < 1e-4, "blok0 {}", d[0]);
     assert!((d[1] - 3.5).abs() < 1e-4, "blok1 {}", d[1]);
 }

@@ -111,7 +111,7 @@ fn set_entries_menepati_ema_state() {
     // EMA update dengan batch yang sama persis -> entri tidak berubah (decay 0.99,
     // tapi sum/count sudah = e sehingga e tetap).
     let z = tensor2(1, 2, &[0.0, 0.0]);
-    let idx = read_int1(&cb.quantize_idx(z));
+    let idx = cb.quantize_idx(z);
     let mut rng = support::Lcg::new(3);
     cb.ema_update(&tensor2(1, 2, &[0.0, 0.0]), &idx, &mut rng);
     cb.refresh_cache();
