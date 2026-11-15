@@ -47,7 +47,9 @@
 - **F1.6**: generator penuh (embedding per level, head, loss/generate, sampling).
 - **F1.7**: trainer 2 tahap, Muon, checkpoint/resume, JSONL.
 - **F1.8**: irisan penuh (BPE→VQ→generator→decoder→sampling, overfit 8 sampel).
-- **F1.10/F3.8**: TUI penuh (JSONL tail, chart, snapshot 3 ukuran, 9 layar).
+- **F1.10/F3.8**: TUI penuh (JSONL tail, chart, 9 layar) + tes nyata di
+  `crates/vir-tui/tests`: snapshot render 3 ukuran, fuzz input proptest, layout responsif,
+  tema/`NO_COLOR`, state `update`, anggaran render, dan PTY (E-010).
 - **F3.1**: Landlock + seccomp + rlimit.
 - **F3.2**: REPL stateful.
 - **F3.3**: vector index, dedup, konsolidasi, ls/tree/link/tag/diff.

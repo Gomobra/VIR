@@ -117,7 +117,7 @@ impl App {
     pub fn palette(&self) -> Palette {
         Palette::new(
             self.settings.config.theme,
-            self.settings.config.color_mode,
+            crate::theme::resolve_mode(self.settings.config.color_mode),
             self.settings.config.colorblind_safe,
         )
     }
@@ -130,6 +130,13 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        // Ctrl+P selalu mengalihkan palet, termasuk saat overlay lain terbuka
+        // (F3.8: palet perintah lewat `Ctrl+P` atau `:`).
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
+            self.help = false;
+            self.palette.toggle();
+            return;
+        }
         if self.palette.open {
             self.on_palette_key(key);
             return;
@@ -140,10 +147,6 @@ impl App {
         }
         if self.filter_mode {
             self.on_filter_key(key);
-            return;
-        }
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
-            self.palette.toggle();
             return;
         }
         match key.code {

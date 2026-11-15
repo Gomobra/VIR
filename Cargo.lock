@@ -2316,6 +2316,7 @@ name = "vir-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "proptest",
  "ratatui",
  "tokio",
  "vir-common",

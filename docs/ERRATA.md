@@ -117,3 +117,24 @@ Format entri:
   korpus 8 byte maksimal 2 merge nyata; ambang lama hanya tercapai bila frekuensi
   salah hitung), `indeks_pasangan_sesuai_hitung_ulang`.
 - Commit: (debugger, tes) + (text-eng, train.rs)
+
+## E-010 — vir-tui tanpa tes nyata; `NO_COLOR` dan Ctrl+P tidak ter-wiring
+- Gejala: `docs/PROGRESS.md` mengklaim "TUI multi-screen ... snapshot 3 ukuran ...
+  CI hijau" padahal `crates/vir-tui` tidak punya satu pun tes, sehingga F3.8.h
+  (snapshot 3 ukuran, fuzz input, PTY) tidak pernah dijalankan. `NO_COLOR` hanya
+  ada sebagai `detect_mode(bool)` yang tidak pernah dipanggil, dan `Ctrl+P`
+  kedua saat palet terbuka justru mengetik `p` ke query sehingga palet tidak
+  pernah tertutup (F3.8: palet lewat `Ctrl+P` atau `:`).
+- Akar masalah: crate TUI ditulis tanpa berkas `tests/` (0 tes → job `nextest`
+  hijau tanpa mengeksekusi apa pun) dan tanpa menyambung mode warna efektif ke
+  `App::palette()`; cabang `Ctrl+P` berada di bawah cabang palet pada `on_key`.
+- Perbaikan: `crates/vir-tui/tests/` (render 3 ukuran, fuzz proptest, layout
+  responsif, tema/`NO_COLOR`, state `update`, anggaran render, PTY);
+  `theme.rs` (`no_color`, `mode_for`, `resolve_mode`); `app.rs` (`palette()` dan
+  `on_key` memakai mode warna efektif serta menangani `Ctrl+P` lebih dulu).
+  `scripts/forbid_stubs.sh`: `vir-tui` tidak lagi di-allowlist "tanpa tes".
+- Tes regresi: `snapshot_tiap_layar_tiga_ukuran`,
+  `input_acak_tidak_panik_dan_invariant_terjaga`,
+  `pty_no_color_mematikan_warna_truecolor`, `ctrl_p_tidak_mengetik_p_ke_query`,
+  `no_color_selalu_menang_atas_setelan`.
+- Commit: (ui-eng)

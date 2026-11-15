@@ -208,10 +208,26 @@ impl Palette {
     }
 }
 
-pub fn detect_mode(env: bool) -> ColorMode {
-    if env {
+/// `NO_COLOR` (no-color.org): variabel ada dan tidak kosong berarti tanpa warna.
+pub fn no_color() -> bool {
+    std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
+}
+
+/// Mode warna efektif: `NO_COLOR` selalu menang atas setelan (F3.8.g/R9).
+pub fn mode_for(no_color: bool, configured: ColorMode) -> ColorMode {
+    if no_color {
         ColorMode::None
     } else {
-        ColorMode::Truecolor
+        configured
     }
+}
+
+/// Mode warna efektif memakai `NO_COLOR` dari lingkungan.
+pub fn resolve_mode(configured: ColorMode) -> ColorMode {
+    mode_for(no_color(), configured)
+}
+
+/// Mode deteksi dari `NO_COLOR` (kompatibel dengan pemanggil lama).
+pub fn detect_mode(no_color: bool) -> ColorMode {
+    mode_for(no_color, ColorMode::Truecolor)
 }

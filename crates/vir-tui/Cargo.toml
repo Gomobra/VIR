@@ -10,3 +10,6 @@ vir-mfs = { path = "../vir-mfs" }
 ratatui = "0.30"
 crossterm = "0.29"
 tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+proptest = "1"

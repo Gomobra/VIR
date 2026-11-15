@@ -42,7 +42,6 @@ declare -A ALLOWED=(
     [vir-modal]="Fase 6: multimodal; belum diaktifkan"
     [vir-model]="F1.5/F1.6: generator; gerbang F1.8 dijalankan lewat vir smoke"
     [vir-py]="binding PyO3; diuji lewat python/"
-    [vir-tui]="F1.10: TUI; snapshot diuji oleh ui-eng"
 )
 
 count_tests() {
