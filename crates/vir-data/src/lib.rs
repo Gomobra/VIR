@@ -25,7 +25,10 @@ mod synth;
 pub use fim::{
     FimMarkers, FimMode, FimParts, fim_psm, fim_spm, parse as parse_fim, transform as transform_fim,
 };
-pub use mix::{MixConfig, SourceMix, mix_blocks, pick_source, proportions, validate_weights};
+pub use mix::{
+    MixConfig, SourceMix, block_counts, mix_blocks, pick_source, proportions, total_blocks,
+    validate_weights,
+};
 pub use pack::{
     DEFAULT_BLOCK_SIZE, PackConfig, PackedBlock, pack_blocks, pack_documents, pack_tokens,
 };

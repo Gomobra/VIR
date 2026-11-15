@@ -31,7 +31,7 @@ pub fn synth_questions(n: usize) -> Vec<String> {
                     format!("Q: berapa {a} + {b}? A: {answer}")
                 }
                 1 => {
-                    let answer = a - b;
+                    let answer = a as i64 - b as i64;
                     format!("Q: what is {a} - {b}? A: {answer}")
                 }
                 _ => {

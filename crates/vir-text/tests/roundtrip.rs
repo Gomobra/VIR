@@ -35,6 +35,7 @@ const KORPUS: &[&str] = &[
     "Angka campuran 1234567890 dan 3,14159 serta 0x1F600 harus utuh.",
 ];
 
+#[allow(dead_code)]
 fn corpus_texts() -> Vec<String> {
     KORPUS.iter().map(|t| (*t).to_string()).collect()
 }
