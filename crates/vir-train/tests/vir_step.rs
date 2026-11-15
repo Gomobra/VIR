@@ -7,7 +7,8 @@ use vir_train::burn_step::VirStepFn;
 use vir_train::data::ShardBatchSource;
 use vir_train::model::VirTrainConfig;
 use vir_train::optim::ParamRole;
-use vir_train::trainer::{LrSchedule, Stage, StepCtx, TrainConfig, Trainer};
+use vir_train::schedule::LrSchedule;
+use vir_train::trainer::{Stage, StepCtx, StepFn, TrainConfig, Trainer};
 
 const SAMPLES: usize = 8;
 const LEN: usize = 4;
