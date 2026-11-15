@@ -146,15 +146,16 @@ fn diff_menghitung_baris_berubah() {
 #[test]
 fn link_dan_tetangga_graf() {
     let store = store();
-    let v1 = tulis(&store, "/episodik/a", "satu");
-    let v2 = tulis(&store, "/episodik/a", "dua");
+    let v1 = tulis(&store, "/episodik/link-a", "satu");
+    let v2 = tulis(&store, "/episodik/link-a", "dua");
     link(&store, v1, v2, LinkKind::DerivedFrom).expect("taut");
     assert!(
         links(&store, v1)
             .expect("tautan")
             .contains(&(v2, LinkKind::DerivedFrom))
     );
-    assert_eq!(neighbors(&store, v1).expect("tetangga"), vec![v2]);
+    // v1 men-supersede versi sebelumnya, jadi tetangga v1 = {pendahulu, v2}.
+    assert!(neighbors(&store, v1).expect("tetangga").contains(&v2));
     assert_eq!(neighbors(&store, v2).expect("tetangga"), vec![v1]);
     assert!(link(&store, v1, v1, LinkKind::DerivedFrom).is_err());
     assert!(link(&store, v1, 9_999, LinkKind::DerivedFrom).is_err());
