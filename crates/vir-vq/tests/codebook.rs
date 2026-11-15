@@ -77,15 +77,19 @@ fn ema_update_av_trigger_count_hitung_developer() {
 
 #[test]
 fn dead_codes_terdeteksi() {
-    let mut cb = Codebook::new(&cfg(8, 2), &device());
-    // Hanya pakai sebagian entri lewat EMA.
+    // restart_threshold = 0 -> dead-code restart mati, sehingga entri yang tak
+    // dipakai tetap mati (tak dihidupkan ulang dari batch).
+    let mut c = cfg(8, 2);
+    c.restart_threshold = 0.0;
+    let mut cb = Codebook::new(&c, &device());
     let z = tensor2(2, 2, &[0.0, 0.0, 1.0, 1.0]);
     let idx = cb.quantize_idx(z);
     let mut rng = support::Lcg::new(1);
     cb.ema_update(&tensor2(2, 2, &[0.0, 0.0, 1.0, 1.0]), &idx, &mut rng);
     cb.refresh_cache();
-    // Sebagian dari 8 entri tidak pernah dipakai -> dead_codes > 0.
+    // Hanya <=2 entri terpakai; sisanya mati.
     assert!(cb.used_codes() <= 2, "hanya <=2 entri terpakai");
+    assert!(cb.dead_codes() >= 6, "mayoritas kode mati");
 }
 
 #[test]
@@ -105,7 +109,10 @@ fn straight_through_meneruskan_nilai_z() {
 #[test]
 fn set_entries_menepati_ema_state() {
     // E-012: setelah set_entries, EMA update pertama tak boleh mencampur init acak.
-    let mut cb = Codebook::new(&cfg(4, 2), &device());
+    // restart_threshold = 0 -> entri yang tak dipakai batch tidak dihidupkan ulang.
+    let mut c = cfg(4, 2);
+    c.restart_threshold = 0.0;
+    let mut cb = Codebook::new(&c, &device());
     cb.set_entries(&[0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0])
         .expect("set");
     // EMA update dengan batch yang sama persis -> entri tidak berubah (decay 0.99,
