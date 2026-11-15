@@ -193,7 +193,7 @@ pub(crate) fn codes_equal(a: &[Tensor<2, Int>], b: &[Tensor<2, Int>]) -> bool {
 pub fn model_smoke() -> Result<(), VirError> {
     let device = smoke_device();
     let levels = vec![2usize, 4, 8];
-    let mut model = Generator::new(&GeneratorConfig::new(16, 2, levels.clone()), &device)?;
+    let model = Generator::new(&GeneratorConfig::new(16, 2, levels.clone()), &device)?;
     let inputs: Vec<Tensor<3>> = (0..levels.len())
         .map(|_| Tensor::<3>::zeros([2, 8, 16], &device))
         .collect();

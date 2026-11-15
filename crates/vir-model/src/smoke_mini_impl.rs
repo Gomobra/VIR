@@ -273,7 +273,7 @@ fn fit_linear_decoder(
         device,
     );
     zero_mlp(&mut dec, dim, device);
-    crate::generator::replace_head(&mut dec.head, w, dim, vocab, device);
+    crate::generator::replace_head(&mut dec.head, w, dim, vocab, device)?;
     Ok(dec)
 }
 

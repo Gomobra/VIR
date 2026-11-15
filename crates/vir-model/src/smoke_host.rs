@@ -174,7 +174,7 @@ pub fn fit_heads_from_features(
         let rows = b * l;
         let vocab = model.heads[k].weight.val().dims()[1];
         let x = read_f32(&features[k].clone().reshape([rows, h]));
-        let want = read_i64(&targets[k].clone().reshape([rows]));
+        let want = indices_to_vec(&targets[k].clone().reshape([rows]));
         if x.len() != rows * h || want.len() != rows {
             return Err(VirError::Internal(format!(
                 "data kepala level {k} tidak dapat dibaca"
@@ -316,7 +316,7 @@ pub fn fit_heads_exact(
         let rows = b * l;
         let vocab = model.heads[k].weight.val().dims()[1];
         let x = read_f32(&features[k].clone().reshape([rows, h]));
-        let want = read_i64(&targets[k].clone().reshape([rows]));
+        let want = indices_to_vec(&targets[k].clone().reshape([rows]));
         if x.len() != rows * h || want.len() != rows {
             return Err(VirError::Internal(format!(
                 "data kepala level {k} tidak dapat dibaca"
@@ -371,9 +371,4 @@ fn one_hot(targets: &[i64], v: usize) -> Vec<f32> {
 /// Baca tensor sebagai `Vec<f32>` (kosong bila gagal).
 fn read_f32(t: &Tensor<2>) -> Vec<f32> {
     t.to_data().try_to_vec::<f32>().unwrap_or_default()
-}
-
-/// Baca tensor indeks sebagai `Vec<i64>` (kosong bila gagal).
-fn read_i64(t: &Tensor<1, Int>) -> Vec<i64> {
-    t.to_data().try_to_vec::<i64>().unwrap_or_default()
 }
