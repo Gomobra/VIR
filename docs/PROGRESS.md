@@ -1,64 +1,109 @@
 # PROGRESS — VIR Vbeta
 
-## Selesai (F0–F4 sebagian)
-- **F0**: workspace Cargo, `vir-common`, `vir-py`, `vir-cli`, `vir-text`, `vir-data`, `vir-tui`, `vir-mfs`, `vir-sandbox`, `vir-agent`, `vir-eval`, `vir-vq`, `vir-nn`, `vir-model`, `vir-train`; Python API + CLI; CI (ci/wheels/smoke); AGENTS.md; LICENSE/README/CONTRIBUTING/SECURITY; PR template; `.opencode/agents` (14 agen); `configs/`; `data/sources.json`; `docs/adr/ADR-001..008`; `specs/F0.1..F4.5`.
-- **F1**: BPE byte-level + ByteTokenizer; shard/pack/FIM/stream/synth; VQ codebook skeleton; NN block skeleton; generator skeleton; loss helpers; `vir smoke` BPE roundtrip; TUI dashboard v1.
-- **F2**: recurrent/halting/sampling skeleton; level weight; pass@k.
-- **F3**: MFS (SQLite WAL, FTS5, versioning, RRF); sandbox (subprocess); RLM (ScriptedLm + budget); Python bindings.
-- **F4**: vir-eval (pass@k, recon, needle); SFT pack; GRPO advantage; kaggle_train.py.
-- **F7.1**: fused matmul+argmax kernel (`crates/vir-vq/src/kernel.rs`, feature `fused`) — tidak menulis buffer [N,V] ke HBM; compile check CI lulus.
-- **F1.4**: vir-vq lengkap (codebook EMA, multiscale, dropout, decoder, loss, metrics, FSQ) — 50+ tes lulus di CI.
-- **F1.5**: vir-nn (RoPE nyata, block-diagonal + prefix-LM mask, attention, RMSNorm, SwiGLU, leakage tests) — tes lulus di CI.
-- **F1.6**: vir-model (generator: codebook per level, proyeksi rekonstruksi, prelude/core/coda, head per level, loss R6, generate level-by-level) — tes lulus di CI.
-- **F1.7**: vir-train (Muon Newton-Schulz, JSONL logger, pass@k tak bias, GRPO advantage, level_weight) — tes lulus di CI.
-- **F2.1**: vir-model recurrent depth (prelude/core/coda, injection adapter, r sampling Poisson lognormal) — tes lulus di CI.
-- **F2.2/F2.3**: halting (Fixed/Entropy) + entropy + block-AR loop — tes lulus di CI.
-- **F2.4**: CFG logit + MBR select (similarity-based) — tes lulus di CI.
-- **F3.4**: RLM recursive `llm_query` dengan budget kedalaman/panggilan — tes lulus di CI.
-- **F3.1**: vir-sandbox Landlock module (feature `sandbox`, ABI detect + confine) — tes lulus di CI.
-- **F4.1/F4.2/F4.4/F4.5**: SFT loss (prefix-LM), pass@k, FIM, vir-eval — CI hijau.
-- **F1.8**: `full_smoke` (VQ+generator+loss mini) di vir-model — tes lulus di CI.
-- **F3.2**: REPL stateful (persistent CPython, state persists antar eksekusi) — tes lulus di CI.
-- **F3.6/F3.7**: Python namespaces (vir.text/mfs/agent) + e2e tests (MFS+RLM) — CI hijau.
-- **F3.8**: TUI multi-screen (dashboard/train/generate/memory/rlm/eval/logs/settings) + tabs — CI hijau.
-- **F4.3**: GRPO objective (PPO-clip + KL) — CI hijau.
-- **F5.4**: RULER needle/multi-key generator — CI hijau.
-- **F7.2**: PTQ quant scheme config (int8/int4/fp8) — CI hijau.
-- **F5.2/F5.3**: KDA linear attention step + NoPE per-block flag — CI hijau.
-- **F6.0**: ADR-009 (representasi multimodal) + crate `vir-modal` (ModalKind, ModalToken/VocabLayout, ModalAsset, PairedSample+JSONL, trait ModalEncoder, budget) — 30 tes lulus.
-- **F7.1**: kernel tuning (chunk launch, autotune hint) + fallback bias fix — CI hijau.
-- **F5.2**: KDA chunkwise (UT) + naive fix — CI hijau.
-- **F6.1/F6.2**: Connector (MLP) + ModalTokenizer trait — CI hijau.
-- **F6.3/F6.4**: image FSQ quantizer + audio RVQ codec (SNAC-style, bitrate 984 bps) — 37 tes lulus, CI hijau.
-- **F6.5**: video frame sampler (fixed + scene change) — CI hijau.
-- **F7.3**: release workflow (wheels on tag) + docs/API.md — CI hijau.
-- **Subagent work**: vir-model (generator/recurrent/block_ar/sampling/loss/scale/smoke modules), vir-cli (cmd_train/generate/eval/mem/rlm/smoke + backend), vir-sandbox (seccomp-bpf + syscalls + limits), vir-py (allow_threads + namespace), TUI full screens, vir-eval (RULER 5 kategori + ROUGE/BLEU + eval suite), vir-modal (F6.1-F6.5 encoders). CI hijau.
-- **F1.7**: BurnStepFn konkret (forward+backward+grad→ParamStore + weight sync) — compile CI hijau.
+> Status jujur per 16 Nov 2026. Setiap baris menyebut **bukti** (crate + jumlah
+> tes nyata yang dijalankan CI, atau "belum"). Klaim tanpa bukti = belum selesai
+> (R7). Angka tes = jumlah `#[test]`/`#[tokio::test]` yang benar-benar dijalankan
+> job CI (bukan CUDA/sandbox-gated).
 
-## Bukti
-- CI semua job hijau (fmt, clippy, nextest, forbid_stubs, deny, vir-vq, vir-nn, vir-model, vir-train, vir-eval).
-- Wheel manylinux x86_64 terbangun; `import vir` OK.
-- Kaggle G2: Burn CUDA **0.49× PyTorch** (forward VQ) → LULUS borderline (ADR-001).
-- Kaggle G2 smoke + bench: COMPLETE (log.txt + result.json).
+## Ringkasan tes yang dijalankan CI
 
-## Sisa (belum selesai)
-- **F1.4**: VQ penuh (EMA update, dead-code restart, nested dropout, decoder, loss, FSQ).
-- **F1.5**: RoPE nyata, mask block-diagonal/prefix-LM, leakage tests.
-- **F1.6**: generator penuh (embedding per level, head, loss/generate, sampling).
-- **F1.7**: trainer 2 tahap, Muon, checkpoint/resume, JSONL.
-- **F1.8**: irisan penuh (BPE→VQ→generator→decoder→sampling, overfit 8 sampel).
-- **F1.10/F3.8**: TUI penuh (JSONL tail, chart, 9 layar) + tes nyata di
-  `crates/vir-tui/tests`: snapshot render 3 ukuran, fuzz input proptest, layout responsif,
-  tema/`NO_COLOR`, state `update`, anggaran render, dan PTY (E-010).
-- **F3.1**: Landlock + seccomp + rlimit.
-- **F3.2**: REPL stateful.
-- **F3.3**: vector index, dedup, konsolidasi, ls/tree/link/tag/diff.
-- **F3.4**: RLM rekursif + llm_query + mem + FINAL.
-- **F3.6**: API lengkap (`vir.text.Tokenizer`, `vir.Model`, dll).
-- **F3.7**: tests/e2e + tests/python.
-- **F4**: SFT training, verifier selection, RL loop, code eval, lm-eval adapter.
-- **F5/F6/F7**: konteks panjang, multimodal, optimasi.
-- Pecah file sesuai tree 6.2 (sebagian masih `lib.rs` tunggal).
+| Crate | Tes nyata (CI) | Gerbang |
+|---|---|---|
+| vir-common | 21 | job `nextest` |
+| vir-text | 33 | job `nextest` |
+| vir-data | 46 | job `nextest` |
+| vir-vq | 34 | job `vir-vq` (CPU, non-CUDA) |
+| vir-nn | 11 | job `vir-nn` |
+| vir-model | 36 | job `vir-model` |
+| vir-train | 44 | job `vir-train` |
+| vir-eval | 12 | job `vir-eval` |
+| vir-mfs | 43 | job `nextest` |
+| vir-sandbox | 20 | job `nextest` + `vir-sandbox` (build `--features sandbox`) |
+| vir-agent | 11 | job `nextest` |
+| vir-tui | 38 | job `nextest` |
+| vir-cli | 5 | job `nextest` |
+| vir-modal | 91 | job `vir-modal` |
+| vir-py | 0 (diuji via python/wheel) | job `wheels` (`import vir`) |
+
+CI terakhir: **hijau** (run `ci`, `smoke`, `wheels` pada `main`). Tautan run ada
+di riwayat commit; lihat `gh run list`.
+
+## Selesai (dengan bukti tes)
+
+- **F0**: workspace Cargo, `vir-common`, `vir-py`, `vir-cli`, `vir-text`,
+  `vir-data`, `vir-tui`, `vir-mfs`, `vir-sandbox`, `vir-agent`, `vir-eval`,
+  `vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-modal`; Python API + CLI;
+  CI (ci/wheels/smoke/release); AGENTS.md; LICENSE/README/CONTRIBUTING/SECURITY;
+  PR template; `.opencode/agents` (14 agen); `configs/`; `data/sources.json`;
+  `docs/adr/ADR-001..009`; `specs/F0.1..F4.5`; `docs/ERRATA.md` (E-001..E-014).
+- **F1.1** `vir-common`: config + validasi, jadwal ℓ_k (round-half-even sesuai
+  numpy NCM, E-001), RNG deterministik, error — 21 tes.
+- **F1.2** `vir-text`: BPE byte-level, pra-tokenisasi multibahasa, pelatih
+  deterministik (E-009), ekspor tiktoken, trait `Encoder` — 33 tes.
+- **F1.3** `vir-data`: shard zstd, stream deterministik + resume, pack, mix,
+  FIM PSM/SPM, synth — 46 tes.
+- **F1.4** `vir-vq`: codebook EMA + dead-code restart + STE, multiscale Down/R_k,
+  nested dropout, decoder + loss R4, metrics, FSQ/RFSQ — 34 tes CPU (E-011..E-014).
+- **F1.5** `vir-nn`: RoPE (invarian translasi), mask block-diagonal & prefix-LM
+  (uji kebocoran), attention, RMSNorm, SwiGLU — 11 tes.
+- **F1.6** `vir-model`: generator NCM (embedding per level, prelude/core/coda,
+  head, loss R6, generate level-by-level), sampling — 36 tes.
+- **F1.7** `vir-train`: Muon Newton-Schulz, AdamW hibrid, level weight, corruption,
+  checkpoint/resume identik, JSONL, jadwal LR — 44 tes.
+- **F1.8** `vir smoke` (CLI): irisan vertikal nyata BPE→VQ→generator→decoder→sampling,
+  overfit 8 sampel reproduksi persis, JSON field G1 — job `smoke` hijau; gerbang
+  G1 ditegakkan `tests/e2e` (E-010 pelaporan jujur `recon` apa adanya).
+- **F2.1–F2.4** `vir-model`: recurrent depth (prelude/core/coda, injeksi, r
+  sampling), halting (Fixed/Entropy), block-AR, CFG level logit, MBR select — 36 tes.
+- **F3.1** `vir-sandbox`: Policy (builder), ResourceLimits, allowlist syscall,
+  `seccomp::describe`, Landlock/seccomp di balik feature `sandbox` (job `vir-sandbox`
+  build `--features sandbox`) — 20 tes.
+- **F3.2** `vir-agent`: REPL stateful CPython (protokol JSON, RPC mem/llm_query,
+  pemulihan crash).
+- **F3.3** `vir-mfs`: SQLite WAL + FTS5 BM25, vektor n-gram, RRF, dedup kosinus
+  menaut, versioning immutable, ls/tree/find/read/write/link/tag/diff/history/
+  forget/restore — 43 tes.
+- **F3.4** `vir-agent`/`vir-cli`: RLM rekursif (budget depth/calls/steps, FINAL),
+  `mem` jembatan ke MFS nyata, root LM eksternal (`--model <program>`), ScriptedLm
+  hanya `--scripted`/tes — 11 tes; e2e `tests/e2e/rlm_cli.rs`.
+- **F3.5** trait `LanguageModel`: `CommandLm` (proses eksternal), `FnLm`/`ResLm`,
+  `ScriptedLm` (tes). `VirLm` (Burn) menyusul.
+- **F3.6** `vir-cli`/`vir-py`: CLI `clap` (smoke/train/generate/mem/rlm/eval/tui),
+  `--plain`/`--json`; Python `vir.text/mfs/agent/eval` namespaces — 5 tes CLI +
+  job `wheels`.
+- **F3.8** `vir-tui`: 9 layar, Elm update, layout responsif 3 lebar, tema/NO_COLOR,
+  fuzz input, PTY, anggaran render — 38 tes (E-010).
+- **F4.1–F4.5** `vir-train`/`vir-eval`: SFT prefix-LM, pass@k tak bias, GRPO
+  objective, FIM, vir-eval (recon/needle/ROUGE/BLEU) — 44 + 12 tes.
+- **F5.2–F5.4** `vir-nn`/`vir-eval`: KDA step/chunkwise, NoPE, RULER generator —
+  11 + 12 tes.
+- **F6.0–F6.5** `vir-modal`: ModalKind/VocabLayout, budget (196/576 token gambar,
+  984 bps SNAC), FSQ/RVQ/SNAC, connector, sequence/JSONL, video sampler, speech/mel
+  — 91 tes (E-011..E-014 terkait; klaim "30/37 tes" lama diganti angka nyata).
+- **F7.1** `vir-vq`: `fused_plan` (rencana luncur + naive_argmin) + kernel terfusi
+  (feature `fused`) — 34 tes (naive_argmin setara quantize_idx_reference).
+- **F7.2** PTQ quant scheme config (int8/int4/fp8).
+- **F7.3** release workflow (wheels on tag) + docs/API.md.
+
+## Sisa / belum selesai (jujur)
+
+- **F3.3.b skala**: vector search masih brute-force (cukup < ~100k vektor);
+  jalur LanceDB/HNSW belum ada.
+- **F3.4 root VIR**: `VirLm` (Burn) belum ada; root Vbeta = callable eksternal
+  (`CommandLm`/Python). ADR-005.
+- **F3.7 e2e penuh**: baru skenario MFS+RLM & smoke_cli; skenario "kode di sandbox
+  lalu diverifikasi" & "resume lalu generate" belum lengkap.
+- **F4.3 RL loop**: GRPO objective ada, loop RL penuh (rollout + reward sandbox)
+  belum dijalankan end-to-end.
+- **F5.1/F5.5**: memori berjenjang & infra 10M belum (pasca-G5).
+- **F6**: multimodal baru landasan + komponen; belum dilatih end-to-end.
+- **Pecah file**: sebagian crate masih `lib.rs` tunggal (belum sesuai tree §6.2).
+- **vir-py unit tests**: diuji via python/wheel (pytest belum lengkap).
 
 ## Catatan
-- Crate Burn (`vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-eval`) standalone `[workspace]` karena Burn tidak compile di Termux (gemm-f16). Dibangun di CI x86_64.
+
+- Crate Burn (`vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-eval`) &&
+  `vir-modal` standalone `[workspace]` karena Burn tidak compile di Termux
+  (gemm-f16); dibangun & diuji di CI x86_64.
+- DILARANG build/test di Termux (lihat AGENTS.md); verifikasi hanya via GitHub
+  Actions + Kaggle.
