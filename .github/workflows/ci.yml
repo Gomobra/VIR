@@ -27,12 +27,32 @@ jobs:
 
   nextest:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-nextest
       - uses: Swatinem/rust-cache@v2
-      - run: cargo nextest run --workspace --no-tests=pass
+      # Bangun binari `vir` agar uji e2e menemukannya.
+      - run: cargo build -p vir-cli
+      # TANPA `--no-tests=pass`: nextest keluar dengan kode 4 bila tidak ada tes
+      # yang dijalankan (F0.2 tugas 3). Jangan hidupkan kembali flag ini.
+      - run: cargo nextest run --workspace
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: Swatinem/rust-cache@v2
+      # Jalur `tests/e2e` (F1.8): menjalankan `vir smoke --json` nyata dan
+      # memvalidasi skema + gerbang G1 lewat crate `vir-e2e`.
+      - run: cargo build -p vir-cli
+      - run: cargo nextest run --manifest-path tests/e2e/Cargo.toml
+        env:
+          VIR_E2E_REQUIRE_BIN: "1"
 
   forbid_stubs:
     runs-on: ubuntu-latest

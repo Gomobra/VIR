@@ -10,6 +10,7 @@ members = [
     "crates/vir-mfs",
     "crates/vir-sandbox",
     "crates/vir-agent",
+    "tests/e2e",
 ]
 
 [workspace.package]
