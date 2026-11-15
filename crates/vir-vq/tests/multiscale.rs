@@ -46,9 +46,9 @@ fn up_memperbesar_panjang() {
 
 #[test]
 fn broadcast_dari_satu_posisi() {
-    // E-013: in_len == 1 -> interp harus menghasilkan [1, ℓ] (bukan [1,1] yang
-    // membuat ScaleOps::new(1, ℓ) panik di TensorData).
-    let ops = ScaleOps::new(1, 4, &device());
+    // E-013: in_len == 1 (L=1, ℓ=1? tidak) — uji broadcast 1 posisi halus ke L.
+    // ScaleOps::new(L=4, ℓ=1): down [B,4,d]->[B,1,d], up [B,1,d]->[B,4,d].
+    let ops = ScaleOps::new(4, 1, &device());
     let x = tensor3(1, 1, 1, &[5.0]);
     let u = ops.up(x);
     let vals = support::read1(&u.reshape([4]));
