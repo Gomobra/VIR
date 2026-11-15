@@ -26,7 +26,12 @@ fn from_serde_yaml() {
 }
 
 #[test]
-fn plasmid_error_trait() {
-    fn terima(_e: &dyn std::error::Error) {}
-    terima(&VirError::Config("x".into()));
+fn error_trait_dipenuhi() {
+    fn terima(e: &dyn std::error::Error) -> String {
+        e.to_string()
+    }
+    assert_eq!(
+        terima(&VirError::Config("x".into())),
+        "konfigurasi tidak valid: x"
+    );
 }
