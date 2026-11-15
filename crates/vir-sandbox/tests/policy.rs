@@ -32,9 +32,9 @@ fn policy_bawaan_memuat_batas_wajar() {
 
 #[test]
 fn policy_bawaan_berisi_env_terbatas() {
-    let keys: Vec<&str> = Policy::default().env.keys().map(String::as_str).collect();
-    assert_eq!(keys, vec!["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"]);
     let env = Policy::default().env;
+    let keys: Vec<&str> = env.keys().map(String::as_str).collect();
+    assert_eq!(keys, vec!["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"]);
     assert_eq!(env.get("TMPDIR").map(String::as_str), Some("/tmp"));
     assert_eq!(env.get("LANG").map(String::as_str), Some("C"));
 }

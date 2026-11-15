@@ -368,12 +368,11 @@ mod tests {
     #[test]
     fn env_kebijakan_dipasang_ke_anak() {
         let cmd = command_for(&Policy::default().with_env("VIR_UJI", "1"));
-        let envs: Vec<(Option<&OsStr>, Option<&OsStr>)> = cmd.get_envs().collect();
-        let vir = envs
-            .iter()
-            .find(|(key, _)| *key == Some(OsStr::new("VIR_UJI")))
-            .map(|(_, value)| *value);
+        let vir = cmd
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("VIR_UJI"))
+            .map(|(_, value)| value);
         assert_eq!(vir, Some(Some(OsStr::new("1"))));
-        assert!(envs.iter().any(|(key, _)| *key == Some(OsStr::new("HOME"))));
+        assert!(cmd.get_envs().any(|(key, _)| *key == OsStr::new("HOME")));
     }
 }
