@@ -6,6 +6,17 @@ license.workspace = true
 
 [dependencies]
 vir-common = { path = "../vir-common" }
+rayon = "1.11"
+
+[features]
+default = []
+
+# Backend encode cepat (PRD F1.2). Feature ini sengaja tanpa dependensi: crates
+# `snaptokens`/`gigatoken` belum dipasang, jadi mengaktifkannya hanya mengubah
+# pesan galat `resolve_backend`. Implementasi acuan di modul `encoder` adalah
+# satu-satunya backend yang aktif sampai ADR backend menetapkan pilihan.
+snaptokens = []
+gigatoken = []
 
 [dev-dependencies]
 proptest = "1"

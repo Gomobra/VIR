@@ -1,153 +1,89 @@
-//! Pipeline data: shard, stream, pack, FIM, synth.
+//! Pipeline data VIR: shard, stream, pack, mix, FIM, sintetis, sumber (PRD F1.3).
+//!
+//! | modul | isi |
+//! |---|---|
+//! | [`shard`] | format shard biner (header + blok zstd), penulis dan pembaca |
+//! | [`stream`] | urutan deterministik dari seed + state resume |
+//! | [`pack`] | blok panjang tetap dengan EOS pemisah dan mask padding |
+//! | [`mix`] | pencampuran blok antar bahasa menurut bobot |
+//! | [`fim`] | transformasi PSM/SPM dan inversnya |
+//! | [`synth`] | korpus sintetis: aritmetika, kode, kalimat templat |
+//! | [`sources`] | pemuat `data/sources.json` (sumber dan lisensi nyata) |
+//!
+//! Alur pakai: `sources::load_repo_sources()` → teks → `vir_text` encode →
+//! `pack::pack_documents` → `shard::ShardWriter` → `stream::TokenStream::from_shard`
+//! → `mix::mix_blocks`.
 
-use std::fs::File;
-use std::io::{Read, Write};
-use vir_common::VirError;
+mod fim;
+mod mix;
+mod pack;
+mod shard;
+mod sources;
+mod stream;
+mod synth;
 
-pub const SHARD_MAGIC: u32 = 0x56495253; // "VIRS"
-pub const FIM_PRE: u32 = 999_001;
-pub const FIM_SUF: u32 = 999_002;
-pub const FIM_MID: u32 = 999_003;
+pub use fim::{
+    FimMarkers, FimMode, FimParts, fim_psm, fim_spm, parse as parse_fim, transform as transform_fim,
+};
+pub use mix::{MixConfig, SourceMix, mix_blocks, pick_source, proportions, validate_weights};
+pub use pack::{
+    DEFAULT_BLOCK_SIZE, PackConfig, PackedBlock, pack_blocks, pack_documents, pack_tokens,
+};
+pub use shard::{
+    DEFAULT_BLOCK_TOKENS, DType, HEADER_BYTES, SHARD_MAGIC, SHARD_VERSION, ShardHeader,
+    ShardReader, ShardWriter, ZSTD_LEVEL, bytes_to_tokens, read_shard, tokens_to_bytes,
+    write_shard,
+};
+pub use sources::{
+    SourceCatalog, SourceEntry, load_repo_sources, load_sources, parse_sources, repo_sources_path,
+};
+pub use stream::{SplitMix64, StreamConfig, StreamState, TokenStream};
+pub use synth::{synth_arithmetic, synth_code, synth_corpus, synth_questions, synth_sentences};
 
-pub fn write_shard(path: &str, tokens: &[u32]) -> Result<(), VirError> {
-    let mut f = File::create(path)?;
-    f.write_all(&SHARD_MAGIC.to_le_bytes())?;
-    f.write_all(&(tokens.len() as u32).to_le_bytes())?;
-    for t in tokens {
-        f.write_all(&t.to_le_bytes())?;
-    }
-    Ok(())
-}
-
-pub fn read_shard(path: &str) -> Result<Vec<u32>, VirError> {
-    let mut f = File::open(path)?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
-    if buf.len() < 8 {
-        return Err(VirError::Internal("shard terlalu pendek".into()));
-    }
-    let magic = u32::from_le_bytes(
-        buf[0..4]
-            .try_into()
-            .map_err(|_| VirError::Internal("magic shard".into()))?,
-    );
-    if magic != SHARD_MAGIC {
-        return Err(VirError::Internal("magic shard salah".into()));
-    }
-    let count = u32::from_le_bytes(
-        buf[4..8]
-            .try_into()
-            .map_err(|_| VirError::Internal("count shard".into()))?,
-    ) as usize;
-    if buf.len() < 8 + count * 4 {
-        return Err(VirError::Internal("shard terpotong".into()));
-    }
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        let off = 8 + i * 4;
-        out.push(u32::from_le_bytes(
-            buf[off..off + 4]
-                .try_into()
-                .map_err(|_| VirError::Internal("token shard".into()))?,
-        ));
-    }
-    Ok(out)
-}
-
-/// Kemas token menjadi blok panjang tetap, pisah dengan EOS (0) bila perlu.
-pub fn pack_tokens(tokens: &[u32], block_size: usize) -> Vec<Vec<u32>> {
-    if block_size == 0 {
-        return vec![];
-    }
-    let mut out = Vec::new();
-    let mut cur = Vec::with_capacity(block_size);
-    for &t in tokens {
-        if cur.len() >= block_size {
-            out.push(std::mem::take(&mut cur));
-        }
-        cur.push(t);
-    }
-    if !cur.is_empty() {
-        while cur.len() < block_size {
-            cur.push(0);
-        }
-        out.push(cur);
-    }
-    out
-}
-
-/// FIM PSM: prefix, suffix, middle -> [pre] prefix [suf] suffix [mid] middle
-pub fn fim_psm(prefix: &[u32], suffix: &[u32], middle: &[u32]) -> Vec<u32> {
-    let mut out = Vec::with_capacity(prefix.len() + suffix.len() + middle.len() + 3);
-    out.push(FIM_PRE);
-    out.extend_from_slice(prefix);
-    out.push(FIM_SUF);
-    out.extend_from_slice(suffix);
-    out.push(FIM_MID);
-    out.extend_from_slice(middle);
-    out
-}
-
-/// FIM SPM: suffix, prefix, middle
-pub fn fim_spm(prefix: &[u32], suffix: &[u32], middle: &[u32]) -> Vec<u32> {
-    let mut out = Vec::with_capacity(prefix.len() + suffix.len() + middle.len() + 3);
-    out.push(FIM_SUF);
-    out.extend_from_slice(suffix);
-    out.push(FIM_PRE);
-    out.extend_from_slice(prefix);
-    out.push(FIM_MID);
-    out.extend_from_slice(middle);
-    out
-}
-
-/// Stream deterministik sederhana: urutan indeks berdasarkan seed.
-pub struct TokenStream {
-    data: Vec<u32>,
-    pos: usize,
-    stride: usize,
-}
-
-impl TokenStream {
-    pub fn new(data: Vec<u32>, seed: u64, block_size: usize) -> Self {
-        // shuffle deterministik sederhana (Fisher-Yates dengan LCG)
-        let mut v = data;
-        let n = v.len();
-        let mut state = seed;
-        for i in (1..n).rev() {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            let j = (state as usize) % (i + 1);
-            v.swap(i, j);
-        }
-        Self {
-            data: v,
-            pos: 0,
-            stride: block_size.max(1),
-        }
-    }
-
-    pub fn next_block(&mut self) -> Option<Vec<u32>> {
-        if self.pos >= self.data.len() {
-            return None;
-        }
-        let end = (self.pos + self.stride).min(self.data.len());
-        let block = self.data[self.pos..end].to_vec();
-        self.pos = end;
-        Some(block)
-    }
-}
-
-/// Format SFT: instruksi -> jawaban; kemas sebagai (prefix, target).
+/// Format SFT: instruksi → jawaban; kemas sebagai pasangan `(prefix, target)`.
 pub fn sft_pack(instruction: &str, answer: &str) -> (String, String) {
     (instruction.to_string(), answer.to_string())
 }
 
-/// Generator sintetis: aritmetika sederhana "a + b = c".
-pub fn synth_arithmetic(n: usize) -> Vec<String> {
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let a = (i * 7 + 3) % 20;
-        let b = (i * 11 + 5) % 20;
-        out.push(format!("{a} + {b} = {}", a + b));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sft_pack_mempertahankan_teks() {
+        let (instruction, answer) = sft_pack("tanya", "jawab");
+        assert_eq!(instruction, "tanya");
+        assert_eq!(answer, "jawab");
     }
-    out
+
+    #[test]
+    fn jalur_pendek_shard_stream_pack() {
+        let texts = synth_arithmetic(16);
+        let tokens: Vec<u32> = texts
+            .iter()
+            .flat_map(|t| t.bytes().map(u32::from))
+            .collect();
+        let pack = PackConfig {
+            block_size: 8,
+            ..PackConfig::default()
+        };
+        let blocks = pack_blocks(&tokens, &pack);
+        assert!(!blocks.is_empty());
+        assert!(blocks.iter().all(|block| block.len() == 8));
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!("vir-data-lib-{pid}.shard"));
+        write_shard(&path, &tokens).expect("tulis shard");
+        let mut reader = ShardReader::open(&path).expect("buka shard");
+        assert_eq!(reader.tokens().expect("token"), tokens);
+        let stream = TokenStream::from_shard(
+            &path,
+            StreamConfig {
+                block_size: 8,
+                ..StreamConfig::default()
+            },
+        )
+        .expect("stream dari shard");
+        assert!(stream.epoch_len() > 0);
+        let _ = std::fs::remove_file(&path);
+    }
 }
