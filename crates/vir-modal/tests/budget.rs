@@ -106,8 +106,10 @@ fn prefix_budget_for_video_uses_sampled_frames() {
     let short = ModalAsset::video("s.mp4", 224, 224, 1_000, 25);
     assert_eq!(short.frames, 25);
     assert_eq!(prefix_budget(&spec, &short).ok(), Some(4_900));
+    // Spec audio menolak aset gambar (jenis tidak cocok).
+    let audio_spec = EncoderSpec::whisper();
     assert!(is_err(prefix_budget(
-        &spec,
+        &audio_spec,
         &ModalAsset::image("i.png", 224, 224)
     )));
 }
