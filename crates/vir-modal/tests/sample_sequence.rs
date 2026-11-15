@@ -194,7 +194,7 @@ fn encode_codes_is_level_major_with_markers() {
     let ids = encode_codes(&layout, ModalKind::Image, &[vec![0, 1], vec![2]]).expect("encode");
     assert_eq!(
         ids,
-        vec![image.open, start0, start0 + 1, start1, image.close]
+        vec![image.open, start0, start0 + 1, start1 + 2, image.close]
     );
     assert_eq!(
         layout.region(ids[0]),
@@ -259,5 +259,6 @@ fn encode_video_inserts_time_markers() {
     assert!(is_err(encode_video(&layout, &[], &[])));
     assert!(is_err(encode_video(&layout, &[vec![0]], &[])));
     assert!(is_err(encode_video(&layout, &[vec![0]], &[64])));
-    assert!(is_err(encode_video(&layout, &[vec![4_000]], &[0])));
+    // Kode 4000 valid (<4096); pakai >= DEFAULT_CODEBOOK agar ditolak.
+    assert!(is_err(encode_video(&layout, &[vec![5_000]], &[0])));
 }
