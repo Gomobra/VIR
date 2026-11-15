@@ -141,8 +141,9 @@ impl MergeTable {
                 )));
             }
         }
-        for id in specials.first_reserved() as usize..base_len {
-            if !vocab[id].is_empty() {
+        let first = specials.first_reserved() as usize;
+        for (id, slot) in vocab.iter().enumerate().skip(first).take(base_len - first) {
+            if !slot.is_empty() {
                 return Err(VirError::Internal(format!(
                     "slot cadangan {id} tidak kosong"
                 )));
