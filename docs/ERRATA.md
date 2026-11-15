@@ -79,10 +79,13 @@ Format entri:
     impor memulihkannya lewat `MergeTable::from_vocab_merges` (lossless).
   - `crates/vir-text/src/bpe.rs`: `from_vocab` (tanpa merge) + `from_vocab_merges`
     (validasi tata letak + penerapan merge berperingkat); `recover_merges` yang
-    keliru dibuang.
+    keliru dibuang. Catatan: vocab impor sudah memuat token hasil merge, jadi
+    `apply_merges` memisahkannya (`split_off`) lalu membandingkan byte hasil
+    `push_merge` dengan token impor pada id yang sama; sisa token tanpa merge
+    (berkas tiktoken pihak lain) dipertahankan.
   - `.config/nextest.toml`: `slow-timeout = { period = "60s", terminate-after = 2 }`
     agar tes yang menggantung gagal cepat dengan namanya, bukan memakan 30 menit.
 - Tes regresi: `token_kosong_tidak_terpotong_saat_impor`,
   `merge_tak_berurutan_ditolak`, `ekspor_impor_tiktoken_setara` (baris token vs
   baris merge), `pipeline_tokenizer_ke_shard_stream_fim` (batas satu epoch).
-- Commit: (debugger)
+- Commit: b0a97c9

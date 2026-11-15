@@ -173,9 +173,21 @@ impl MergeTable {
     }
 
     /// Terapkan merge berurutan; peringkat `r` harus menghasilkan id `base_len + r`.
+    ///
+    /// Vocab impor sudah memuat token hasil merge, jadi ia dipisah dulu: tiap
+    /// merge dibangun ulang lewat [`push_merge`](Self::push_merge) lalu byte-nya
+    /// dibandingkan dengan token impor pada id yang sama. Sisa token impor tanpa
+    /// merge (berkas tiktoken pihak lain) dipertahankan apa adanya.
     fn apply_merges(&mut self, merges: Vec<Pair>) -> Result<(), VirError> {
+        let imported = self.vocab.split_off(self.base_len as usize);
+        let mut rest = imported.into_iter();
         for (rank, pair) in merges.into_iter().enumerate() {
             let expected = self.base_len + rank as u32;
+            let Some(existing) = rest.next() else {
+                return Err(VirError::Internal(format!(
+                    "vocab tanpa token merge peringkat {rank}"
+                )));
+            };
             if pair.0.max(pair.1) >= expected {
                 return Err(VirError::Internal(format!(
                     "merge peringkat {rank} memakai id di luar vocab"
@@ -186,12 +198,13 @@ impl MergeTable {
                     "merge peringkat {rank} ganda atau tidak sah"
                 )));
             };
-            if id != expected || self.vocab.len() != expected as usize + 1 {
+            if id != expected || self.token(id) != Some(existing.as_slice()) {
                 return Err(VirError::Internal(format!(
                     "merge peringkat {rank} tidak cocok dengan vocab"
                 )));
             }
         }
+        self.vocab.extend(rest);
         Ok(())
     }
 }
