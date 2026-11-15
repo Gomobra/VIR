@@ -98,7 +98,11 @@ fn rlm_final_hanya_dari_model() {
 
 #[test]
 fn rlm_mem_membaca_mfs_nyata() {
-    let lm = ScriptedLm::new(vec!["print(mem('find', query='alpha'))".to_string()]);
+    // Model membungkus hasil `mem('find')` dalam FINAL(...): bila jembatan
+    // mengarang/`null`, isi "alpha beta" tidak akan pernah muncul di keluaran.
+    let lm = ScriptedLm::new(vec![
+        "print('FINAL(' + str(mem('find', query='alpha')) + ')')".to_string(),
+    ]);
     let bridge = bridge();
     bridge
         .call(&json!({ "op": "write", "path": "/n/a", "content": "alpha beta" }))
