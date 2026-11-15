@@ -148,7 +148,7 @@ impl MemBridge {
     }
 
     /// Terjemahkan target baca: bilangan bulat → id versi, selain itu path.
-    fn resolve_target(&self, target: &str) -> Result<ReadTarget<'_>, VirError> {
+    fn resolve_target<'a>(&self, target: &'a str) -> Result<ReadTarget<'a>, VirError> {
         if target.trim().is_empty() {
             return Err(VirError::Config("operasi read butuh path atau id".into()));
         }
