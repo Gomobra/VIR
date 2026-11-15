@@ -194,7 +194,7 @@ fn layout_codebooks_tile_without_gaps_or_overlap() {
     spans.sort();
     for pair in spans.windows(2) {
         assert!(
-            !pair[0].overlaps(pair[1]),
+            !pair[0].overlaps(&pair[1]),
             "blok tumpang tindih: {:?} vs {:?}",
             pair[0],
             pair[1]
