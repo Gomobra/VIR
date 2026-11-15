@@ -11,7 +11,7 @@ use vir_modal::budget::{
     audio_codes, audio_understanding_tokens, image_tokens, prefix_budget, snac24k_bitrate,
     snac24k_codes, video_tokens,
 };
-use vir_modal::encoder::{EncoderSpec, budget_of, default_patch, spec_budget};
+use vir_modal::encoder::{EncoderSpec, ModalEncoder, budget_of, default_patch, spec_budget};
 use vir_modal::kind::ModalKind;
 use vir_modal::vision::ImageEncoder;
 
