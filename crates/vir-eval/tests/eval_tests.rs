@@ -117,7 +117,8 @@ fn metric_table_render_markdown() {
     table.push_row(&["1".to_string()]);
     assert_eq!(table.len(), 1);
     assert!(!table.is_empty());
-    let lines: Vec<&str> = table.render().lines().collect();
+    let rendered = table.render();
+    let lines: Vec<&str> = rendered.lines().collect();
     assert_eq!(lines[0], "| A | B |");
     assert_eq!(lines[1], "| --- | --- |");
     assert_eq!(lines[2], "| 1 |  |");
