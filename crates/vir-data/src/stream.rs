@@ -148,10 +148,7 @@ impl TokenStream {
             self.epoch += 1;
             self.refill_order();
         }
-        let index = match self.order.get(self.cursor) {
-            Some(index) => *index as usize,
-            None => return None,
-        };
+        let index = *self.order.get(self.cursor)? as usize;
         self.cursor += 1;
         self.produced += 1;
         self.blocks.get(index).map(|block| block.as_slice())
@@ -312,7 +309,7 @@ mod tests {
         let mut rng = SplitMix64::new(1);
         assert_eq!(rng.below(1), 0);
         let value = rng.next_f64();
-        assert!(value >= 0.0 && value < 1.0);
+        assert!((0.0..1.0).contains(&value));
         assert_eq!(SplitMix64::new(5).next_u64(), SplitMix64::new(5).next_u64());
     }
 }
