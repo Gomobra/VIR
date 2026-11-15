@@ -99,7 +99,7 @@ fn span_arithmetic_and_overlap() {
     assert_eq!(s.shift(5), Span::new(15, 4));
     assert!(Span::new(0, 4).overlaps(&Span::new(3, 4)));
     assert!(!Span::new(0, 4).overlaps(&Span::new(4, 4)));
-    assert!(Span::new(4, 4).overlaps(&Span::new(0, 4)));
+    assert!(!Span::new(4, 4).overlaps(&Span::new(0, 4)));
     assert!(!Span::new(0, 0).overlaps(&Span::new(0, 4)));
     assert_eq!(SPAN_ALIGN, 64);
 }
