@@ -3,7 +3,6 @@
 mod support;
 
 use burn::tensor::{Tensor, TensorData};
-use support::read2;
 use vir_vq::multiscale::ScaleOps;
 
 fn device() -> burn::tensor::Device {

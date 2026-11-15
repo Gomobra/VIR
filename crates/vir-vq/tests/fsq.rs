@@ -63,13 +63,13 @@ fn fsq_lookup_adalah_keluaran_unproj_dari_indeks() {
     let data: Vec<f32> = (0..60).map(|_| rng.unit() * 3.0 - 1.5).collect();
     let u = tensor2(5, 12, &data);
     let q = fsq.quantize(u);
-    let back = fsq.lookup(q.indices);
+    let back = fsq.lookup(q.indices.clone());
     // Bentuk benar: [N, d].
     assert_eq!(back.dims(), q.quantized.dims());
     assert_eq!(back.dims()[0], 5);
     assert_eq!(back.dims()[1], 12);
     // Determinisme: lookup(idx) sama untuk idx sama.
-    let back2 = fsq.lookup(q.indices);
+    let back2 = fsq.lookup(q.indices.clone());
     let b1 = support::read1(&back.reshape([60]));
     let b2 = support::read1(&back2.reshape([60]));
     for (x, y) in b1.iter().zip(b2.iter()) {
