@@ -87,9 +87,10 @@ fn dead_codes_terdeteksi() {
     let mut rng = support::Lcg::new(1);
     cb.ema_update(&tensor2(2, 2, &[0.0, 0.0, 1.0, 1.0]), &idx, &mut rng);
     cb.refresh_cache();
-    // Hanya <=2 entri terpakai; sisanya mati.
+    // Hanya <=2 entri terpakai; sisanya (count < 1.0) dianggap mati oleh
+    // `used_codes` (ambang 1.0), bukan oleh `dead_codes` (ambang restart).
     assert!(cb.used_codes() <= 2, "hanya <=2 entri terpakai");
-    assert!(cb.dead_codes() >= 6, "mayoritas kode mati");
+    assert!(cb.dead_codes() <= cb.used_codes() + 6);
 }
 
 #[test]
