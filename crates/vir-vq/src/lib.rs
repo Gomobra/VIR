@@ -32,22 +32,24 @@ pub mod multiscale;
 pub mod quantizer;
 
 pub use codebook::{Codebook, CodebookConfig};
-pub use decoder::{chunked_cross_entropy, Decoder, DecoderConfig};
+pub use decoder::{Decoder, DecoderConfig, chunked_cross_entropy};
 pub use dropout::{
-    cumulative_sums, cutoff_distribution, mask_reconstruction, nested_dropout_cutoff,
-    sample_cutoff, sum_levels, ABLATION_PROBS,
+    ABLATION_PROBS, cumulative_sums, cutoff_distribution, mask_reconstruction,
+    nested_dropout_cutoff, sample_cutoff, sum_levels,
 };
 pub use fsq::{Fsq, FsqActivation, FsqConfig, Normalized, Rfsq, RfsqNorm};
-pub use loss::{commitment_loss, fsq_loss, latent_loss, token_cross_entropy, vq_loss, vq_loss_chunked};
+pub use loss::{
+    commitment_loss, fsq_loss, latent_loss, token_cross_entropy, vq_loss, vq_loss_chunked,
+};
 pub use metrics::{
-    classify_token, is_markup, is_number, is_username, is_word_boundary, level_accuracy,
-    reports_json, tensor_accuracy, token_accuracy, ErrorCategory, ErrorReport, LevelReport,
+    ErrorCategory, ErrorReport, LevelReport, classify_token, is_markup, is_number, is_username,
+    is_word_boundary, level_accuracy, reports_json, tensor_accuracy, token_accuracy,
 };
 pub use multiscale::{
-    weighted_sum, EncodeOutput, LevelOutput, LevelVq, MultiscaleVq, Phi, ScaleOps,
+    EncodeOutput, LevelOutput, LevelVq, MultiscaleVq, Phi, ScaleOps, weighted_sum,
 };
 pub use quantizer::{
-    histogram, indices_to_vec, replace_param, Quantized, Quantizer, QuantizerStats,
+    Quantized, Quantizer, QuantizerStats, histogram, indices_to_vec, replace_param,
 };
 
 use burn::prelude::*;
@@ -81,4 +83,3 @@ pub fn fsq_smoke() -> Result<(), VirError> {
     let _ = q.indices;
     Ok(())
 }
-

@@ -1,114 +1,81 @@
-//! `vir.agent`: RLM rekursif di atas LM berskrip (PRD F3.4).
+//! `vir.agent`: RLM rekursif dengan LM nyata dan MFS nyata (PRD F3.4, F3.5).
 //!
 //! Loop RLM berjalan di Rust dan menjalankan kode di REPL CPython terpisah;
-//! karena itu GIL dilepas selama loop (`Python::allow_threads`). Bila `mem`
-//! diberikan, callable Python dipanggil lewat GIL untuk setiap operasi memori.
+//! karena itu GIL dilepas selama loop (`Python::allow_threads`).
+//!
+//! Root LM adalah callable Python `(prompt) -> str` (ADR-005: default Vbeta
+//! adalah callable, bukan model VIR). `mem` adalah callable
+//! `(op, payload_json) -> json_str`; tanpa callable, operasi memori gagal
+//! dengan galat yang jelas, bukan `null` diam-diam.
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
-use vir_agent::{run_rlm, RlmConfig, RlmRun, ScriptedLm};
+use vir_agent::{run_rlm, FnLm, RlmConfig, RlmRun};
 use vir_common::VirError;
 
 use crate::err;
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(rlm_run, m)?)?;
-    m.add_function(wrap_pyfunction!(rlm_run_info, m)?)?;
     m.add_class::<Rlm>()?;
     Ok(())
 }
 
 /// Anggaran RLM dari argumen Python.
-fn config(max_depth: usize, max_calls: usize) -> RlmConfig {
+fn config(max_depth: usize, max_calls: usize, max_steps: usize) -> RlmConfig {
     RlmConfig {
         max_depth,
         max_calls,
-        max_steps: max_calls.max(1),
+        max_steps: max_steps.max(1),
     }
 }
 
-/// Jembatan memori tanpa host: semua operasi mengembalikan null.
-fn null_mem(_op: &str, _payload: &Value) -> Result<Value, VirError> {
-    Ok(Value::Null)
-}
-
-/// Jalankan loop RLM dengan LM berskrip; GIL dilepas selama loop.
-fn run_scripted(
-    py: Python<'_>,
-    responses: Vec<String>,
-    context: String,
-    cfg: RlmConfig,
-) -> PyResult<RlmRun> {
-    py.allow_threads(move || {
-        let lm = ScriptedLm::new(responses);
-        run_rlm(&lm, &context, &cfg, null_mem).map_err(err::runtime)
-    })
-}
-
-/// Hasil RLM sebagai dict Python.
-fn outcome_dict<'py>(py: Python<'py>, out: &RlmRun) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new_bound(py);
-    dict.set_item("final_answer", out.final_answer.as_deref())?;
-    dict.set_item("steps", out.steps)?;
-    dict.set_item("calls_used", out.calls_used)?;
-    dict.set_item("recovered", out.recovered)?;
-    Ok(dict)
-}
-
-/// Jalankan RLM dengan LM berskrip; kembalikan jawaban akhir saja.
-#[pyfunction]
-#[pyo3(signature = (responses, context, max_depth = 3, max_calls = 8))]
-fn rlm_run(
-    py: Python<'_>,
-    responses: Vec<String>,
-    context: String,
-    max_depth: usize,
-    max_calls: usize,
-) -> PyResult<Option<String>> {
-    let out = run_scripted(py, responses, context, config(max_depth, max_calls))?;
-    Ok(out.final_answer)
-}
-
-/// Sama seperti [`rlm_run`], tetapi mengembalikan dict statistik.
-#[pyfunction]
-#[pyo3(signature = (responses, context, max_depth = 3, max_calls = 8))]
-fn rlm_run_info<'py>(
-    py: Python<'py>,
-    responses: Vec<String>,
-    context: String,
-    max_depth: usize,
-    max_calls: usize,
-) -> PyResult<Bound<'py, PyDict>> {
-    let out = run_scripted(py, responses, context, config(max_depth, max_calls))?;
-    outcome_dict(py, &out)
-}
-
-/// RLM rekursif dengan LM berskrip dan jembatan memori opsional.
+/// RLM dengan root callable Python dan jembatan memori opsional.
 #[pyclass(name = "RLM")]
 pub struct Rlm {
-    responses: Vec<String>,
+    generate: Py<PyAny>,
     mem: Option<Py<PyAny>>,
     max_depth: usize,
     max_calls: usize,
+    max_steps: usize,
+}
+
+impl Rlm {
+    fn run_inner(&self, py: Python<'_>, context: &str) -> PyResult<RlmRun> {
+        let generate = self.generate.clone_ref(py);
+        let mem = self.mem.as_ref().map(|m| m.clone_ref(py));
+        let (max_depth, max_calls, max_steps) = (self.max_depth, self.max_calls, self.max_steps);
+        let task = context.to_string();
+        py.allow_threads(move || {
+            let lm = FnLm::new(move |prompt: &str| call_generate(&generate, prompt));
+            let cfg = config(max_depth, max_calls, max_steps);
+            run_rlm(&lm, &task, &cfg, &mut |payload: &Value| {
+                call_mem(&mem, payload)
+            })
+            .map_err(err::runtime)
+        })
+    }
 }
 
 #[pymethods]
 impl Rlm {
-    /// `responses` = urutan jawaban LM; `mem` = callable `(op, payload_json)`.
+    /// `generate` = callable `(prompt: str) -> str`; `mem` = callable
+    /// `(op: str, payload_json: str) -> json_str`.
     #[new]
-    #[pyo3(signature = (responses, mem = None, max_depth = 3, max_calls = 8))]
+    #[pyo3(signature = (generate, mem = None, max_depth = 3, max_calls = 8, max_steps = 8))]
     fn new(
-        responses: Vec<String>,
+        generate: Py<PyAny>,
         mem: Option<Py<PyAny>>,
         max_depth: usize,
         max_calls: usize,
+        max_steps: usize,
     ) -> Self {
         Self {
-            responses,
+            generate,
             mem,
             max_depth,
             max_calls,
+            max_steps,
         }
     }
 
@@ -129,31 +96,50 @@ impl Rlm {
     fn max_calls(&self) -> usize {
         self.max_calls
     }
-}
 
-impl Rlm {
-    fn run_inner(&self, py: Python<'_>, context: &str) -> PyResult<RlmRun> {
-        let responses = self.responses.clone();
-        let mem = self.mem.as_ref().map(|m| m.clone_ref(py));
-        let (max_depth, max_calls) = (self.max_depth, self.max_calls);
-        let task = context.to_string();
-        py.allow_threads(move || {
-            let lm = ScriptedLm::new(responses);
-            let cfg = config(max_depth, max_calls);
-            let mut bridge = |op: &str, payload: &Value| call_mem(&mem, op, payload);
-            run_rlm(&lm, &task, &cfg, &mut bridge).map_err(err::runtime)
-        })
+    /// Jumlah langkah maksimum.
+    #[getter]
+    fn max_steps(&self) -> usize {
+        self.max_steps
     }
 }
 
-/// Panggil callable `mem` milik host lewat GIL; null bila tidak ada.
-fn call_mem(mem: &Option<Py<PyAny>>, op: &str, payload: &Value) -> Result<Value, VirError> {
-    let Some(callable) = mem else {
-        return Ok(Value::Null);
-    };
+/// Hasil RLM sebagai dict Python.
+fn outcome_dict<'py>(py: Python<'py>, out: &RlmRun) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("final_answer", out.final_answer.as_deref())?;
+    dict.set_item("steps", out.steps)?;
+    dict.set_item("calls_used", out.calls_used)?;
+    dict.set_item("recovered", out.recovered)?;
+    Ok(dict)
+}
+
+/// Panggil callable root LM lewat GIL.
+fn call_generate(callable: &Py<PyAny>, prompt: &str) -> Result<String, VirError> {
     Python::with_gil(|py| {
         let out = callable
-            .call1(py, (op, payload.to_string()))
+            .call1(py, (prompt,))
+            .map_err(|e| VirError::Internal(e.to_string()))?;
+        out.extract::<String>(py)
+            .map_err(|e| VirError::Internal(e.to_string()))
+    })
+}
+
+/// Panggil callable `mem` milik host lewat GIL.
+fn call_mem(mem: &Option<Py<PyAny>>, payload: &Value) -> Result<Value, VirError> {
+    let Some(callable) = mem else {
+        return Err(VirError::Config(
+            "operasi memori butuh callable `mem` (op, payload_json) -> json".into(),
+        ));
+    };
+    let op = payload
+        .get("op")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Python::with_gil(|py| {
+        let out = callable
+            .call1(py, (&op, payload.to_string()))
             .map_err(|e| VirError::Internal(e.to_string()))?;
         let json: String = out
             .extract(py)

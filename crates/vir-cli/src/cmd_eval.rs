@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 
-use crate::CliError;
+use crate::error::CliError;
 
 #[derive(Args)]
 pub(crate) struct Args {

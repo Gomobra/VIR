@@ -195,4 +195,3 @@ pub fn histogram(indices: &Tensor<1, Int>, codes: usize) -> Vec<u64> {
     }
     counts
 }
-

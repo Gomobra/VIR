@@ -23,7 +23,7 @@
 //!   aktivasi mendekati seragam (arXiv 2601.17124; temuan dari gambar, jadi
 //!   diuji di VIR).
 
-use crate::quantizer::{histogram, vec_to_tensor, Quantized, Quantizer, QuantizerStats};
+use crate::quantizer::{Quantized, Quantizer, QuantizerStats, histogram, vec_to_tensor};
 use burn::module::{Module, Param};
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
@@ -325,7 +325,9 @@ pub fn normalize_with_stats(x: Tensor<2>, eps: f32) -> Normalized {
     let [n, _d] = x.dims();
     let mean = x.clone().mean_dim(1).reshape([n, 1]);
     let centered = x - mean.clone();
-    let var = (centered.clone() * centered.clone()).mean_dim(1).reshape([n, 1]);
+    let var = (centered.clone() * centered.clone())
+        .mean_dim(1)
+        .reshape([n, 1]);
     let rstd = (var + eps).sqrt().recip();
     Normalized {
         x: centered.clone() * rstd.clone(),
@@ -388,4 +390,3 @@ impl Quantizer for RfsqNorm {
         self.inner.stats(indices)
     }
 }
-

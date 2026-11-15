@@ -81,10 +81,11 @@ impl Decoder {
         let [b, l, d] = x.dims();
         let mu = x.clone().mean_dim(2).reshape([b, l, 1]);
         let centered = x - mu;
-        let var = (centered.clone() * centered.clone()).mean_dim(2).reshape([b, l, 1]);
+        let var = (centered.clone() * centered.clone())
+            .mean_dim(2)
+            .reshape([b, l, 1]);
         let normed = centered / (var + self.eps).sqrt();
-        normed * self.norm_gamma.val().reshape([1, 1, d])
-            + self.norm_beta.val().reshape([1, 1, d])
+        normed * self.norm_gamma.val().reshape([1, 1, d]) + self.norm_beta.val().reshape([1, 1, d])
     }
 
     /// Satu blok MLP pre-norm + residual, lalu kepala softmax.
@@ -129,10 +130,7 @@ pub fn chunked_cross_entropy(
         let end = (start + size).min(len);
         let rows = batch * (end - start);
         let zc = z.clone().slice([0..batch, start..end, 0..dim]);
-        let tc = target
-            .clone()
-            .slice([0..batch, start..end])
-            .reshape([rows]);
+        let tc = target.clone().slice([0..batch, start..end]).reshape([rows]);
         let logits = decoder.forward(zc).reshape([rows, vocab]);
         let mean = loss.forward(logits, tc);
         // Kali jumlah token di potongan ini, lalu bagi total token di akhir.
@@ -148,4 +146,3 @@ pub fn chunked_cross_entropy(
     acc.map(|sum| sum / denom)
         .unwrap_or_else(|| Tensor::zeros([1], &device))
 }
-

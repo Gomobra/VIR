@@ -1,46 +1,21 @@
-//! Trait `LanguageModel` dan implementasi untuk tes/closure (F3.5).
+//! Titik sambung model (F3.5).
 //!
-//! Root RLM dapat berupa model VIR (`vir-model`), callable Python
-//! (`vir-py`), atau LM tiruan untuk tes. Trait ini adalah satu-satunya titik
-//! sambung; implementasi konkret diletakkan di crate pemiliknya.
+//! Trait [`LanguageModel`] adalah satu-satunya antarmuka yang dipakai RLM.
+//! Implementasi konkret tinggal di modulnya masing-masing.
 
 use vir_common::VirError;
 
+pub use crate::lm_command::CommandLm;
+pub use crate::lm_scripted::ScriptedLm;
+
 /// Model bahasa: menghasilkan teks dari prompt.
 pub trait LanguageModel {
+    /// Hasilkan satu respons untuk `prompt`.
     fn generate(&self, prompt: &str) -> Result<String, VirError>;
-}
 
-/// LM tiruan dengan urutan jawaban tetap (untuk tes deterministik).
-#[derive(Debug, Clone)]
-pub struct ScriptedLm {
-    responses: Vec<String>,
-    idx: std::cell::Cell<usize>,
-}
-
-impl ScriptedLm {
-    pub fn new(responses: Vec<String>) -> Self {
-        Self {
-            responses,
-            idx: std::cell::Cell::new(0),
-        }
-    }
-
-    /// Berapa jawaban sudah dipakai.
-    pub fn used(&self) -> usize {
-        self.idx.get()
-    }
-}
-
-impl LanguageModel for ScriptedLm {
-    fn generate(&self, _prompt: &str) -> Result<String, VirError> {
-        let i = self.idx.get();
-        if let Some(response) = self.responses.get(i) {
-            self.idx.set(i + 1);
-            Ok(response.clone())
-        } else {
-            Ok(String::new())
-        }
+    /// `true` bila LM ini berskrip (bukan model nyata); bawaan `false`.
+    fn is_scripted(&self) -> bool {
+        false
     }
 }
 

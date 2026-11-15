@@ -56,7 +56,14 @@ impl MemoryStore {
         Ok(store)
     }
 
-    /// Buka tanpa indeks vektor (hanya FTS).
+    /// Buka tanpa indeks vektor pada berkas (hanya FTS).
+    pub fn open_without_index(path: &str) -> Result<Self> {
+        let mut store = Self::from_connection(open_connection(path)?)?;
+        store.embedder = None;
+        Ok(store)
+    }
+
+    /// Buka in-memory tanpa indeks vektor (hanya FTS).
     pub fn open_in_memory_without_index() -> Result<Self> {
         let mut store = Self::from_connection(open_memory()?)?;
         store.embedder = None;

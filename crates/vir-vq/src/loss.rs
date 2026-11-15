@@ -11,7 +11,7 @@
 //! Dengan FSQ ([`crate::fsq`]) kedua suku MSE dihilangkan: FSQ tidak butuh loss
 //! tambahan (PRD F1.4.d langkah 2).
 
-use crate::decoder::{chunked_cross_entropy, Decoder};
+use crate::decoder::{Decoder, chunked_cross_entropy};
 use burn::nn::loss::CrossEntropyLossConfig;
 use burn::prelude::*;
 
@@ -28,11 +28,17 @@ pub fn latent_loss(z: Tensor<2>, z_q: Tensor<2>) -> Tensor<1> {
 }
 
 /// CE token dari logits `[B, L, V]` dan target `[B, L]` (rerata per token).
-pub fn token_cross_entropy(logits: Tensor<3>, target: Tensor<2, Int>, device: &Device) -> Tensor<1> {
+pub fn token_cross_entropy(
+    logits: Tensor<3>,
+    target: Tensor<2, Int>,
+    device: &Device,
+) -> Tensor<1> {
     let [b, t, v] = logits.dims();
     let flat = logits.reshape([b * t, v]);
     let tgt = target.reshape([b * t]);
-    CrossEntropyLossConfig::new().init(device).forward(flat, tgt)
+    CrossEntropyLossConfig::new()
+        .init(device)
+        .forward(flat, tgt)
 }
 
 /// Loss R4 lengkap dari logits yang sudah dihitung (versi padat).
@@ -64,7 +70,10 @@ pub fn vq_loss_chunked(
 ) -> Tensor<1> {
     let [b, t, d] = z.dims();
     let ce = chunked_cross_entropy(decoder, z_hat.clone(), target, chunk);
-    let commit = commitment_loss(z.clone().reshape([b * t, d]), z_hat.clone().reshape([b * t, d]));
+    let commit = commitment_loss(
+        z.clone().reshape([b * t, d]),
+        z_hat.clone().reshape([b * t, d]),
+    );
     let latent = latent_loss(z.reshape([b * t, d]), z_hat.reshape([b * t, d]));
     ce + commit * commitment_cost + latent
 }
@@ -78,4 +87,3 @@ pub fn fsq_loss(
 ) -> Tensor<1> {
     chunked_cross_entropy(decoder, z_hat, target, chunk)
 }
-

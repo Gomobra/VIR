@@ -22,8 +22,8 @@
 
 use crate::quantizer::Quantizer;
 use burn::module::Module;
-use burn::nn::conv::{Conv1d, Conv1dConfig};
 use burn::nn::PaddingConfig1d;
+use burn::nn::conv::{Conv1d, Conv1dConfig};
 use burn::prelude::*;
 use vir_common::VirError;
 
@@ -368,4 +368,3 @@ pub fn weighted_sum(levels: &[Tensor<3>], weights: &[f32]) -> Option<Tensor<3>> 
     }
     Some(acc)
 }
-

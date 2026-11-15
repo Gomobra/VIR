@@ -8,7 +8,7 @@ use std::path::Path;
 use clap::Args;
 
 use crate::backend::{BackendUnavailable, TRAIN_BACKEND};
-use crate::CliError;
+use crate::error::CliError;
 
 #[derive(Args)]
 pub(crate) struct Args {

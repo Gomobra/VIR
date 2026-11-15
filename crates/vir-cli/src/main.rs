@@ -1,9 +1,20 @@
-use clap::{Parser, Subcommand};
-use vir_agent::{RlmConfig, ScriptedLm, run_rlm};
-use vir_common::build_info;
-use vir_mfs::MemoryStore;
+//! Titik masuk `vir` (PRD F3.6).
+//!
+//! Setiap subperintah hanya memanggil pustaka; tidak ada logika bisnis di sini.
 
+mod backend;
+mod cmd_eval;
+mod cmd_generate;
+mod cmd_mem;
+mod cmd_rlm;
+mod cmd_train;
+mod error;
 mod smoke;
+
+use clap::{Parser, Subcommand};
+use vir_common::build_info;
+
+use crate::error::CliError;
 
 #[derive(Parser)]
 #[command(name = "vir", version, about = "VIR Vbeta CLI")]
@@ -14,72 +25,41 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Irisan vertikal ujung ke ujung (G1)
     Smoke {
+        /// Keluarkan status sebagai JSON
         #[arg(long)]
         json: bool,
     },
+    /// Antarmuka terminal penuh
     Tui,
-    Mem {
-        #[arg(long)]
-        path: String,
-        #[arg(long)]
-        write: Option<String>,
-        #[arg(long)]
-        read: Option<i64>,
-        #[arg(long)]
-        find: Option<String>,
-    },
-    Rlm {
-        #[arg(long)]
-        context: String,
-    },
+    /// Operasi memori MFS
+    Mem(cmd_mem::Args),
+    /// RLM dengan LM nyata + MFS nyata
+    Rlm(cmd_rlm::Args),
+    /// Evaluasi (metrik)
+    Eval(cmd_eval::Args),
+    /// Latihan model
+    Train(cmd_train::Args),
+    /// Generasi dari checkpoint
+    Generate(cmd_generate::Args),
+    /// Info build
     Version,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), CliError> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Smoke { json } => smoke::run(json)?,
-        Commands::Tui => {
-            vir_tui::run()?;
+        Commands::Smoke { json } => smoke::run(json).map_err(|e| CliError::other(e.to_string())),
+        Commands::Tui => vir_tui::run().map_err(|e| CliError::other(e.to_string())),
+        Commands::Mem(args) => cmd_mem::run(&args),
+        Commands::Rlm(args) => cmd_rlm::run(&args),
+        Commands::Eval(args) => cmd_eval::run(&args),
+        Commands::Train(args) => cmd_train::run(&args),
+        Commands::Generate(args) => cmd_generate::run(&args),
+        Commands::Version => {
+            println!("{}", build_info());
+            Ok(())
         }
-        Commands::Mem {
-            path,
-            write,
-            read,
-            find,
-        } => {
-            let store = MemoryStore::open(&path)?;
-            if let Some(content) = write {
-                let vid = store.write("/cli", &content)?;
-                println!("wrote version {}", vid);
-            }
-            if let Some(vid) = read {
-                println!("{}", store.read(vid)?);
-            }
-            if let Some(q) = find {
-                for (id, content, score) in store.find(&q, 5)? {
-                    println!("{}: {} (score {:.4})", id, content, score);
-                }
-            }
-        }
-        Commands::Rlm { context } => {
-            let lm = ScriptedLm::new(vec!["print('FINAL(ok)')".into()]);
-            let cfg = RlmConfig {
-                max_depth: 2,
-                max_calls: 2,
-                max_steps: 2,
-            };
-            let mut mem = |_path: &str,
-                           _args: &serde_json::Value|
-             -> Result<serde_json::Value, vir_common::VirError> {
-                Ok(serde_json::Value::Null)
-            };
-            let r = run_rlm(&lm, &context, &cfg, &mut mem)?;
-            println!("final: {:?}", r.final_answer);
-            println!("steps: {}, calls: {}", r.steps, r.calls_used);
-        }
-        Commands::Version => println!("{}", build_info()),
     }
-    Ok(())
 }

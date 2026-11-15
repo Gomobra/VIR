@@ -8,7 +8,7 @@ menyusun namespace yang rapi (PRD F3.6)::
     tok = vir.text.Tokenizer.train(corpus, vocab_size=32000)
     cfg = vir.model.ModelConfig()
     mem = vir.mfs.Memory("memori.db")
-    out = vir.agent.RLM(["print('FINAL(ok)')"]).run(tugas)
+    out = vir.agent.RLM(lambda prompt: model.generate(prompt)).run(tugas)
 
 Namespace ``model`` dan ``train`` hanya memuat konfigurasi pada build inti;
 backend Burn (latihan, checkpoint, VQ penuh) tidak disertakan di sana.
@@ -33,8 +33,6 @@ from ._core import (
     pass_at_k,
     recon_accuracy,
     require_backend,
-    rlm_run,
-    rlm_run_info,
     text_decode,
     text_encode,
     text_special_tokens,
@@ -105,8 +103,6 @@ mfs = SimpleNamespace(Memory=Memory)
 
 agent = SimpleNamespace(
     RLM=RLM,
-    rlm_run=rlm_run,
-    rlm_run_info=rlm_run_info,
 )
 
 eval = SimpleNamespace(

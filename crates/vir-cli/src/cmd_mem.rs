@@ -3,7 +3,7 @@
 use clap::Args;
 use vir_mfs::MemoryStore;
 
-use crate::CliError;
+use crate::error::CliError;
 
 #[derive(Args)]
 pub(crate) struct Args {

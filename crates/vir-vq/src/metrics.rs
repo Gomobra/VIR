@@ -127,9 +127,12 @@ pub fn is_number(token: &str) -> bool {
 
 /// True bila token membawa markup atau tanda baca struktural.
 pub fn is_markup(token: &str) -> bool {
-    token
-        .chars()
-        .any(|c| matches!(c, '<' | '>' | '{' | '}' | '[' | ']' | '"' | '\'' | '|' | '&'))
+    token.chars().any(|c| {
+        matches!(
+            c,
+            '<' | '>' | '{' | '}' | '[' | ']' | '"' | '\'' | '|' | '&'
+        )
+    })
 }
 
 /// True bila token adalah nama pengguna, tagar, atau URL.
@@ -289,4 +292,3 @@ pub fn reports_json(reports: &[LevelReport]) -> String {
     let body: Vec<String> = reports.iter().map(LevelReport::to_json).collect();
     format!("[{}]", body.join(","))
 }
-

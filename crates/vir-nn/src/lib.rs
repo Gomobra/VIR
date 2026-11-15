@@ -351,4 +351,3 @@ pub fn nn_smoke() -> Result<(), VirError> {
     let _ = blk.forward(x);
     Ok(())
 }
-

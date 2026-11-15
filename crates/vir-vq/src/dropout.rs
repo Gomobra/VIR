@@ -102,4 +102,3 @@ pub fn cumulative_sums(levels: &[Tensor<3>]) -> Vec<Tensor<3>> {
     }
     out
 }
-

@@ -91,26 +91,19 @@ class Memory:
     def current_version(self, path: str) -> int | None: ...
 
 # --- vir.agent (RLM) ---
-def rlm_run(
-    responses: list[str],
-    context: str,
-    max_depth: int = ...,
-    max_calls: int = ...,
-) -> str | None: ...
-def rlm_run_info(
-    responses: list[str],
-    context: str,
-    max_depth: int = ...,
-    max_calls: int = ...,
-) -> dict[str, object]: ...
-
 class RLM:
+    """RLM rekursif. ``generate`` = callable ``(prompt: str) -> str``;
+    ``mem`` = callable ``(op: str, payload_json: str) -> str`` (opsional).
+    Tanpa ``mem``, operasi memori gagal dengan galat yang jelas (bukan ``null``).
+    """
+
     def __init__(
         self,
-        responses: list[str],
+        generate: object,
         mem: object | None = ...,
         max_depth: int = ...,
         max_calls: int = ...,
+        max_steps: int = ...,
     ) -> None: ...
     def run(self, context: str) -> dict[str, object]: ...
     @property

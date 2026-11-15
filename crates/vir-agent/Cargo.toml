@@ -7,7 +7,8 @@ license.workspace = true
 [dependencies]
 vir-common = { path = "../vir-common" }
 vir-sandbox = { path = "../vir-sandbox" }
+vir-mfs = { path = "../vir-mfs" }
 serde_json = "1"
 
 [dev-dependencies]
-vir-mfs = { path = "../vir-mfs" }
+tempfile = "3"

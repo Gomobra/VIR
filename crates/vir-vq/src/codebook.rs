@@ -18,7 +18,7 @@
 //! [`crate::quantizer::QuantizerStats`] lewat implementasi
 //! [`crate::quantizer::Quantizer`] di bawah.
 
-use crate::quantizer::{histogram, Quantized, Quantizer, QuantizerStats};
+use crate::quantizer::{Quantized, Quantizer, QuantizerStats, histogram};
 use burn::module::{Module, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, IndexingUpdateOp};
@@ -85,7 +85,9 @@ impl Codebook {
         let shape = [cfg.num_entries, cfg.dim];
         let w = Tensor::random(shape, Distribution::Normal(0.0, 1.0), device);
         let e_t = w.clone().transpose();
-        let e_sq = (w.clone() * w.clone()).sum_dim(1).reshape([cfg.num_entries]);
+        let e_sq = (w.clone() * w.clone())
+            .sum_dim(1)
+            .reshape([cfg.num_entries]);
         Self {
             e_t,
             e_sq,
@@ -132,11 +134,7 @@ impl Codebook {
             )));
         }
         let device = self.weight.val().device();
-        self.set_weight(crate::quantizer::rows_to_tensor(
-            rows,
-            self.dim,
-            &device,
-        ));
+        self.set_weight(crate::quantizer::rows_to_tensor(rows, self.dim, &device));
         Ok(())
     }
 
@@ -211,10 +209,9 @@ impl Codebook {
         let batch_count = onehot.clone().sum_dim(0).reshape([v]);
         let batch_sum = onehot.transpose().matmul(u.clone().detach());
         let decay = self.ema_decay;
-        let mut count = self.ema_count.clone().mul_scalar(decay)
-            + batch_count.mul_scalar(1.0 - decay);
-        let mut sum =
-            self.ema_sum.clone().mul_scalar(decay) + batch_sum.mul_scalar(1.0 - decay);
+        let mut count =
+            self.ema_count.clone().mul_scalar(decay) + batch_count.mul_scalar(1.0 - decay);
+        let mut sum = self.ema_sum.clone().mul_scalar(decay) + batch_sum.mul_scalar(1.0 - decay);
         self.restart_dead(u, &mut count, &mut sum, rng);
 
         // `count` sudah dijaga `>= eps`; reshape agar bisa membagi `[V, d]`.
@@ -237,7 +234,11 @@ impl Codebook {
         if rows == 0 {
             return;
         }
-        let live = count.clone().to_data().try_to_vec::<f32>().unwrap_or_default();
+        let live = count
+            .clone()
+            .to_data()
+            .try_to_vec::<f32>()
+            .unwrap_or_default();
         let dead: Vec<i64> = live
             .iter()
             .enumerate()
@@ -259,7 +260,9 @@ impl Codebook {
         *count = count
             .clone()
             .select_assign(0, dead_idx.clone(), ones, IndexingUpdateOp::Assign);
-        *sum = sum.clone().select_assign(0, dead_idx, samples, IndexingUpdateOp::Assign);
+        *sum = sum
+            .clone()
+            .select_assign(0, dead_idx, samples, IndexingUpdateOp::Assign);
     }
 
     /// Jumlah kode mati menurut hitungan EMA saat ini.
@@ -270,9 +273,7 @@ impl Codebook {
             .to_data()
             .try_to_vec::<f32>()
             .unwrap_or_default();
-        live.iter()
-            .filter(|c| **c < self.restart_threshold)
-            .count()
+        live.iter().filter(|c| **c < self.restart_threshold).count()
     }
 
     /// Jumlah entri yang terpakai minimal sekali (tanpa batch baru).
@@ -317,4 +318,3 @@ impl Quantizer for Codebook {
         QuantizerStats::from_counts(&histogram(indices, self.num_entries))
     }
 }
-
