@@ -12,6 +12,17 @@ members = [
     "crates/vir-agent",
     "tests/e2e",
 ]
+# Crate yang berdiri sendiri (punya `[workspace]` masing-masing) harus dikecualikan
+# agar Cargo tidak menolak "multiple workspace roots". `vir-cli` kini bergantung
+# pada `vir-model` (F1.8/G1), sehingga jalur ini wajib dikecualikan.
+exclude = [
+    "crates/vir-model",
+    "crates/vir-nn",
+    "crates/vir-vq",
+    "crates/vir-train",
+    "crates/vir-eval",
+    "crates/vir-modal",
+]
 
 [workspace.package]
 version = "0.1.0"
