@@ -373,6 +373,6 @@ mod tests {
             .find(|(key, _)| *key == OsStr::new("VIR_UJI"))
             .map(|(_, value)| value);
         assert_eq!(vir, Some(Some(OsStr::new("1"))));
-        assert!(cmd.get_envs().any(|(key, _)| *key == OsStr::new("HOME")));
+        assert!(cmd.get_envs().any(|(key, _)| key == OsStr::new("HOME")));
     }
 }

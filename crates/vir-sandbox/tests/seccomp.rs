@@ -7,9 +7,9 @@ use vir_sandbox::seccomp::describe;
 
 #[test]
 fn describe_mengenali_syscall_dikenal() {
-    let execve = i64::from(libc::SYS_execve);
+    let execve = libc::SYS_execve;
     assert_eq!(describe(execve), format!("syscall {execve} (execve)"));
-    let ptrace = i64::from(libc::SYS_ptrace);
+    let ptrace = libc::SYS_ptrace;
     assert_eq!(describe(ptrace), format!("syscall {ptrace} (ptrace)"));
 }
 
