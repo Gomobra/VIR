@@ -21,17 +21,23 @@ pub(crate) struct Args {
 }
 
 pub(crate) fn run(args: &Args) -> Result<(), CliError> {
-    let store = MemoryStore::open(&args.path).map_err(CliError::other)?;
+    let store = MemoryStore::open(&args.path).map_err(|e| CliError::other(e.to_string()))?;
     if let Some(content) = &args.write {
-        let version_id = store.write("/cli", content).map_err(CliError::other)?;
+        let version_id = store
+            .write("/cli", content)
+            .map_err(|e| CliError::other(e.to_string()))?;
         println!("wrote version {version_id}");
     }
     if let Some(version_id) = args.read {
-        let content = store.read(version_id).map_err(CliError::other)?;
+        let content = store
+            .read(version_id)
+            .map_err(|e| CliError::other(e.to_string()))?;
         println!("{content}");
     }
     if let Some(query) = &args.find {
-        let hits = store.find(query, 5).map_err(CliError::other)?;
+        let hits = store
+            .find(query, 5)
+            .map_err(|e| CliError::other(e.to_string()))?;
         for (id, content, score) in hits {
             println!("{id}: {content} (score {score:.4})");
         }

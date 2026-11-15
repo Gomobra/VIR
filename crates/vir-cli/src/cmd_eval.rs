@@ -160,7 +160,7 @@ fn unigram_entropy(tokens: &[u32]) -> f64 {
 
 /// Baca token (bilangan bulat dipisah spasi/baris).
 fn read_tokens(path: &Path) -> Result<Vec<u32>, CliError> {
-    let text = std::fs::read_to_string(path).map_err(CliError::other)?;
+    let text = std::fs::read_to_string(path).map_err(|e| CliError::other(e.to_string()))?;
     let mut out = Vec::new();
     for token in text.split_whitespace() {
         let value: u32 = token

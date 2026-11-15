@@ -111,7 +111,7 @@ fn load_context(args: &Args) -> Result<String, CliError> {
     let Some(path) = &args.context_file else {
         return Ok(args.context.clone());
     };
-    let text = std::fs::read_to_string(path).map_err(CliError::other)?;
+    let text = std::fs::read_to_string(path).map_err(|e| CliError::other(e.to_string()))?;
     Ok(format!(
         "{}\n\n--- {} ---\n{text}",
         args.context,
