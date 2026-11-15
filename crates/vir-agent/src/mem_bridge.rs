@@ -78,23 +78,54 @@ impl MemBridge {
 impl MemBridge {
     fn parse(&self, payload: &JsonValue) -> Result<MemOp, VirError> {
         let name = field(payload, "op", true)?;
+        // REPL mengirim `{op, args:[...], kwargs:{...}}`; CLI langsung mengirim
+        // medan datar. Gabungkan keduanya agar satu jembatan melayani dua jalur.
+        let args = payload.get("args").and_then(JsonValue::as_array);
+        let kwargs = payload.get("kwargs");
+        let named = |key: &str| -> Option<String> {
+            kwargs
+                .and_then(|k| k.get(key))
+                .or_else(|| payload.get(key))
+                .and_then(JsonValue::as_str)
+                .map(str::to_string)
+        };
+        let positional = |idx: usize| -> Option<String> {
+            args.and_then(|a| a.get(idx))
+                .and_then(JsonValue::as_str)
+                .map(str::to_string)
+        };
         match name.as_str() {
             "ls" => Ok(MemOp::Ls {
-                prefix: opt_string(payload, "path")?.unwrap_or_else(|| "/".to_string()),
+                prefix: named("path")
+                    .or_else(|| positional(0))
+                    .unwrap_or_else(|| "/".to_string()),
             }),
             "read" => Ok(MemOp::Read {
-                target: opt_string(payload, "path")?.unwrap_or_default(),
+                target: named("path")
+                    .or_else(|| named("target"))
+                    .or_else(|| positional(0))
+                    .unwrap_or_default(),
             }),
             "write" => Ok(MemOp::Write {
-                path: opt_string(payload, "path")?.unwrap_or_else(|| "/rlm".to_string()),
-                content: opt_string(payload, "content")?.unwrap_or_default(),
+                path: named("path")
+                    .or_else(|| positional(0))
+                    .unwrap_or_else(|| "/rlm".to_string()),
+                content: named("content")
+                    .or_else(|| positional(1))
+                    .unwrap_or_default(),
             }),
             "find" => Ok(MemOp::Find {
-                query: opt_string(payload, "query")?.unwrap_or_default(),
-                limit: payload
-                    .get("limit")
-                    .and_then(JsonValue::as_u64)
-                    .unwrap_or(5) as usize,
+                query: named("query").or_else(|| positional(0)).unwrap_or_default(),
+                limit: named("limit")
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .or_else(|| {
+                        kwargs
+                            .and_then(|k| k.get("limit"))
+                            .or_else(|| payload.get("limit"))
+                            .and_then(JsonValue::as_u64)
+                            .map(|v| v as usize)
+                    })
+                    .unwrap_or(5),
             }),
             other => Err(VirError::Config(format!(
                 "operasi mem tidak dikenal: {other}"

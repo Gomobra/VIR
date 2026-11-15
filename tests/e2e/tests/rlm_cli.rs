@@ -47,12 +47,18 @@ impl Drop for Scratch {
     }
 }
 
-/// Skrip model nyata: membaca prompt dari stdin lalu mencetak satu blok kode
-/// RLM yang memanggil `mem('find', ...)`.
+/// Skrip model nyata: panggilan pertama menjalankan `mem('find', ...)`, panggilan
+/// kedua membaca hasilnya dari transkrip dan mencetak `FINAL(...)`. Membuktikan
+/// RLM benar-benar memanggil MFS nyata (bukan `FINAL(ok)` yang di-hard-code).
 const MODEL_SCRIPT: &str = r#"import sys
 
-sys.stdin.read()
-print("print(mem('find', query='alpha'))")
+transcript = sys.stdin.read()
+
+# Transkrip sudah memuat hasil `find` dari MFS -> selesai.
+if "alpha beta" in transcript:
+    print("print('FINAL(ditemukan: alpha beta)')")
+else:
+    print("print(mem('find', query='alpha'))")
 "#;
 
 #[test]
