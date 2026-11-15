@@ -6,9 +6,9 @@
 use serde_json::json;
 use vir_common::VirError;
 
-use crate::lm::ScriptedLm;
-use crate::mem_bridge::MemBridge;
-use crate::rlm::{RlmConfig, run_rlm};
+use vir_agent::lm::ScriptedLm;
+use vir_agent::mem_bridge::MemBridge;
+use vir_agent::rlm::{RlmConfig, run_rlm};
 
 fn cfg() -> RlmConfig {
     RlmConfig {
