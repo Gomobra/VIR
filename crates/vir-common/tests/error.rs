@@ -4,7 +4,10 @@ use vir_common::VirError;
 
 #[test]
 fn display_tiap_varian() {
-    assert_eq!(VirError::Config("x".into()).to_string(), "x");
+    assert_eq!(
+        VirError::Config("x".into()).to_string(),
+        "konfigurasi tidak valid: x"
+    );
     assert!(
         VirError::Internal("boom".into())
             .to_string()
