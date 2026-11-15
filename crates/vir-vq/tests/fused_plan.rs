@@ -79,11 +79,8 @@ fn naive_argmin_memilih_terdekat() {
         TensorData::new(vec![0.1f32, 0.1, 0.9, 0.9], [2, 2]),
         &device(),
     );
-    let got = read_int(&naive_argmin(
-        z,
-        cb.weight.val(),
-        Tensor::<1>::from_floats(TensorData::new(vec![0.0f32; 4], [4]), &device()),
-    ));
+    let bias = neg_half_sq_norm(&cb);
+    let got = read_int(&naive_argmin(z, cb.weight.val(), bias));
     assert_eq!(got, vec![0, 3]);
 }
 
