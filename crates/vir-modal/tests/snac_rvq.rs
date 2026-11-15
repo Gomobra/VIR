@@ -86,11 +86,12 @@ fn rvq_residual_roundtrip_is_exact() {
     let back = rvq.decode(&codes, 1, 2).expect("decode");
     assert_eq!(back, vec![4.0, 4.0]);
 
-    // [5,5]: level 0 memilih [4,4], residual [1,1] → level 1 memilih [2,0].
+    // [5,5]: level 0 memilih [4,4] (idx 3); residual [1,1] ekuidistan ke semua
+    // entry level-1 → tie-break ambil indeks terkecil (0), rekonstruksi [4,4].
     let codes = rvq.encode(&[5.0, 5.0], 1, 2).expect("encode");
-    assert_eq!(codes, vec![vec![3], vec![1]]);
+    assert_eq!(codes, vec![vec![3], vec![0]]);
     let back = rvq.decode(&codes, 1, 2).expect("decode");
-    assert_eq!(back, vec![6.0, 4.0]);
+    assert_eq!(back, vec![4.0, 4.0]);
 
     assert!(is_err(rvq.decode(&codes, 2, 2)));
     assert!(is_err(rvq.decode(&[vec![0], vec![0], vec![0]], 1, 2)));
