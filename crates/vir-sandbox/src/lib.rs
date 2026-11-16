@@ -16,6 +16,17 @@
 //! Tanpa fitur `sandbox`, pembatasan sistem berkas dan penyaringan syscall tidak
 //! tersedia; hanya rlimit, timeout, dan batas keluaran yang berlaku.
 //! Lihat `docs/adr/ADR-006-sandbox.md`.
+//!
+//! # Tes
+//!
+//! - `tests/policy.rs`, `tests/allowlist.rs`, `tests/seccomp.rs` — logika murni
+//!   (kebijakan, rlimit, daftar syscall) yang jalan di job `nextest` tanpa
+//!   kernel khusus.
+//! - `tests/isolation.rs` — isolasi kernel nyata (loop tak hingga, OOM, ledakan
+//!   proses, tulis di luar workdir, jaringan, syscall terlarang) yang dijalankan
+//!   job `vir-sandbox` dengan `cargo test -p vir-sandbox --features sandbox`.
+//!   Tes yang butuh kemampuan kernel yang tidak ada akan mencetak `SKIP:` dengan
+//!   alasan, tidak lulus diam-diam.
 
 pub mod landlock;
 pub mod limits;

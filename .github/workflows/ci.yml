@@ -85,13 +85,16 @@ jobs:
       # allowlist syscall. Job `nextest` juga menjalankannya; langkah ini
       # membuat kegagalan crate terlihat langsung pada jobnya sendiri.
       - run: cargo test -p vir-sandbox
-      # Kode konfinemen kernel (Landlock + seccomp) wajib tetap kompilasi dan
-      # lolos clippy di Linux walau tidak dijalankan di job ini.
-      # `cargo test --features sandbox` sengaja tidak dipasang: dengan filter
-      # seccomp aktif, program uji (mis. `/bin/sh`) bergantung pada allowlist
-      # yang diaudit terhadap kernel nyata (F3.1 butir 7, `tests/isolation.rs`).
-      - run: cargo clippy -p vir-sandbox --all-targets --features sandbox -- -D warnings
-      - run: cargo build -p vir-sandbox --features sandbox
+      # Konfinemen kernel (Landlock + seccomp) wajib kompilasi dan lolos clippy.
+      - run: cargo clippy -p vir-sandbox --all-targets --features sandbox,iso-helper -- -D warnings
+      # Tes isolasi nyata (F3.1 butir 7): loop tak hingga, OOM, ledakan proses,
+      # tulis di luar workdir, jaringan, syscall terlarang. `vir-iso` dibangun
+      # sebagai binari bantuan (fitur `iso-helper`), jadi satu perintah ini
+      # cukup. Bila kernel runner tidak mendukung sebuah kemampuan, tesnya
+      # mencetak `SKIP: <alasan>` (lihat log), tidak lulus diam-diam;
+      # `konfinemen_anak_terpasang` tetap gagal bila konfinemen Landlock+seccomp
+      # tidak dapat dipasang di runner yang seharusnya mendukung.
+      - run: cargo test -p vir-sandbox --features sandbox,iso-helper
 
   vir-vq:
     runs-on: ubuntu-latest

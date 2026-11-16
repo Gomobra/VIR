@@ -74,11 +74,20 @@ process group), `landlock.rs` (filesystem/jaringan + deteksi ABI),
 `seccomp.rs` (filter + deteksi dukungan), `syscalls.rs` (allowlist),
 `lib.rs` (urutan konfinemen, timeout dinding, pemotongan keluaran).
 
+Sudah ada:
+- Tes isolasi `tests/isolation.rs` (loop tak hingga, OOM/RLIMIT_AS, ledakan fork
+  dengan RLIMIT_NPROC, tulis di luar workdir, TCP ditolak, `ptrace` → EPERM),
+  dengan biner bantuan `src/bin/vir-iso.rs`. Job CI `vir-sandbox` menjalankan
+  `cargo test -p vir-sandbox --features sandbox` (bukan hanya `build`), jadi
+  konfinemen kernel benar-benar diuji. Tes yang butuh kemampuan kernel yang
+  tidak ada mencetak `SKIP: <alasan>`, tidak lulus diam-diam.
+- Model ancaman dan batas keamanan: `docs/threat-model.md` (aset, aktor, kontrol
+  yang ditegakkan, yang **tidak** dilindungi: eksploitasi kernel, side-channel,
+  noisy neighbor/no cgroup, kerahasiaan baca path sistem, AF_UNIX/IPC, dll).
+
 Belum ada:
-- Tes isolasi `tests/isolation.rs` (loop tak hingga, ledakan memori, ledakan
-  proses, tulis di luar workdir, akses jaringan, syscall terlarang) — F3.1
-  butir 7, ditulis oleh `eval-eng`.
-- Model ancaman dan batas keamanan di `docs/` — F3.1 butir 8.
 - Landlock ABI 6 (IPC/signal): saat ini dipakai `ABI::V9` dengan penurunan hak
   eksplisit, bukan penolakan; keputusan ini ditunda sampai kernel sesi CI/Kaggle
   diperiksa.
+- cgroup v2 per sesi (`memory.max`, `pids.max`) — lihat `docs/threat-model.md`
+  §4.3 (RLIMIT saja tidak menjamin keadilan tingkat sistem).

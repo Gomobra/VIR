@@ -47,8 +47,8 @@ use burn_cubecl::tensor::CubeTensor;
 use cube_ops::fused_argmin_kernel;
 
 pub use crate::fused_plan::{
-    CODES_PER_TILE, D_TILE, E_TILE_STRIDE, LOWEST_SCORE, MAX_ROWS_PER_LAUNCH, PLANE, ROWS_PER_CUBE,
-    THREADS_PER_CUBE, LaunchPlan, args_compatible, is_cube_device, naive_argmin, output_dtype,
+    CODES_PER_TILE, D_TILE, E_TILE_STRIDE, LOWEST_SCORE, LaunchPlan, MAX_ROWS_PER_LAUNCH, PLANE,
+    ROWS_PER_CUBE, THREADS_PER_CUBE, args_compatible, is_cube_device, naive_argmin, output_dtype,
     output_shape, plan_launch,
 };
 
