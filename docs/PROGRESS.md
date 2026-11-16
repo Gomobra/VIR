@@ -55,7 +55,7 @@ di riwayat commit; lihat `gh run list`.
   G1 ditegakkan `tests/e2e` (E-010 pelaporan jujur `recon` apa adanya).
 - **F2.1–F2.4** `vir-model`: recurrent depth (prelude/core/coda, injeksi, r
   sampling), halting (Fixed/Entropy), block-AR, CFG level logit, MBR select — 36 tes.
-- **F3.1** `vir-sandbox`: Policy (builder), ResourceLimits, allowlist syscall,
+- **F3.1** `vir-sandbox`: Policy (builder), ResourceLimits, allowlist syscall, isolasi kernel nyata (`tests/isolation.rs` 9 tes: loop/OOM/fork/write luar workdir/TCP/syscall) + threat-model (E-015),
   `seccomp::describe`, Landlock/seccomp di balik feature `sandbox` (job `vir-sandbox`
   build `--features sandbox`) — 20 tes.
 - **F3.2** `vir-agent`: REPL stateful CPython (protokol JSON, RPC mem/llm_query,
@@ -82,7 +82,7 @@ di riwayat commit; lihat `gh run list`.
   — 91 tes (E-011..E-014 terkait; klaim "30/37 tes" lama diganti angka nyata).
 - **F7.1** `vir-vq`: `fused_plan` (rencana luncur + naive_argmin) + kernel terfusi
   (feature `fused`) — 34 tes (naive_argmin setara quantize_idx_reference).
-- **F7.2** PTQ quant scheme config (int8/int4/fp8).
+- **F7.2** PTQ nyata: int8/int4/fp8 (skala per-tensor/blok, fp8 E4M3), ekspor/impor `vir-quant-1`, kualitas vs ukuran — `crates/vir-nn/src/{quant,export}.rs`, 10 tes.
 - **F7.3** release workflow (wheels on tag) + docs/API.md.
 
 ## Sisa / belum selesai (jujur)
