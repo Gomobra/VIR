@@ -104,7 +104,7 @@ di riwayat commit; lihat `gh run list`.
 
 - **G2 (vir-kaggle-g2-cuda)**: build vir-vq CUDA + test → `build_rc 0, test_rc 0`, ~19 mnt.
 - **G3 (vir-kaggle-g3)**: build vir-train CUDA (Burn 0.22.1) + test → 5 tes lulus, ~17 mnt.
-- **DDP (vir-kaggle-ddp, F2.5.e)**: notebook build `vir-cli` CUDA + `vir make-shard` (shard sintetis 137k token) + `vir train --world 1` vs `--world 2` (DDP 2×T4). Status terakhir: antri GPU / running (log + result.json di-download selektif, bukan full output).
+- **DDP (vir-kaggle-ddp, F2.5.e)**: notebook build `vir-cli` CUDA (18 mnt) + `vir make-shard` (137k token) + `vir train --world 1` vs `--world 2` (DDP 2×T4). Bug ditemukan & diperbaiki via Kaggle (R2): DevicePool::detect into_vec, vir train pakai cfg.total_len() + warmup proporsional, vir make-shard baru. Status terakhir: running v6.
 
 ## Catatan
 
