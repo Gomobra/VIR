@@ -114,7 +114,7 @@ pub struct Tokenizer<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay
     dim: usize,
 }
 
-impl<Q: Quantizer + Module> Tokenizer<Q> {
+impl<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay> Tokenizer<Q> {
     /// Rakit tokenizer di atas `vq` yang sudah berisi kuantizer tiap level.
     pub fn new(vq: MultiscaleVq<Q>, device: &Device) -> Self {
         let dim = vq.levels[0].quantizer.dim();
@@ -223,7 +223,7 @@ pub fn run_arm<A: Arm>(name: &str, steps: usize, arm: &A) -> ArmReport {
 }
 
 /// Loss arm: R4 (CE + komitmen + laten) untuk VQ-EMA, CE saja untuk FSQ.
-fn arm_loss<Q: Quantizer + Module>(
+fn arm_loss<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay>(
     model: &Tokenizer<Q>,
     z: &Tensor<3>,
     enc: &EncodeOutput,
@@ -244,7 +244,7 @@ fn arm_loss<Q: Quantizer + Module>(
 }
 
 /// Pembaruan EMA + restart kode mati tiap level (PRD F1.4.a langkah 2).
-fn update_codebooks<Q: Quantizer + Module>(
+fn update_codebooks<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay>(
     model: &mut Tokenizer<Q>,
     enc: &EncodeOutput,
     rng: &mut Lcg,
@@ -261,7 +261,7 @@ fn update_codebooks<Q: Quantizer + Module>(
 }
 
 /// Ukur arm terlatih: akurasi dan galat per level + statistik kode.
-fn evaluate<Q: Quantizer + Module>(
+fn evaluate<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay>(
     name: &str,
     model: &Tokenizer<Q>,
     corpus: &[i64],
@@ -297,7 +297,7 @@ fn evaluate<Q: Quantizer + Module>(
 }
 
 /// `(perplexity, utilisasi, kode mati)` per level dari indeks kode.
-fn code_stats<Q: Quantizer + Module>(
+fn code_stats<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay>(
     model: &Tokenizer<Q>,
     indices: &[Tensor<2, Int>],
 ) -> (Vec<f32>, Vec<f64>, Vec<usize>) {
