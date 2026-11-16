@@ -1,4 +1,7 @@
-//! Komponen jaringan VIR (RoPE, mask, attention, norm, FFN, blok).
+//! Komponen jaringan VIR (RoPE, mask, attention, norm, FFN, blok, PTQ F7.2).
+
+pub mod export;
+pub mod quant;
 
 use burn::module::Module;
 use burn::module::Param;
@@ -210,7 +213,8 @@ impl Block {
     }
 }
 
-/// PTQ config (F7.2): quant scheme.
+/// PTQ config (F7.2): quant scheme (dipakai modul `quant`; enum ini
+/// kompatibel dengan `quant::QuantScheme`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuantScheme {
     Int8,
