@@ -43,6 +43,7 @@ pub mod rng;
 pub mod schedule;
 pub mod trainer;
 
+pub use burn_step::VirStepFn;
 pub use checkpoint::{Checkpoint, CheckpointFile, Progress, build as build_checkpoint};
 pub use corruption::{CorruptBatch, Corruption, RateShape, level_rates};
 pub use data::{BatchSource, ShardBatchSource};

@@ -8,11 +8,9 @@
 use std::path::Path;
 
 use serde_json::Value as Json;
-use vir_common::VirError;
-use vir_model::MiniSmokeConfig;
 use vir_train::{
     DdpStepFn, DevicePool, HostAllReduce, LrSchedule, ShardBatchSource, Stage, TrainConfig,
-    Trainer, VirStepFn, VirTrainConfig, level_schedule,
+    Trainer, VirStepFn, VirTrainConfig,
 };
 
 use crate::error::CliError;
@@ -128,7 +126,7 @@ fn vocab_from_shard(path: &str) -> Result<usize, CliError> {
         .map_err(|e| CliError::other(format!("baca shard: {e}")))?;
     let mut max = 0u32;
     reader
-        .for_each_block(|block| {
+        .for_each_block(|block: &[u32]| -> Result<(), vir_common::VirError> {
             for t in block {
                 max = max.max(*t);
             }
