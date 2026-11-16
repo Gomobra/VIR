@@ -42,7 +42,7 @@ fn syscall_startup_libc_diizinkan() {
     // Syscall yang dipakai pemuat dinamis dan libc saat proses mulai. Bila
     // salah satu hilang, program apa pun gagal dengan `EPERM` sebelum `main`.
     let list = allowlist();
-    let wajib = vec![
+    let mut wajib = vec![
         libc::SYS_ioctl,
         libc::SYS_mmap,
         libc::SYS_mprotect,
