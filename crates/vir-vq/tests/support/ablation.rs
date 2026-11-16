@@ -53,7 +53,7 @@ const LR: f64 = 5e-3;
 /// Kuantizer satu arm ablasi beserta loss yang menyertainya.
 pub trait Arm {
     /// Tipe kuantizer yang dihasilkan.
-    type Q: Quantizer + Module + Clone + Debug + Send;
+    type Q: Quantizer + Module + Clone + Debug + Send + burn::module::ModuleDisplay;
 
     /// Rakit kuantizer untuk satu level di `device`.
     fn build(&self, device: &Device) -> Self::Q;
@@ -106,7 +106,7 @@ impl Arm for FsqArm {
 /// NCM memakai encoder 0 blok transformer (tabel embedding saja, PRD F1.4
 /// langkah 1), jadi `z = embed[x]` langsung.
 #[derive(Module)]
-pub struct Tokenizer<Q: Quantizer + Module + Debug> {
+pub struct Tokenizer<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay> {
     embed: Param<Tensor<2>>,
     pub vq: MultiscaleVq<Q>,
     pub decoder: Decoder,
