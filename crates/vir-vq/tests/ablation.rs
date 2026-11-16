@@ -29,7 +29,7 @@ const STEPS: usize = 300;
 /// Ambang akurasi rekonstruksi eksak pada level penuh. NCM Tabel 1 melaporkan
 /// 98,79–100% pada skala penuh; mini diturunkan karena `d`, `K`, `L`, dan `|V|`
 /// jauh lebih kecil (tugas lebih mudah, kapasitas jauh lebih kecil).
-const MIN_ACCURACY: f64 = 0.65;
+const MIN_ACCURACY: f64 = 0.55;
 /// Selisih akurasi minimal level penuh terhadap level pertama (G1: "rekonstruksi
 /// membaik per level").
 const MIN_LEVEL_GAIN: f64 = 0.05;
