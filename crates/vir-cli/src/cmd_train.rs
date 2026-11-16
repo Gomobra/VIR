@@ -50,7 +50,7 @@ impl FileModel {
                     x.as_array().map(|a| {
                         a.iter()
                             .filter_map(|v| v.as_u64().map(|x| x as usize))
-                            .collect()
+                            .collect::<Vec<usize>>()
                     })
                 })
                 .filter(|l| !l.is_empty()),
