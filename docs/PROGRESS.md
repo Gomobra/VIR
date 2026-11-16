@@ -100,6 +100,12 @@ di riwayat commit; lihat `gh run list`.
 - **Pecah file**: sebagian crate masih `lib.rs` tunggal (belum sesuai tree §6.2).
 - **vir-py unit tests**: diuji via python/wheel (pytest belum lengkap).
 
+## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
+
+- **G2 (vir-kaggle-g2-cuda)**: build vir-vq CUDA + test → `build_rc 0, test_rc 0`, ~19 mnt.
+- **G3 (vir-kaggle-g3)**: build vir-train CUDA (Burn 0.22.1) + test → 5 tes lulus, ~17 mnt.
+- **DDP (vir-kaggle-ddp, F2.5.e)**: notebook build `vir-cli` CUDA + `vir make-shard` (shard sintetis 137k token) + `vir train --world 1` vs `--world 2` (DDP 2×T4). Status terakhir: antri GPU / running (log + result.json di-download selektif, bukan full output).
+
 ## Catatan
 
 - Crate Burn (`vir-vq`, `vir-nn`, `vir-model`, `vir-train`, `vir-eval`) &&
@@ -107,3 +113,6 @@ di riwayat commit; lihat `gh run list`.
   (gemm-f16); dibangun & diuji di CI x86_64.
 - DILARANG build/test di Termux (lihat AGENTS.md); verifikasi hanya via GitHub
   Actions + Kaggle.
+- Kaggle CLI: ambil **hanya** `log.txt` + `result.json` via
+  `kaggle kernels output <kernel> -p <dir> --file-pattern '^(log\.txt|result\.json)$'`
+  (jangan full output — hemat kuota & waktu).
