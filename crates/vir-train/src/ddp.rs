@@ -153,15 +153,15 @@ impl DdpStepFn {
             )));
         }
         let mut ranks = Vec::with_capacity(world);
-        let mut shared: Option<ParamStore> = None;
         for (source, device) in sources.into_iter().zip(pool.devices().iter()) {
             let (step, store) = VirStepFn::new(cfg.clone(), source, device.clone(), stage)?;
-            if shared.is_none() {
-                shared = Some(store);
-            }
             ranks.push(VirRank { step, store });
         }
-        let shared = shared.ok_or_else(|| VirError::Config("world 0".into()))?;
+        // Store bersama = salinan store rank 0 (bobot awal identik semua rank).
+        let shared = ranks
+            .first()
+            .map(|r| r.store.clone())
+            .ok_or_else(|| VirError::Config("world 0".into()))?;
         Ok((
             Self {
                 ranks,
@@ -199,9 +199,8 @@ impl StepFn for DdpStepFn {
                 rng: &mut rank_rng,
                 corruption: None,
             };
-            let out = self.ranks[r]
-                .step
-                .compute(rank_ctx, &mut self.ranks[r].store)?;
+            let rank = &mut self.ranks[r];
+            let out = rank.step.compute(rank_ctx, &mut rank.store)?;
             losses.push(out);
         }
         // 2. All-reduce gradien lintas rank → store bersama.
