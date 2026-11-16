@@ -115,6 +115,39 @@ fn store_parameter_cocok_dengan_peran_tahap() {
 }
 
 #[test]
+fn init_bobot_identik_walau_konstruksi_paralel() {
+    // Regresi akar: RNG device global + init lazy membuat bobot awal bergantung
+    // pada urutan konstruksi. Empat `VirStepFn` dibangun serentak; toko awal
+    // semuanya harus sama (kalau tidak, resume tak mungkin identik).
+    let handles: Vec<_> = ["init_p0", "init_p1", "init_p2", "init_p3"]
+        .into_iter()
+        .map(|tag| {
+            std::thread::spawn(move || {
+                let (_, store) =
+                    VirStepFn::new(mini_config(), source(tag), Default::default(), Stage::Vq)
+                        .expect("rakit");
+                store
+                    .slots
+                    .iter()
+                    .map(|s| s.data.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let mut handles = handles.into_iter();
+    let base = handles.next().expect("satu handle").join().expect("join 0");
+    for (i, handle) in handles.enumerate() {
+        let other = handle.join().expect("join");
+        assert_eq!(
+            other,
+            base,
+            "toko awal konstruksi paralel ke-{} beda",
+            i + 1
+        );
+    }
+}
+
+#[test]
 fn gradien_tersalin_ke_slot_store() {
     let (mut step, mut store) = VirStepFn::new(
         mini_config(),

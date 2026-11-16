@@ -146,6 +146,24 @@ pub fn build_store(model: &VirTrainModel, stage: Stage) -> Result<ParamStore, Vi
     Ok(store)
 }
 
+/// Paksa inisialisasi parameter lazy, tanpa menyalin nilainya.
+///
+/// Bobot `Linear`/codebook dibuat lazy oleh Burn (`Param::uninitialized`) dan
+/// baru ditarik dari RNG device pada `val()` pertama. Inisialisasi model wajib
+/// menarik semuanya sebelum kunci RNG dilepas, agar bobot awal hanya bergantung
+/// pada seed (lihat `INIT_LOCK` di [`crate::model`]).
+pub fn init_params(model: &VirTrainModel) {
+    struct ForceInit;
+
+    impl ModuleVisitor for ForceInit {
+        fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<D>>) {
+            let _ = param.val();
+        }
+    }
+
+    model.visit(&mut ForceInit);
+}
+
 /// Muat parameter model dari store.
 ///
 /// Slot beku dimuat tanpa gradien (leaf `Requirement::None`) sehingga tidak

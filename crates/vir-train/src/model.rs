@@ -15,6 +15,8 @@
 //! Generator). Model ini tidak menyimpan state optimizer; bobot otoritatif ada di
 //! [`crate::optim::ParamStore`] dan disalin ke model setiap langkah.
 
+use std::sync::{Mutex, MutexGuard};
+
 use burn::module::Param;
 use burn::prelude::*;
 use burn::tensor::{Device, TensorData};
@@ -154,9 +156,21 @@ pub struct VqEncoded {
 }
 
 impl VirTrainModel {
-    /// Rakit model dari konfigurasi (bobot acak; device sebaiknya sudah di-seed).
+    /// Rakit model dari konfigurasi; bobot awal hanya fungsi `cfg.seed`.
+    ///
+    /// Seed + seluruh tarikan init dijalankan di dalam satu kunci proses dan
+    /// parameter lazy dipaksa ditarik sebelum kunci lepas (lihat [`INIT_LOCK`]).
     pub fn new(cfg: &VirTrainConfig, device: &Device) -> Result<Self, VirError> {
         cfg.validate()?;
+        let _guard = init_guard();
+        device.seed(cfg.seed);
+        let model = Self::build(cfg, device)?;
+        crate::params::init_params(&model);
+        Ok(model)
+    }
+
+    /// Rakit modul dengan bobot lazy dari RNG device (tanpa seed/kunci).
+    fn build(cfg: &VirTrainConfig, device: &Device) -> Result<Self, VirError> {
         let cb = CodebookConfig {
             num_entries: cfg.codebook_size,
             dim: cfg.dim,
@@ -286,6 +300,26 @@ fn init_embed(cfg: &VirTrainConfig) -> Vec<f32> {
     (0..cfg.vocab * cfg.dim)
         .map(|_| rng.next_f32() * 2.0 - 1.0)
         .collect()
+}
+
+/// Kunci proses untuk inisialisasi bobot model.
+///
+/// RNG backend CPU bersifat **global** (`burn-ndarray` menyimpan
+/// `SEED: Mutex<Option<StdRng>>` di static), dan bobot `Linear`/codebook
+/// diinisialisasi *lazy* pada `val()` pertama. Akibatnya "seed → seluruh
+/// tarikan" hanya reproducible bila tidak ada konstruksi lain yang menarik di
+/// tengah jalan: pada runner `cargo nextest` (enam tes paralel) dua `VirStepFn`
+/// dengan seed sama menghasilkan bobot awal berbeda, sehingga
+/// `resume_generator_identik` gagal (slot 1 = codebook VQ beda).
+///
+/// Kunci ini membuat satu konstruksi model tak terpisah; pemanggil wajib
+/// menyimpan penjaga sampai seluruh parameter lazy ditarik
+/// ([`crate::params::init_params`]).
+static INIT_LOCK: Mutex<()> = Mutex::new(());
+
+/// Penjaga [`INIT_LOCK`]; racun akibat panic diabaikan agar proses tetap jalan.
+fn init_guard() -> MutexGuard<'static, ()> {
+    INIT_LOCK.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 /// Adaptor `rand::RngCore` (0.8) di atas RNG vir-train yang bisa di-checkpoint.

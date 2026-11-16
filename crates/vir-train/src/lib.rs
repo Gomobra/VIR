@@ -57,7 +57,9 @@ pub use optim::{
     OptGroup, OptimSettings, ParamRole, ParamSlot, ParamStore, classify, clip_grad_norm,
     newton_schulz, newton_schulz_steps,
 };
-pub use params::{build_store, collect_grads, copy_back, load_store, sync_frozen, write_grads};
+pub use params::{
+    build_store, collect_grads, copy_back, init_params, load_store, sync_frozen, write_grads,
+};
 pub use rng::Rng;
 pub use schedule::{LrKind, LrSchedule};
 pub use trainer::{
