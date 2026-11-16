@@ -202,9 +202,16 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         None => vocab_from_shard(&args.data)?,
     };
     let cfg = build_config(&file, vocab)?;
+    if cfg.total_len() != args.seq_len {
+        return Err(CliError::other(format!(
+            "--seq-len {} != L model {} (samakan dengan config levels terakhir)",
+            args.seq_len,
+            cfg.total_len()
+        )));
+    }
     let tcfg = train_config(&cfg, stage, args.steps, args.seed);
     let dir = args.resume.clone().unwrap_or_else(|| args.out.clone());
-    let outcome = train(&cfg, &args.data, &dir, world, stage, &tcfg)?;
+    let outcome = train(&cfg, &args.data, &dir, world, stage, &tcfg, args.batch)?;
     report(&outcome, vocab, world, args.json);
     Ok(())
 }
@@ -243,9 +250,10 @@ fn train(
     world: usize,
     stage: Stage,
     tcfg: &TrainConfig,
+    batch: usize,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if world <= 1 {
-        let source = ShardBatchSource::from_shard(data, 8, 32, cfg.seed, false)
+        let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
             .map_err(|e| CliError::other(e.to_string()))?;
         let (mut step, store) = VirStepFn::new(cfg.clone(), source, Default::default(), stage)
             .map_err(|e| CliError::other(e.to_string()))?;
@@ -259,8 +267,14 @@ fn train(
         let mut sources = Vec::with_capacity(world);
         for r in 0..world {
             sources.push(
-                ShardBatchSource::from_shard(data, 8, 32, cfg.seed + r as u64, r % 2 == 0)
-                    .map_err(|e| CliError::other(e.to_string()))?,
+                ShardBatchSource::from_shard(
+                    data,
+                    batch,
+                    cfg.total_len(),
+                    cfg.seed + r as u64,
+                    r % 2 == 0,
+                )
+                .map_err(|e| CliError::other(e.to_string()))?,
             );
         }
         let (mut step, store) =

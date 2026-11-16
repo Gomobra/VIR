@@ -43,30 +43,26 @@ P(b.stderr[-3000:])
 if b.returncode != 0:
     raise SystemExit('build gagal')""")
 
-code("""# Buat shard token sintetis (aritmetika + kalimat) untuk latihan mini.
-import random
-random.seed(42)
-def synth_tokens(n):
-    toks = []
-    for _ in range(n):
-        a, b = random.randint(0, 99), random.randint(0, 99)
-        op = random.choice(['+', '-', '*'])
-        toks.append(f'{a} {op} {b} ='.split())
-        toks.append(str(eval(f'{a}{op}{b}')).split())
-    flat = [t for row in toks for t in row]
-    return flat
-# Tulis sebagai file teks sederhana (vir-data vocab mini)
-with open('/kaggle/working/corpus.txt', 'w') as f:
-    for _ in range(200):
-        f.write(' '.join(synth_tokens(1)[0] if False else str(random.randint(0,999)) for _ in range(8)) + '\\n')
-P('shard/corpus siap')""")
+code("""# Buat shard token biner vir-data via `vir make-shard` (nyata, dipakai vir train).
+import subprocess, os
+env = {**os.environ}
+r = subprocess.run(
+    ['/tmp/target/release/vir', 'make-shard', '--out', '/kaggle/working/mini_shard.bin',
+     '--docs', '2000', '--vocab', '512'],
+    capture_output=True, text=True, env=env)
+P('make-shard rc', r.returncode)
+P(r.stdout[-500:])
+P(r.stderr[-500:])
+assert r.returncode == 0, 'make-shard gagal'
+assert os.path.exists('/kaggle/working/mini_shard.bin'), 'shard tidak dibuat'
+P('shard siap:', os.path.getsize('/kaggle/working/mini_shard.bin'), 'bytes')""")
 
 code("""# Latihan world=1 vs world=2 (DDP). vir train --world N --data <shard> ...
 import subprocess, json, time, os
 def run_train(world, steps, out):
     cmd = ['/tmp/target/release/vir', 'train',
-           '--data', '/tmp/VIR/data/mini_shard.bin',
-           '--out', out, '--steps', str(steps), '--world', str(world), '--stage', 'gen', '--json']
+           '--data', '/kaggle/working/mini_shard.bin',
+           '--out', out, '--steps', str(steps), '--world', str(world), '--stage', 'gen', '--seq-len', '128', '--json']
     t = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True)
     dt = time.time() - t
