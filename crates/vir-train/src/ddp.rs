@@ -45,7 +45,9 @@ impl DevicePool {
         {
             let devices = burn::tensor::Device::enumerate(burn::tensor::DeviceType::Cuda);
             if !devices.is_empty() {
-                return Self { devices };
+                return Self {
+                    devices: devices.into_vec(),
+                };
             }
         }
         Self {
