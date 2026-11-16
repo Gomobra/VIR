@@ -105,7 +105,7 @@ impl Arm for FsqArm {
 ///
 /// NCM memakai encoder 0 blok transformer (tabel embedding saja, PRD F1.4
 /// langkah 1), jadi `z = embed[x]` langsung.
-#[derive(Module)]
+#[derive(Module, Debug)]
 pub struct Tokenizer<Q: Quantizer + Module + Debug + burn::module::ModuleDisplay> {
     embed: Param<Tensor<2>>,
     pub vq: MultiscaleVq<Q>,
