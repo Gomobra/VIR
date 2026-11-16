@@ -7,8 +7,6 @@
 
 use std::fmt;
 
-/// Backend latihan.
-pub(crate) const TRAIN_BACKEND: &str = "vir-train (Burn)";
 /// Backend model.
 pub(crate) const MODEL_BACKEND: &str = "vir-model (Burn)";
 
@@ -54,12 +52,12 @@ mod tests {
 
     #[test]
     fn json_muat_command_backend_dan_status() {
-        let b = BackendUnavailable::new("train", TRAIN_BACKEND);
+        let b = BackendUnavailable::new("train", "vir-train (Burn)");
         let text = b.json();
         let v: serde_json::Value = serde_json::from_str(&text).expect("json valid");
         assert_eq!(v["command"], "train");
         assert_eq!(v["status"], "unavailable");
-        assert_eq!(v["backend"], TRAIN_BACKEND);
+        assert_eq!(v["backend"], "vir-train (Burn)");
         assert!(v["build"].is_string());
     }
 

@@ -22,7 +22,6 @@ struct FileModel {
     num_heads: Option<usize>,
     levels: Option<Vec<usize>>,
     codebook_size: Option<usize>,
-    vocab: Option<usize>,
     phi_kernel: Option<usize>,
     prelude_blocks: Option<usize>,
     core_blocks: Option<usize>,
@@ -55,7 +54,6 @@ impl FileModel {
                 })
                 .filter(|l| !l.is_empty()),
             codebook_size: num("codebook_size"),
-            vocab: num("vocab"),
             phi_kernel: num("phi_kernel"),
             prelude_blocks: num("prelude_blocks"),
             core_blocks: num("core_blocks"),
