@@ -325,4 +325,8 @@ impl Quantizer for Codebook {
     fn stats(&self, indices: &Tensor<1, Int>) -> QuantizerStats {
         QuantizerStats::from_counts(&histogram(indices, self.num_entries))
     }
+
+    fn dead_codes(&self) -> usize {
+        Codebook::dead_codes(self)
+    }
 }

@@ -6,7 +6,10 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 vir-common = { path = "../vir-common" }
-burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "autotune", "fusion", "persistence"] }
+# `optim` (optimizer + `GradientsParams`) dipakai loop latihan tokenizer pada
+# ablasi F1.4.f (`tests/ablation.rs`) dan oleh pemanggil yang melatih
+# `MultiscaleVq` di CPU/Kaggle; tanpa flag ini `burn::optim` tidak ada.
+burn = { version = "0.22", default-features = false, features = ["flex", "autodiff", "std", "optim", "autotune", "fusion", "persistence"] }
 burn-cuda = { version = "0.22", optional = true, features = ["autotune", "fusion", "persistence"] }
 # Kernel terfusi (F7.1). Tanpa runtime sendiri: `fused` selalu mengaktifkan
 # `cuda`, dan `burn-cuda` yang membawa `cubecl/cuda` lewat `burn-backend`.

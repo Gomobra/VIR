@@ -1,7 +1,9 @@
-//! Pembantu tes CPU untuk `vir-vq` (tanpa CUDA): RNG deterministik kecil dan
-//! pembaca tensor ke `Vec<f32>`/`Vec<i32>`.
+//! Pembantu tes CPU untuk `vir-vq` (tanpa CUDA): RNG deterministik kecil,
+//! pembaca tensor ke `Vec<f32>`/`Vec<i32>`, dan harness ablasi (F1.4.f).
 
 #![allow(dead_code)]
+
+pub mod ablation;
 
 use burn::tensor::{Int, Tensor, TensorData};
 

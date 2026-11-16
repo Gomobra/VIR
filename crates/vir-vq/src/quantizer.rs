@@ -136,6 +136,15 @@ pub trait Quantizer {
     /// [`crate::codebook::Codebook`]; tidak ada state untuk FSQ.
     fn update(&mut self, indices: &Tensor<1, Int>, u: &Tensor<2>, rng: &mut dyn RngCore);
 
+    /// Jumlah entri codebook yang mati (hitungan EMA di bawah
+    /// [`crate::codebook::CodebookConfig::restart_threshold`]).
+    ///
+    /// Selalu 0 untuk kuantizer tanpa codebook terpelajar (FSQ/RFSQ/iFSQ):
+    /// itulah bentuk "bebas collapse" yang diuji ablasi F1.4.f.
+    fn dead_codes(&self) -> usize {
+        0
+    }
+
     /// Statistik histogram kode dari indeks batch (F1.4.a dan F1.4.e).
     fn stats(&self, indices: &Tensor<1, Int>) -> QuantizerStats;
 }

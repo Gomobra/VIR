@@ -197,6 +197,13 @@ pub struct LevelOutput {
     pub codes: Tensor<3>,
     /// `R_k(e_k(r_k))` pada `[B, L, d]` (dengan gradien straight-through).
     pub contribution: Tensor<3>,
+    /// Masukan kuantizer pra-kuantisasi `Down_k(z^(k-1))`, diratakan `[B*l, d]`.
+    ///
+    /// NCM menuntut EMA atas `u_k` (bukan atas keluaran kode), jadi
+    /// [`crate::quantizer::Quantizer::update`] membutuhkan tensor ini. Tanpa
+    /// medan ini pemanggil harus menyalin ulang loop
+    /// [`MultiscaleVq::encode`] hanya untuk mendapatkannya.
+    pub input: Tensor<2>,
 }
 
 impl<Q: Quantizer + Module> LevelVq<Q> {
@@ -228,13 +235,14 @@ impl<Q: Quantizer + Module> LevelVq<Q> {
         let u = self.scale.down(residual);
         let len = u.dims()[1];
         let flat = u.clone().reshape([batch * len, dim]);
-        let (quantized, st) = self.quantizer.quantize_st(flat);
+        let (quantized, st) = self.quantizer.quantize_st(flat.clone());
         let codes = quantized.quantized.reshape([batch, len, dim]);
         let contribution = self.reconstruct(st.reshape([batch, len, dim]));
         LevelOutput {
             indices: quantized.indices.reshape([batch, len]),
             codes,
             contribution,
+            input: flat,
         }
     }
 
@@ -268,6 +276,12 @@ pub struct EncodeOutput {
     pub contributions: Vec<Tensor<3>>,
     /// Indeks kode per level, `[B, ℓ_k]`.
     pub indices: Vec<Tensor<2, Int>>,
+    /// Masukan kuantizer pra-kuantisasi tiap level, `[B·ℓ_k, d]`.
+    ///
+    /// Dipakai [`crate::quantizer::Quantizer::update`] (EMA + restart kode
+    /// mati) tanpa menyalin ulang loop encode. Tensor ini bagian dari graf
+    /// autodiff: buang `EncodeOutput` tepat setelah `update` bila memori ketat.
+    pub level_inputs: Vec<Tensor<2>>,
     /// Rekonstruksi akhir `ẑ^(cutoff)`.
     pub final_z: Tensor<3>,
 }
@@ -321,6 +335,7 @@ impl<Q: Quantizer + Module> MultiscaleVq<Q> {
         let mut zs = Vec::with_capacity(k);
         let mut contributions = Vec::with_capacity(k);
         let mut indices = Vec::with_capacity(k);
+        let mut inputs = Vec::with_capacity(k);
         for level in self.levels.iter().take(k) {
             let out = level.forward(residual);
             z_hat = z_hat + out.contribution.clone();
@@ -328,11 +343,13 @@ impl<Q: Quantizer + Module> MultiscaleVq<Q> {
             zs.push(z_hat.clone());
             contributions.push(out.contribution);
             indices.push(out.indices);
+            inputs.push(out.input);
         }
         EncodeOutput {
             z_hat: zs,
             contributions,
             indices,
+            level_inputs: inputs,
             final_z: z_hat,
         }
     }
