@@ -32,6 +32,7 @@ pub mod burn_step;
 pub mod checkpoint;
 pub mod corruption;
 pub mod data;
+pub mod ddp;
 pub mod logging;
 pub mod loss;
 pub mod metrics;
@@ -45,6 +46,7 @@ pub mod trainer;
 pub use checkpoint::{Checkpoint, CheckpointFile, Progress, build as build_checkpoint};
 pub use corruption::{CorruptBatch, Corruption, RateShape, level_rates};
 pub use data::{BatchSource, ShardBatchSource};
+pub use ddp::{DdpStepFn, DevicePool, GradAllReduce, HostAllReduce};
 pub use logging::{EventRecord, JsonlLogger, StepRecord};
 pub use loss::{
     LossBreakdown, code_weight, grpo_advantage, grpo_objective, level_loss_terms, level_weight,
