@@ -49,10 +49,6 @@ pub fn load_quantized(path: &str) -> Result<Vec<f32>, VirError> {
 
 /// Metadata JSON ekspor (`vir-quant-1`).
 fn encode_meta(qt: &QuantizedTensor, shape: Option<&[usize]>) -> Result<String, VirError> {
-    let shape_json = match shape {
-        Some(s) => serde_json::to_string(s).map_err(|e| VirError::Internal(e.to_string()))?,
-        None => "[]".to_string(),
-    };
     let (kind, block) = match qt.granularity {
         QuantGranularity::PerTensor => ("per_tensor", 0usize),
         QuantGranularity::PerBlock { block_size } => ("per_block", block_size),
@@ -62,12 +58,16 @@ fn encode_meta(qt: &QuantizedTensor, shape: Option<&[usize]>) -> Result<String, 
         QuantScheme::Int4 => "int4",
         QuantScheme::Fp8 => "fp8",
     };
-    Ok(format!(
-        "{{\"version\":\"{}\",\"scheme\":\"{scheme}\",\"granularity\":\"{kind}\",\"block_size\":{block},\"numel\":{},\"num_blocks\":{},\"shape\":{shape_json}}",
-        crate::quant::EXPORT_VERSION,
-        qt.numel(),
-        qt.scales.len()
-    ))
+    let meta = serde_json::json!({
+        "version": crate::quant::EXPORT_VERSION,
+        "scheme": scheme,
+        "granularity": kind,
+        "block_size": block,
+        "numel": qt.numel(),
+        "num_blocks": qt.scales.len(),
+        "shape": shape,
+    });
+    serde_json::to_string(&meta).map_err(|e| VirError::Internal(e.to_string()))
 }
 
 /// Payload biner: nilai terkuantisasi lalu skala f32 little-endian.
