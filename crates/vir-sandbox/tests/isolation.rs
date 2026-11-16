@@ -245,9 +245,7 @@ fn jaringan_tcp_ditolak() {
     assert!(
         matches!(net.as_deref(), Some("BLOCKED") | Some("ERROR")),
         "connect TCP harus ditolak Landlock (BLOCKED/EPERM); dapat {net:?} (exit {:?})",
-        out.exit_code,
-        out.stderr,
-        out.stdout
+        out.exit_code
     );
     assert!(
         field(&out.stdout, "NET").is_none(),
