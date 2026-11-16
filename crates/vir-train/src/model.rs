@@ -349,12 +349,17 @@ impl rand::RngCore for RngAdapter<'_> {
 }
 
 /// Device latih: autodiff bila belum, lalu di-seed agar init bobot deterministik.
+///
+/// Seed dilakukan **di dalam** [`INIT_LOCK`] yang sama dengan
+/// [`VirTrainModel::new`], agar seed satu thread tak merusak init thread lain
+/// (RNG backend CPU bersifat global).
 pub fn train_device(device: Device, seed: u64) -> Device {
     let device = if device.is_autodiff() {
         device
     } else {
         device.autodiff()
     };
+    let _guard = init_guard();
     device.seed(seed);
     device
 }
