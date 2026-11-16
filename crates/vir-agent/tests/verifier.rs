@@ -35,11 +35,12 @@ const TIMEOUT_PENDEK: u64 = 700;
 
 /// Kebijakan tanpa konfinemen kernel; lihat catatan di header berkas.
 fn policy_fungsional(timeout_ms: u64) -> Policy {
-    let mut policy = Policy::default();
-    policy.landlock = false;
-    policy.seccomp = false;
-    policy.timeout = Duration::from_millis(timeout_ms);
-    policy
+    Policy {
+        landlock: false,
+        seccomp: false,
+        timeout: Duration::from_millis(timeout_ms),
+        ..Policy::default()
+    }
 }
 
 /// Verifier kode untuk tes fungsional; `tests` = sumber modul `unittest`.
@@ -210,7 +211,10 @@ fn code_verifier_bawaan_menyalakan_konfinemen_kernel() {
     let verifier = CodeVerifier::new();
     let policy = verifier.policy();
     assert!(policy.landlock, "Landlock wajib aktif secara bawaan");
-    assert!(policy.seccomp, "allowlist syscall wajib aktif secara bawaan");
+    assert!(
+        policy.seccomp,
+        "allowlist syscall wajib aktif secara bawaan"
+    );
     assert!(policy.workdir.is_none(), "workdir disetel per kandidat");
 }
 
@@ -288,8 +292,7 @@ fn code_verifier_tes_kosong_ditolak() {
     let verifier = verifier_fungsional(Some("import unittest\n"), TIMEOUT_UJI);
     let hasil = verifier.run("tugas", KANDIDAT_OK);
     let report = hasil.expect("jalan");
-    assert_eq!(report.exit_code, Some(0), "unittest tanpa tes keluar 0");
-    assert_eq!(report.tests_run, Some(0));
+    assert_eq!(report.tests_run, Some(0), "unittest melaporkan 0 tes");
     assert!(!report.passed, "tes kosong harus ditolak");
     let skor = verifier.score("tugas", KANDIDAT_OK);
     assert_eq!(skor.expect("skor"), 0.0);

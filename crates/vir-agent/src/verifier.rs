@@ -124,7 +124,9 @@ where
         }
     }
     let Some(picked) = best else {
-        return Err(VirError::Config("seleksi butuh minimal satu kandidat".into()));
+        return Err(VirError::Config(
+            "seleksi butuh minimal satu kandidat".into(),
+        ));
     };
     Ok(picked)
 }
@@ -173,7 +175,9 @@ where
     F: FnMut(usize) -> Result<String, VirError>,
 {
     if budget == 0 {
-        return Err(VirError::Config("anggaran pagar harus lebih dari nol".into()));
+        return Err(VirError::Config(
+            "anggaran pagar harus lebih dari nol".into(),
+        ));
     }
     let mut report = GuardReport::kosong();
     for attempt in 0..budget {

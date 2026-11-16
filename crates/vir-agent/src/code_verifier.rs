@@ -64,9 +64,10 @@ impl Default for CodeVerifier {
 /// Kebijakan bawaan: timeout dinding 10 s dan konfinemen kernel mengikuti
 /// `vir-sandbox` (aktif bila fitur `sandbox` dikompilasi).
 fn default_policy() -> Policy {
-    let mut policy = Policy::default();
-    policy.timeout = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
-    policy
+    Policy {
+        timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        ..Policy::default()
+    }
 }
 
 impl CodeVerifier {
@@ -183,5 +184,11 @@ fn count_tests(out: &RunResult) -> Option<usize> {
     out.stderr
         .lines()
         .chain(out.stdout.lines())
-        .find_map(|line| line.strip_prefix("Ran ")?.split_whitespace().next()?.parse().ok())
+        .find_map(|line| {
+            line.strip_prefix("Ran ")?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
 }

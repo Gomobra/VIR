@@ -46,7 +46,10 @@ pub fn confinement_error() -> Option<String> {
         Ok(out) if out.exit_code == Some(0) => None,
         Ok(out) => {
             let stderr: String = out.stderr.chars().take(240).collect();
-            Some(format!("konfinemen anak gagal (exit {:?}): {stderr}", out.exit_code))
+            Some(format!(
+                "konfinemen anak gagal (exit {:?}): {stderr}",
+                out.exit_code
+            ))
         }
         Err(err) => Some(format!("konfinemen anak gagal dipasang: {err}")),
     }

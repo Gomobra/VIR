@@ -279,13 +279,11 @@ fn syscall_terlarang_ditolak() {
     );
 
     // Pembanding tanpa seccomp: ptrace tidak boleh balik EPERM dari filter,
-    // membuktikan EPERM di atas berasal dari sandbox.
-    let out_kontrol = run(
-        helper(),
-        &["bad-syscall"],
-        &Policy::default().with_seccomp(false),
-    )
-    .expect("anak dapat dijalankan");
+    // membuktikan EPERM di atas berasal dari sandbox. Tetap di bawah Landlock
+    // (workdir wajib, E-015); hanya seccomp yang dimatikan.
+    let tanpa_seccomp = policy_in(&dir).with_seccomp(false);
+    let hasil_kontrol = run(helper(), &["bad-syscall"], &tanpa_seccomp);
+    let out_kontrol = hasil_kontrol.expect("anak dapat dijalankan");
     assert_ne!(
         field(&out_kontrol.stdout, "SYSCALL").as_deref(),
         Some("EPERM"),
