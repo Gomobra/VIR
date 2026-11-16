@@ -5,6 +5,7 @@
 mod backend;
 mod cmd_eval;
 mod cmd_generate;
+mod cmd_make_shard;
 mod cmd_mem;
 mod cmd_rlm;
 mod cmd_train;
@@ -43,6 +44,8 @@ enum Commands {
     Train(cmd_train::Args),
     /// Generasi dari checkpoint
     Generate(cmd_generate::Args),
+    /// Bikin shard token sintetis (vir-data)
+    MakeShard(cmd_make_shard::Args),
     /// Info build
     Version,
 }
@@ -57,6 +60,7 @@ fn main() -> Result<(), CliError> {
         Commands::Eval(args) => cmd_eval::run(&args),
         Commands::Train(args) => cmd_train::run(&args),
         Commands::Generate(args) => cmd_generate::run(&args),
+        Commands::MakeShard(args) => cmd_make_shard::run(&args),
         Commands::Version => {
             println!("{}", build_info());
             Ok(())
