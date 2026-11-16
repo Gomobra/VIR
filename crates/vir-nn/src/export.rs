@@ -88,7 +88,8 @@ fn decode_export(meta: &str, payload: &[u8]) -> Result<QuantizedTensor, VirError
         block_size: usize,
         numel: usize,
         num_blocks: usize,
-        shape: Vec<usize>,
+        #[serde(default)]
+        shape: Option<Vec<usize>>,
     }
     let m: Meta = serde_json::from_str(meta).map_err(|e| VirError::Internal(e.to_string()))?;
     let scheme = match m.scheme.as_str() {
@@ -126,7 +127,7 @@ fn decode_export(meta: &str, payload: &[u8]) -> Result<QuantizedTensor, VirError
     Ok(QuantizedTensor {
         scheme,
         granularity,
-        shape: m.shape,
+        shape: m.shape.unwrap_or_default(),
         packed: payload[..packed_len].to_vec(),
         scales,
     })
