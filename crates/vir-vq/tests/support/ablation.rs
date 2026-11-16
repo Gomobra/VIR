@@ -20,6 +20,7 @@ use burn::module::{Module, Param};
 use burn::optim::{AdamWConfig, GradientsParams};
 use burn::prelude::*;
 use burn::tensor::{Device, Distribution, Int, Tensor, TensorData};
+use std::fmt::Debug;
 use vir_vq::codebook::{Codebook, CodebookConfig};
 use vir_vq::fsq::{Fsq, FsqConfig};
 use vir_vq::quantizer::Quantizer;
@@ -105,7 +106,7 @@ impl Arm for FsqArm {
 /// NCM memakai encoder 0 blok transformer (tabel embedding saja, PRD F1.4
 /// langkah 1), jadi `z = embed[x]` langsung.
 #[derive(Module)]
-pub struct Tokenizer<Q: Quantizer + Module> {
+pub struct Tokenizer<Q: Quantizer + Module + Debug> {
     embed: Param<Tensor<2>>,
     pub vq: MultiscaleVq<Q>,
     pub decoder: Decoder,
