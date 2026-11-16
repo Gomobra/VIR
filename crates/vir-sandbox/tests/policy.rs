@@ -94,9 +94,15 @@ fn resource_limits_kosong_tanpa_batas() {
     assert_eq!(ResourceLimits::default(), kosong);
 }
 
+/// Kebijakan untuk tes CPU: konfinemen kernel dimatikan agar yang diuji adalah
+/// `run`/`spawn` (rlimit, timeout, penangkapan keluaran), bukan Landlock.
+fn policy_cpu() -> Policy {
+    Policy::default().with_landlock(false)
+}
+
 #[test]
 fn run_menangkap_stdout_stderr_dan_status() {
-    let policy = Policy::default().with_max_output(4096);
+    let policy = policy_cpu().with_max_output(4096);
     let out = run(
         "sh",
         &["-c", "printf halo; printf oops >&2; exit 3"],
@@ -115,14 +121,14 @@ fn run_menangkap_stdout_stderr_dan_status() {
 
 #[test]
 fn run_meneruskan_env_kebijakan_ke_anak() {
-    let policy = Policy::default().with_env("VIR_UJI", "42");
+    let policy = policy_cpu().with_env("VIR_UJI", "42");
     let out = run("sh", &["-c", "printf %s \"$VIR_UJI\""], &policy).expect("perintah jalan");
     assert_eq!(out.stdout, "42");
 }
 
 #[test]
 fn run_memotong_keluaran_besar() {
-    let policy = Policy::default().with_max_output(1000);
+    let policy = policy_cpu().with_max_output(1000);
     let out = run(
         "sh",
         &["-c", "head -c 5000 /dev/zero | tr '\\0' a"],
@@ -135,7 +141,7 @@ fn run_memotong_keluaran_besar() {
 
 #[test]
 fn run_membunuh_proses_yang_melewati_timeout() {
-    let policy = Policy::default().with_timeout(Duration::from_millis(300));
+    let policy = policy_cpu().with_timeout(Duration::from_millis(300));
     let start = Instant::now();
     let out = run("sh", &["-c", "sleep 30"], &policy).expect("perintah jalan");
     assert!(out.timed_out, "proses yang melewati timeout harus ditandai");
@@ -147,7 +153,7 @@ fn run_membunuh_proses_yang_melewati_timeout() {
 
 #[test]
 fn spawn_meneruskan_stdin_ke_stdout() {
-    let mut child = spawn("cat", &[], &Policy::default()).expect("spawn");
+    let mut child = spawn("cat", &[], &policy_cpu()).expect("spawn");
     {
         let mut stdin = child.stdin.take().expect("stdin anak");
         stdin.write_all(b"ping\n").expect("tulis ke anak");
@@ -161,4 +167,24 @@ fn spawn_meneruskan_stdin_ke_stdout() {
         .expect("baca anak");
     let _ = child.wait();
     assert_eq!(out, "ping\n");
+}
+
+/// E-015: Landlock tanpa `workdir` tidak boleh diam-diam kehilangan konfinemen.
+#[cfg(feature = "sandbox")]
+#[test]
+fn landlock_tanpa_workdir_ditolak() {
+    let policy = Policy::default();
+    assert!(policy.landlock && policy.workdir.is_none());
+    let hasil = run("true", &[], &policy);
+    let err = hasil.expect_err("kebijakan tanpa workdir harus ditolak");
+    assert!(err.to_string().contains("workdir"), "pesan: {err}");
+}
+
+/// Tanpa Landlock, `workdir` kosong tetap sah (tes CPU di host apa pun).
+#[test]
+fn tanpa_landlock_tanpa_workdir_tetap_jalan() {
+    let policy = policy_cpu();
+    assert!(policy.workdir.is_none());
+    let out = run("true", &[], &policy).expect("perintah jalan");
+    assert_eq!(out.exit_code, Some(0));
 }

@@ -13,6 +13,11 @@
 //!   `setpgid` → `chdir` → `PR_SET_NO_NEW_PRIVS` → Landlock → seccomp →
 //!   `exec`.
 //!
+//! Landlock hanya dapat menulis ke `workdir` + `allow_write`. Karena itu
+//! kebijakan yang meminta Landlock tanpa `workdir` ditolak: tanpa sasaran aturan
+//! tulis, konfinemen hilang diam-diam sementara pemanggil menyangka aktif
+//! (E-015).
+//!
 //! Tanpa fitur `sandbox`, pembatasan sistem berkas dan penyaringan syscall tidak
 //! tersedia; hanya rlimit, timeout, dan batas keluaran yang berlaku.
 //! Lihat `docs/adr/ADR-006-sandbox.md`.
@@ -21,7 +26,8 @@
 //!
 //! - `tests/policy.rs`, `tests/allowlist.rs`, `tests/seccomp.rs` — logika murni
 //!   (kebijakan, rlimit, daftar syscall) yang jalan di job `nextest` tanpa
-//!   kernel khusus.
+//!   kernel khusus; `landlock_tanpa_workdir_ditolak` (E-015) hanya dikompilasi
+//!   saat fitur `sandbox` aktif.
 //! - `tests/isolation.rs` — isolasi kernel nyata (loop tak hingga, OOM, ledakan
 //!   proses, tulis di luar workdir, jaringan, syscall terlarang) yang dijalankan
 //!   job `vir-sandbox` dengan `cargo test -p vir-sandbox --features sandbox`.
@@ -162,7 +168,13 @@ pub struct RunResult {
 }
 
 /// Bangun `Command` berkonfinemen tanpa spawn.
-fn build_command(program: &str, args: &[&str], policy: &Policy, stdin: Stdio) -> Command {
+fn build_command(
+    program: &str,
+    args: &[&str],
+    policy: &Policy,
+    stdin: Stdio,
+) -> Result<Command, VirError> {
+    check_landlock(policy)?;
     let mut cmd = Command::new(program);
     cmd.args(args);
     if let Some(dir) = &policy.workdir {
@@ -180,12 +192,31 @@ fn build_command(program: &str, args: &[&str], policy: &Policy, stdin: Stdio) ->
     limits::confine_command(&mut cmd, policy.limits);
     wire_landlock(&mut cmd, policy);
     wire_seccomp(&mut cmd, policy);
-    cmd
+    Ok(cmd)
+}
+
+/// Landlock hanya menulis ke `workdir` + `allow_write`; tanpa `workdir` aturan
+/// tulis tidak punya sasaran sehingga konfinemen hilang diam-diam. Kebijakan
+/// seperti itu ditolak (E-015).
+#[cfg(feature = "sandbox")]
+fn check_landlock(policy: &Policy) -> Result<(), VirError> {
+    if policy.landlock && policy.workdir.is_none() {
+        return Err(VirError::Config(
+            "landlock diminta tanpa Policy::workdir; set workdir atau landlock=false".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Tanpa fitur `sandbox` tidak ada konfinemen kernel yang bisa hilang.
+#[cfg(not(feature = "sandbox"))]
+fn check_landlock(_policy: &Policy) -> Result<(), VirError> {
+    Ok(())
 }
 
 /// Jalankan perintah sampai selesai, dengan timeout dan batas keluaran.
 pub fn run(program: &str, args: &[&str], policy: &Policy) -> Result<RunResult, VirError> {
-    let mut cmd = build_command(program, args, policy, Stdio::null());
+    let mut cmd = build_command(program, args, policy, Stdio::null())?;
     let child = cmd.spawn().map_err(VirError::Io)?;
     collect(child, policy)
 }
@@ -195,7 +226,7 @@ pub fn run(program: &str, args: &[&str], policy: &Policy) -> Result<RunResult, V
 /// Dipakai REPL berumur panjang; pemanggil bertangggung jawab menutup pipa dan
 /// membunuh grup proses lewat [`limits::kill_group`].
 pub fn spawn(program: &str, args: &[&str], policy: &Policy) -> Result<Child, VirError> {
-    let mut cmd = build_command(program, args, policy, Stdio::piped());
+    let mut cmd = build_command(program, args, policy, Stdio::piped())?;
     cmd.spawn().map_err(VirError::Io)
 }
 
@@ -357,7 +388,7 @@ mod tests {
     use std::process::Stdio;
 
     fn command_for(policy: &Policy) -> Command {
-        build_command("vir-uji", &["-c", "nilai"], policy, Stdio::null())
+        build_command("vir-uji", &["-c", "nilai"], policy, Stdio::null()).expect("kebijakan sah")
     }
 
     #[test]
@@ -372,13 +403,16 @@ mod tests {
 
     #[test]
     fn cwd_tidak_dipasang_bila_kebijakan_tanpa_workdir() {
-        let cmd = command_for(&Policy::default());
+        // Tanpa `workdir`, Landlock dimatikan; lihat `check_landlock`.
+        let policy = Policy::default().with_landlock(false);
+        let cmd = command_for(&policy);
         assert!(cmd.get_current_dir().is_none());
     }
 
     #[test]
     fn env_kebijakan_dipasang_ke_anak() {
-        let cmd = command_for(&Policy::default().with_env("VIR_UJI", "1"));
+        let dasar = Policy::default().with_landlock(false);
+        let cmd = command_for(&dasar.with_env("VIR_UJI", "1"));
         let vir = cmd
             .get_envs()
             .find(|(key, _)| *key == OsStr::new("VIR_UJI"))

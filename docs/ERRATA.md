@@ -184,3 +184,23 @@ Format entri:
 - Perbaikan: `Fsq` menyimpan `dim: usize` dan `Quantizer::dim()` mengembalikan `d`.
 - Tes regresi: `fsq_dim_adalah_dimensi_laten`, `fsq_roundtrip_depan_belakang_konsisten`.
 - Commit: (vq-eng)
+
+## E-015 — Landlock tanpa `workdir` kehilangan konfinemen diam-diam
+- Gejala: `Policy::default()` (landlock = true) tanpa `workdir` tetap berjalan
+  tanpa pembatasan sistem berkas apa pun; pemanggil menyangka konfinemen kernel
+  aktif padahal `wire_landlock` hanya menambal aturan bila `workdir` ada. Pada
+  jalur yang sama, `confinemen_error()` di tes isolasi memakai `.ok()?`, sehingga
+  galat pemasangan konfinemen (spawn anak gagal) terbaca sebagai "tidak ada
+  galat" — kegagalan sandbox bisa lewat sebagai sukses.
+- Akar masalah: aturan tulis Landlock berbasis `workdir` + `allow_write`, jadi
+  tanpa `workdir` tidak ada sasaran aturan tulis. Kode melewati konfinemen tanpa
+  memberi tanda, dan deteksi kemampuan kernel menelan galat spawn.
+- Perbaikan: `build_command` memeriksa kebijakan lebih dulu (E-015) — dengan
+  fitur `sandbox`, `landlock = true` tanpa `workdir` ditolak dengan
+  `VirError::Config` (fail closed); `confinemen_error()` melaporkan galat
+  pemasangan sebagai teks, bukan `None`.
+- Tes regresi: `landlock_tanpa_workdir_ditolak` (vir-sandbox, hanya fitur
+  `sandbox`), `tanpa_landlock_tanpa_workdir_tetap_jalan`, dan
+  `konfinemen_anak_terpasang` yang kini benar-benar gagal bila pemasangan
+  konfinemen error.
+- Commit: (agent-eng)

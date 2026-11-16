@@ -9,6 +9,11 @@ vir-common = { path = "../vir-common" }
 vir-sandbox = { path = "../vir-sandbox" }
 vir-mfs = { path = "../vir-mfs" }
 serde_json = "1"
-
-[dev-dependencies]
+# Direktori kerja sementara untuk `CodeVerifier` (satu direktori per kandidat).
 tempfile = "3"
+
+[features]
+default = []
+# Teruskan konfinemen kernel (Landlock + seccomp) ke `vir-sandbox`; tanpa fitur
+# ini `CodeVerifier` tetap jalan dengan rlimit + timeout (dipakai job `nextest`).
+sandbox = ["vir-sandbox/sandbox"]

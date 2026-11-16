@@ -38,15 +38,18 @@ pub fn seccomp_available() -> bool {
 /// atau aturan Landlock ditolak LSM lain. Uji dengan `true` di bawah kebijakan
 /// bawaan agar tes isolasi tidak menuduh sandbox rusak padahal host yang menolak.
 pub fn confinement_error() -> Option<String> {
-    let out = run("true", &[], &Policy::default()).ok()?;
-    if out.exit_code == Some(0) {
-        return None;
+    // `Policy::default()` meminta Landlock, yang mensyaratkan `workdir` (E-015);
+    // galat pemasangan (spawn gagal) juga harus terlaporkan, bukan dianggap sukses.
+    let dir = TempDir::new("konfinemen");
+    let policy = policy_in(&dir);
+    match run("true", &[], &policy) {
+        Ok(out) if out.exit_code == Some(0) => None,
+        Ok(out) => {
+            let stderr: String = out.stderr.chars().take(240).collect();
+            Some(format!("konfinemen anak gagal (exit {:?}): {stderr}", out.exit_code))
+        }
+        Err(err) => Some(format!("konfinemen anak gagal dipasang: {err}")),
     }
-    let stderr: String = out.stderr.chars().take(240).collect();
-    Some(format!(
-        "pemasangan konfinemen anak gagal (exit {:?}): {stderr}",
-        out.exit_code
-    ))
 }
 
 /// Ringkasan satu baris untuk pesan `SKIP`.
