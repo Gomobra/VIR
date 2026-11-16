@@ -233,7 +233,8 @@ fn train_config(cfg: &VirTrainConfig, stage: Stage, steps: u64, seed: Option<u64
         steps,
         levels: cfg.levels.clone(),
         alpha: cfg.alpha,
-        lr: LrSchedule::cosine(3e-4, 3e-5, 500, steps.max(1)),
+        // Warmup proporsional (<= 10% langkah, maks 500) agar tak melebihi total.
+        lr: LrSchedule::cosine(3e-4, 3e-5, (steps / 10).clamp(1, 500), steps.max(1)),
         grad_clip: 1.0,
         log_every: 10,
         checkpoint_every: 200.max(steps / 4),
