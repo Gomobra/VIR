@@ -548,6 +548,7 @@ impl NativeTrainer {
         };
         let now = Instant::now();
         let stage0 = tcfg.stage;
+        let seed = cfg.seed;
         Ok(Self {
             config: tcfg,
             model,
@@ -559,7 +560,7 @@ impl NativeTrainer {
             stage: stage0,
             step: 0,
             stage_step: 0,
-            rng: Rng::new(cfg.seed),
+            rng: Rng::new(seed),
             corruption: None,
             gate,
             logger: None,
