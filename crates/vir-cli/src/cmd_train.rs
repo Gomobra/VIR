@@ -219,7 +219,6 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         &args.data,
         &dir,
         world,
-        stage,
         &tcfg,
         args.batch,
         args.native,
@@ -261,14 +260,14 @@ fn train(
     data: &str,
     dir: &str,
     world: usize,
-    stage: Stage,
     tcfg: &TrainConfig,
     batch: usize,
     native: bool,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if native {
-        return train_native(cfg, data, dir, world, stage, tcfg, batch);
+        return train_native(cfg, data, dir, world, tcfg, batch);
     }
+    let stage = tcfg.stage;
     if world <= 1 {
         let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
             .map_err(|e| CliError::other(e.to_string()))?;
@@ -311,7 +310,6 @@ fn train_native(
     data: &str,
     dir: &str,
     world: usize,
-    stage: Stage,
     tcfg: &TrainConfig,
     batch: usize,
 ) -> Result<vir_train::RunOutcome, CliError> {
