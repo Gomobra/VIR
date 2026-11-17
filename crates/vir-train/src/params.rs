@@ -321,12 +321,29 @@ pub fn import_safetensors(
     model: VirTrainModel,
     tensors: &[(String, Vec<usize>, Vec<f32>)],
 ) -> Result<VirTrainModel, VirError> {
+    // `read_safetensors` bisa mengembalikan tensor terurut alfabet (serde_json
+    // Map = BTreeMap). `load_store` memetakan per indeks ke urutan `scan` model,
+    // jadi kita susun slot mengikuti urutan scan, mengambil data by name.
+    use std::collections::HashMap;
+    let by_name: HashMap<&str, &(Vec<usize>, Vec<f32>)> = tensors
+        .iter()
+        .map(|(n, s, d)| (n.as_str(), (s, d)))
+        .collect();
+    let order = scan(&model)?;
     let mut store = ParamStore::new();
-    for (name, shape, data) in tensors {
+    for f in &order {
+        let Some((shape, data)) = by_name.get(f.name.as_str()) else {
+            return Err(VirError::Internal(format!("tensor hilang: {}", f.name)));
+        };
         let cols = shape.last().copied().unwrap_or(1).max(1);
         let rows = if cols > 0 { data.len() / cols } else { 0 };
-        let role = role_for_path(name);
-        store.add(ParamSlot::new(name, rows, cols.max(1), role, data.clone()));
+        store.add(ParamSlot::new(
+            &f.name,
+            rows,
+            cols.max(1),
+            f.role,
+            data.clone(),
+        ));
     }
     load_store(model, &store)
 }
