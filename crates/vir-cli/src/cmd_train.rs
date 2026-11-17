@@ -164,6 +164,9 @@ pub(crate) struct Args {
     /// Jumlah GPU/rank data-parallel (default 1 = single device)
     #[arg(long, default_value_t = 1)]
     pub world: usize,
+    /// Pakai trainer GPU-native (tanpa roundtrip host↔GPU; hanya world=1)
+    #[arg(long)]
+    pub native: bool,
     /// Tahap awal: vq | gen
     #[arg(long, default_value = "gen")]
     pub stage: String,
@@ -211,7 +214,16 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
     }
     let tcfg = train_config(&cfg, stage, args.steps, args.seed);
     let dir = args.resume.clone().unwrap_or_else(|| args.out.clone());
-    let outcome = train(&cfg, &args.data, &dir, world, stage, &tcfg, args.batch)?;
+    let outcome = train(
+        &cfg,
+        &args.data,
+        &dir,
+        world,
+        stage,
+        &tcfg,
+        args.batch,
+        args.native,
+    )?;
     report(&outcome, vocab, world, args.json);
     Ok(())
 }
@@ -252,7 +264,11 @@ fn train(
     stage: Stage,
     tcfg: &TrainConfig,
     batch: usize,
+    native: bool,
 ) -> Result<vir_train::RunOutcome, CliError> {
+    if native {
+        return train_native(cfg, data, dir, world, stage, tcfg, batch);
+    }
     if world <= 1 {
         let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
             .map_err(|e| CliError::other(e.to_string()))?;
@@ -287,6 +303,37 @@ fn train(
             .run(&mut step)
             .map_err(|e| CliError::other(e.to_string()))
     }
+}
+
+/// Jalur GPU-native (tanpa roundtrip host↔GPU; hanya single device).
+fn train_native(
+    cfg: &VirTrainConfig,
+    data: &str,
+    dir: &str,
+    world: usize,
+    stage: Stage,
+    tcfg: &TrainConfig,
+    batch: usize,
+) -> Result<vir_train::RunOutcome, CliError> {
+    if world > 1 {
+        return Err(CliError::other(
+            "--native belum mendukung --world > 1 (DDP native belum ada)",
+        ));
+    }
+    let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
+        .map_err(|e| CliError::other(e.to_string()))?;
+    let mut trainer = vir_train::NativeTrainer::with_train_config(
+        cfg.clone(),
+        source,
+        Default::default(),
+        tcfg.clone(),
+    )
+    .map_err(|e| CliError::other(e.to_string()))?;
+    trainer
+        .open(dir)
+        .map_err(|e| CliError::other(e.to_string()))?;
+    trainer.run().map_err(|e| CliError::other(e.to_string()))?;
+    Ok(trainer.outcome(trainer.gate_passed()))
 }
 
 /// Ringkasan hasil (JSON atau teks).

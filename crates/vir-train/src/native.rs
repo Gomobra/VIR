@@ -614,6 +614,11 @@ impl NativeTrainer {
         self.logger.as_mut()
     }
 
+    /// `true` bila gerbang VQ sudah lulus (untuk ringkasan CLI).
+    pub fn gate_passed(&self) -> bool {
+        self.gate.passed
+    }
+
     /// Tok/s rata-rata sejak trainer dibuat.
     pub fn tokens_per_sec(&self) -> f64 {
         let secs = self.started.elapsed().as_secs_f64();
