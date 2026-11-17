@@ -300,3 +300,28 @@ pub fn copy_back(model: &VirTrainModel, store: &mut ParamStore) -> Result<usize,
     }
     Ok(copied)
 }
+
+/// Ekspor bobot model ke daftar `(path, shape, data)` untuk safetensors/checkpoint.
+pub fn export_safetensors(
+    model: &VirTrainModel,
+) -> Result<Vec<(String, Vec<usize>, Vec<f32>)>, VirError> {
+    Ok(scan(model)?
+        .into_iter()
+        .map(|f| (f.name, vec![f.rows, f.cols], f.data))
+        .collect())
+}
+
+/// Impor bobot dari daftar `(path, shape, data)` ke model (via `load_store`).
+pub fn import_safetensors(
+    model: VirTrainModel,
+    tensors: &[(String, Vec<usize>, Vec<f32>)],
+) -> Result<VirTrainModel, VirError> {
+    let mut store = ParamStore::new();
+    for (name, shape, data) in tensors {
+        let cols = shape.last().copied().unwrap_or(1).max(1);
+        let rows = if cols > 0 { data.len() / cols } else { 0 };
+        let role = role_for_path(name);
+        store.add(ParamSlot::new(name, rows, cols.max(1), role, data.clone()));
+    }
+    load_store(model, &store)
+}

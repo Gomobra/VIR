@@ -27,7 +27,7 @@ use vir_vq::{Codebook, CodebookConfig, Decoder, DecoderConfig, MultiscaleVq};
 use crate::rng::Rng;
 
 /// Konfigurasi model latih.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VirTrainConfig {
     /// Lebar laten/hidden `d`.
     pub dim: usize,

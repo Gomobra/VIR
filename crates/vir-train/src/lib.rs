@@ -37,6 +37,7 @@ pub mod logging;
 pub mod loss;
 pub mod metrics;
 pub mod model;
+pub mod native;
 pub mod optim;
 pub mod params;
 pub mod rng;
@@ -55,13 +56,15 @@ pub use loss::{
 };
 pub use metrics::{LevelStat, histogram, level_stats, perplexity, utilization};
 pub use model::{VirTrainConfig, VirTrainModel, VqEncoded, train_device};
+pub use native::NativeTrainer;
 pub use optim::{
     AdamState, AdamW, Hybrid, MUON_SCALE, MomState, Muon, MuonParams, NS_COEFFS, NS_STEPS,
     OptGroup, OptimSettings, ParamRole, ParamSlot, ParamStore, classify, clip_grad_norm,
     newton_schulz, newton_schulz_steps,
 };
 pub use params::{
-    build_store, collect_grads, copy_back, init_params, load_store, sync_frozen, write_grads,
+    build_store, collect_grads, copy_back, export_safetensors, import_safetensors, init_params,
+    load_store, sync_frozen, write_grads,
 };
 pub use rng::Rng;
 pub use schedule::{LrKind, LrSchedule};
