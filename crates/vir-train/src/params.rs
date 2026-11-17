@@ -45,11 +45,6 @@ struct Found {
 /// Segmen pertama path adalah nama field pada [`VirTrainModel`], jadi generator
 /// dikenali dari radix `generator` — bukan dari potongan `gen.` yang tidak
 /// pernah muncul pada path nyata.
-pub fn role_for_path(path: &str) -> ParamRole {
-    role_for(path)
-}
-
-/// Peran tahap dari path modul (PRD F1.7 dua tahap).
 fn role_for(path: &str) -> ParamRole {
     if path.contains("codebook") || path.contains("quantizer") || path.contains("phis") {
         return ParamRole::Tokenizer;
@@ -304,36 +299,4 @@ pub fn copy_back(model: &VirTrainModel, store: &mut ParamStore) -> Result<usize,
         }
     }
     Ok(copied)
-}
-
-/// Ekspor bobot model ke daftar `(path, shape, data)` untuk safetensors/checkpoint.
-///
-/// Path = nama modul berbatas titik; shape = `[rows, cols]`; data = f32 baris.
-/// Urutan = urutan parameter model (dari `scan`), sehingga `import_safetensors`
-/// dapat memuatnya kembali lewat `load_store` (yang memetakan per indeks).
-pub fn export_safetensors(
-    model: &VirTrainModel,
-) -> Result<Vec<(String, Vec<usize>, Vec<f32>)>, VirError> {
-    Ok(scan(model)?
-        .into_iter()
-        .map(|f| (f.name, vec![f.rows, f.cols], f.data))
-        .collect())
-}
-
-/// Impor bobot dari daftar `(path, shape, data)` ke model (via `load_store`).
-///
-/// Urutan tensors harus sama dengan urutan parameter model (hasil `scan`).
-/// `load_store` memakai shape asli tiap param; slot hanya butuh `data` + peran.
-pub fn import_safetensors(
-    model: VirTrainModel,
-    tensors: &[(String, Vec<usize>, Vec<f32>)],
-) -> Result<VirTrainModel, VirError> {
-    let mut store = ParamStore::new();
-    for (name, shape, data) in tensors {
-        let cols = shape.last().copied().unwrap_or(1).max(1);
-        let rows = if cols > 0 { data.len() / cols } else { 0 };
-        let role = role_for_path(name);
-        store.add(ParamSlot::new(name, rows, cols.max(1), role, data.clone()));
-    }
-    load_store(model, &store)
 }
