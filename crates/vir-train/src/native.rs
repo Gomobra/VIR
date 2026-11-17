@@ -681,7 +681,9 @@ impl NativeTrainer {
             let keep = non_frozen_param_ids(&self.model, stage);
             self.last_dropped = 0;
             let grads = GradientsParams::from_params(&mut grads, &self.model, &keep);
-            self.model = self.opt.step(lr, self.model, grads);
+            // ModuleOptimizer::step mengonsumsi model; klon device-side (bukan PCIe).
+            let model = self.model.clone();
+            self.model = self.opt.step(lr, model, grads);
             self.step += 1;
             self.stage_step += 1;
             self.sample_tok_s();
