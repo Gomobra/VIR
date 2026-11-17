@@ -38,9 +38,10 @@ P('make-shard rc', r.returncode, r.stdout.strip(), r.stderr.strip())
 assert r.returncode==0""")
 
 code("""# Matriks: world=1 & world=2, steps kecil, timeout per-run
-def run(world, steps, timeout=150):
+def run(world, steps, timeout=200):
     cmd=[VIR,'train','--data','/kaggle/working/mini_shard.bin','--out',f'/kaggle/working/run_w{world}',
-         '--steps',str(steps),'--world',str(world),'--stage','gen','--seq-len','128','--json']
+         '--steps',str(steps),'--world',str(world),'--stage','gen','--seq-len','32',
+         '--config','/tmp/VIR/configs/mini_train.json','--json']
     t=time.time()
     try:
         r=subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
