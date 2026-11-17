@@ -55,6 +55,11 @@ fn role_for(path: &str) -> ParamRole {
     }
 }
 
+/// Peran tahap dari path modul (versi publik untuk `native.rs`).
+pub fn role_for_path(path: &str) -> ParamRole {
+    role_for(path)
+}
+
 /// Kumpulan parameter dari satu jelajah `Module`.
 #[derive(Default)]
 struct Finder {

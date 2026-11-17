@@ -547,6 +547,7 @@ impl NativeTrainer {
             None => GateTracker::new(GateMetric::TokenAccuracy),
         };
         let now = Instant::now();
+        let stage0 = tcfg.stage;
         Ok(Self {
             config: tcfg,
             model,
@@ -555,7 +556,7 @@ impl NativeTrainer {
             source,
             device,
             weights,
-            stage: tcfg.stage,
+            stage: stage0,
             step: 0,
             stage_step: 0,
             rng: Rng::new(cfg.seed),
