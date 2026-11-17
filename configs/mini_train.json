@@ -1,0 +1,16 @@
+{
+  "dim": 64,
+  "num_heads": 4,
+  "levels": [2, 4, 8, 16, 32],
+  "codebook_size": 256,
+  "phi_kernel": 1,
+  "prelude_blocks": 1,
+    "core_blocks": 2,
+    "coda_blocks": 1,
+    "num_loops": 2,
+    "decoder_hidden": 64,
+    "commitment_cost": 0.25,
+    "alpha": 0.0,
+    "chunk": 0,
+    "seed": 42
+}
