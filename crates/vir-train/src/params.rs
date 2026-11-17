@@ -325,22 +325,17 @@ pub fn import_safetensors(
     // Map = BTreeMap). `load_store` memetakan per indeks ke urutan `scan` model,
     // jadi kita susun slot mengikuti urutan scan, mengambil data by name.
     use std::collections::HashMap;
-    let by_name: HashMap<&str, &(Vec<usize>, Vec<f32>)> = tensors
-        .iter()
-        .map(|(n, s, d)| (n.as_str(), (s, d)))
-        .collect();
-    let order = scan(&model)?;
+    let by_name: HashMap<&str, &Vec<f32>> =
+        tensors.iter().map(|(n, _, d)| (n.as_str(), d)).collect();
     let mut store = ParamStore::new();
-    for f in &order {
-        let Some((shape, data)) = by_name.get(f.name.as_str()) else {
+    for f in scan(&model)? {
+        let Some(data) = by_name.get(f.name.as_str()).copied() else {
             return Err(VirError::Internal(format!("tensor hilang: {}", f.name)));
         };
-        let cols = shape.last().copied().unwrap_or(1).max(1);
-        let rows = if cols > 0 { data.len() / cols } else { 0 };
         store.add(ParamSlot::new(
             &f.name,
-            rows,
-            cols.max(1),
+            f.rows,
+            f.cols,
             f.role,
             data.clone(),
         ));
