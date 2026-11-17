@@ -330,3 +330,19 @@ pub fn import_safetensors(
     }
     load_store(model, &store)
 }
+
+/// Kumpulkan path parameter 2D (matriks) — untuk grup Muon (F1.7: Muon hanya 2D).
+///
+/// Muon (Newton-Schulz) hanya berlaku untuk matriks 2D; parameter 1D (norm,
+/// bias) harus di AdamW agar tidak panik. Path diambil dari `scan` (rows/cols).
+pub fn two_d_param_paths(model: &VirTrainModel) -> Vec<String> {
+    scan(model)
+        .map(|found| {
+            found
+                .into_iter()
+                .filter(|f| f.rows > 1 && f.cols > 1)
+                .map(|f| f.name)
+                .collect()
+        })
+        .unwrap_or_default()
+}

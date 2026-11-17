@@ -72,3 +72,29 @@ pub fn burn_optimizer(cfg: &BurnHybridSettings) -> ModuleOptimizer {
         None,
     )
 }
+
+/// Bangun optimizer hibrid dengan grup Muon **eksplisit** dari path 2D.
+///
+/// Muon hanya menerima matriks 2D; parameter 1D (norm/bias) tetap AdamW.
+/// `two_d_paths` = hasil `crate::params::two_d_param_paths(model)`.
+pub fn burn_optimizer_with_paths(
+    cfg: &BurnHybridSettings,
+    two_d_paths: Vec<String>,
+) -> ModuleOptimizer {
+    let adamw = AdamWConfig::new()
+        .with_beta_1(cfg.beta1)
+        .with_beta_2(cfg.beta2)
+        .with_epsilon(cfg.eps)
+        .with_weight_decay(cfg.weight_decay)
+        .init();
+    let muon = MuonConfig::new()
+        .with_adjust_lr_fn(AdjustLrFn::MatchRmsAdamW)
+        .with_ns_steps(cfg.ns_steps)
+        .build();
+    let group = if two_d_paths.is_empty() {
+        ParamGroup::from_predicate("__no_such_param__".to_string())
+    } else {
+        ParamGroup::from_paths(two_d_paths)
+    };
+    adamw.with_group(group, muon, None)
+}

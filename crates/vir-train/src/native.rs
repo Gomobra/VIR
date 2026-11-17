@@ -62,7 +62,7 @@ use vir_common::VirError;
 use vir_model::ncm_loss;
 use vir_vq::{Codebook, MultiscaleVq, Quantizer, tensor_accuracy, vq_loss_chunked};
 
-use crate::burn_bridge::{BurnHybridSettings, burn_optimizer};
+use crate::burn_bridge::{BurnHybridSettings, burn_optimizer_with_paths};
 use crate::checkpoint::{CHECKPOINT_VERSION, LOG_FILE};
 use crate::corruption::Corruption;
 use crate::data::{BatchSource, ShardBatchSource};
@@ -540,7 +540,10 @@ impl NativeTrainer {
         }
         let device = train_device(device, cfg.seed);
         let model = VirTrainModel::new(&cfg, &device)?;
-        let opt = burn_optimizer(&BurnHybridSettings::default());
+        let opt = burn_optimizer_with_paths(
+            &BurnHybridSettings::default(),
+            crate::params::two_d_param_paths(&model),
+        );
         let weights = crate::loss::level_weight(&cfg.levels, cfg.alpha);
         let gate = match tcfg.gate {
             Some(g) => GateTracker::new(g.metric),
@@ -788,7 +791,10 @@ impl NativeTrainer {
         let device = train_device(Default::default(), state.model.seed);
         let model = VirTrainModel::new(&state.model, &device)?;
         let model = params::import_safetensors(model, &tensors)?;
-        let opt = burn_optimizer(&BurnHybridSettings::default());
+        let opt = burn_optimizer_with_paths(
+            &BurnHybridSettings::default(),
+            crate::params::two_d_param_paths(&model),
+        );
         let weights = crate::loss::level_weight(&state.model.levels, state.model.alpha);
         let now = Instant::now();
         Ok(Self {
