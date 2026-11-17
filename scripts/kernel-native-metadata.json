@@ -1,0 +1,14 @@
+{
+ "id": "spesialassme/vir-kaggle-native-bench",
+ "title": "vir-kaggle-native-bench",
+ "code_file": "vir_kaggle_native.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": true,
+ "dataset_sources": [],
+ "competition_sources": [],
+ "kernel_sources": []
+}

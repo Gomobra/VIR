@@ -15,7 +15,7 @@
 | vir-vq | 34 | job `vir-vq` (CPU, non-CUDA) |
 | vir-nn | 11 | job `vir-nn` |
 | vir-model | 36 | job `vir-model` |
-| vir-train | 44 | job `vir-train` |
+| vir-train | 68 | job `vir-train` |
 | vir-eval | 12 | job `vir-eval` |
 | vir-mfs | 43 | job `nextest` |
 | vir-sandbox | 20 | job `nextest` + `vir-sandbox` (build `--features sandbox`) |
@@ -55,6 +55,7 @@ di riwayat commit; lihat `gh run list`.
   G1 ditegakkan `tests/e2e` (E-010 pelaporan jujur `recon` apa adanya).
 - **F2.1–F2.4** `vir-model`: recurrent depth (prelude/core/coda, injeksi, r
   sampling), halting (Fixed/Entropy), block-AR, CFG level logit, MBR select — 36 tes.
+- **F2.5 latihan nyata** `vir-train`/`vir-cli`: `vir train` (single-GPU, `VirStepFn`+`Trainer`) & `vir train --world N` (DDP data-parallel, `DevicePool`+`HostAllReduce`+`DdpStepFn`) — **DDP terbukti di 2×T4 (Kaggle)**. **GPU-native** `vir train --native` (`NativeTrainer`, param tetap di GPU, `GradientsParams::from_params` freeze, Muon 2D via `burn_optimizer_with_paths`, safetensors by-name) — CI hijau; 68 tes vir-train (termasuk `tests/native.rs`: jalan, safetensors round-trip, resume).
 - **F3.1** `vir-sandbox`: Policy (builder), ResourceLimits, allowlist syscall, isolasi kernel nyata (`tests/isolation.rs` 9 tes: loop/OOM/fork/write luar workdir/TCP/syscall) + threat-model (E-015),
   `seccomp::describe`, Landlock/seccomp di balik feature `sandbox` (job `vir-sandbox`
   build `--features sandbox`) — 20 tes.
