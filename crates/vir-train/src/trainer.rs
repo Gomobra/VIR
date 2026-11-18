@@ -372,6 +372,12 @@ pub struct RunOutcome {
     /// Diisi jalur GPU-native ([`crate::native::NativeTrainer`]); jalur host
     /// mengisi `0.0`. `0.0` juga berarti "tak diukur".
     pub tok_s: f64,
+    /// EWMA durasi forward (ms) — profil fase (R1).
+    pub fwd_ms: f32,
+    /// EWMA durasi backward (ms).
+    pub bwd_ms: f32,
+    /// EWMA durasi optimizer step (ms).
+    pub opt_ms: f32,
 }
 
 /// Trainer dua tahap.
@@ -559,6 +565,9 @@ impl Trainer {
             transitioned,
             loss: self.last_loss,
             tok_s: 0.0,
+            fwd_ms: 0.0,
+            bwd_ms: 0.0,
+            opt_ms: 0.0,
         })
     }
 

@@ -353,6 +353,9 @@ fn report(outcome: &vir_train::RunOutcome, vocab: usize, world: usize, json: boo
                 "vocab_size": vocab,
                 "world": world,
                 "tok_s": outcome.tok_s,
+                "fwd_ms": outcome.fwd_ms,
+                "bwd_ms": outcome.bwd_ms,
+                "opt_ms": outcome.opt_ms,
             })
         );
         return;

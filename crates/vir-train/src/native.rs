@@ -625,6 +625,12 @@ pub struct NativeTrainer {
     last_loss_t: Option<Tensor<1>>,
     /// Sisa langkah warmup (W0); dijalankan sekali, lalu dinolkan.
     warmup: u64,
+    /// EWMA durasi forward (ms) — profil fase (R1).
+    fw_ms: f32,
+    /// EWMA durasi backward (ms) — profil fase (R1).
+    bw_ms: f32,
+    /// EWMA durasi optimizer step (ms) — profil fase (R1).
+    op_ms: f32,
 }
 
 impl NativeTrainer {
@@ -705,6 +711,9 @@ impl NativeTrainer {
             keep,
             last_loss_t: None,
             warmup: 0,
+            fw_ms: 0.0,
+            bw_ms: 0.0,
+            op_ms: 0.0,
         })
     }
 
@@ -826,6 +835,9 @@ impl NativeTrainer {
         self.last_sample = now;
         self.last_sample_tokens = self.tokens_done;
         self.tok_s = 0.0;
+        self.fw_ms = 0.0;
+        self.bw_ms = 0.0;
+        self.op_ms = 0.0;
     }
 
     /// Satu langkah penuh: forward → backward → `opt.step`.
@@ -837,14 +849,24 @@ impl NativeTrainer {
         let lr = self.config.lr.lr(self.step);
         let want_metrics = measured && self.metrics_due();
         let out = self.forward(lr, want_metrics)?;
+        let fwd_ms = elapsed_ms(t0);
         let tokens = out.tokens;
         let metrics = out.metrics;
-        self.backward_and_step(lr, out.loss)?;
+        let (bwd_ms, opt_ms) = self.backward_and_step(lr, out.loss)?;
         let dt_ms = elapsed_ms(t0);
         if measured {
+            self.record_times(fwd_ms, bwd_ms, opt_ms);
             self.finish_step(tokens, metrics, lr, dt_ms)?;
         }
         Ok(())
+    }
+
+    /// Perbarui EWMA durasi tiap fase (fwd/bwd/opt) — untuk R1 (profil).
+    fn record_times(&mut self, fwd: f32, bwd: f32, opt: f32) {
+        let a = 0.2;
+        self.fw_ms = ewma(self.fw_ms, fwd, a);
+        self.bw_ms = ewma(self.bw_ms, bwd, a);
+        self.op_ms = ewma(self.op_ms, opt, a);
     }
 
     /// `true` bila langkah berikutnya harus mengukur metrik (log/gerbang).
@@ -903,20 +925,26 @@ impl NativeTrainer {
     }
 
     /// Backward + `opt.step` di device; hanya gradien non-beku yang diikutkan.
-    fn backward_and_step(&mut self, lr: f64, loss: Tensor<1>) -> Result<(), VirError> {
+    ///
+    /// Mengembalikan `(bwd_ms, opt_ms)` untuk profil fase (R1).
+    fn backward_and_step(&mut self, lr: f64, loss: Tensor<1>) -> Result<(f32, f32), VirError> {
         if !loss.is_tracked() {
             return Err(VirError::Internal(
                 "loss tidak terlacak autodiff (device tanpa gradien?)".into(),
             ));
         }
         self.last_loss_t = Some(loss.clone());
+        let tb = Instant::now();
         let mut grads = loss.backward();
+        let bwd_ms = elapsed_ms(tb);
         self.refresh_keep();
         let grads = GradientsParams::from_params(&mut grads, &self.model, self.keep_ids());
+        let to = Instant::now();
         // ModuleOptimizer::step mengonsumsi model; klon device-side (bukan PCIe).
         let model = self.model.clone();
         self.model = self.opt.step(lr, model, grads);
-        Ok(())
+        let opt_ms = elapsed_ms(to);
+        Ok((bwd_ms, opt_ms))
     }
 
     /// Segarkan cache `ParamId` non-beku bila tahap berubah (B11).
@@ -1123,6 +1151,9 @@ impl NativeTrainer {
             keep,
             last_loss_t: None,
             warmup: 0,
+            fw_ms: 0.0,
+            bw_ms: 0.0,
+            op_ms: 0.0,
         })
     }
 
@@ -1162,6 +1193,9 @@ impl NativeTrainer {
             transitioned: self.transitions > 0,
             loss: self.last_loss,
             tok_s: self.tokens_per_sec(),
+            fwd_ms: self.fw_ms,
+            bwd_ms: self.bw_ms,
+            opt_ms: self.op_ms,
         }
     }
 }
@@ -1213,4 +1247,13 @@ pub fn elapsed_since(start: Instant) -> Duration {
 /// Milidetik sejak `t0` (untuk `StepRecord::dt_ms`).
 fn elapsed_ms(t0: Instant) -> f32 {
     t0.elapsed().as_secs_f32() * 1000.0
+}
+
+/// Exponentially-weighted moving average (profil fase, R1).
+fn ewma(cur: f32, inst: f32, a: f32) -> f32 {
+    if cur <= 0.0 {
+        inst
+    } else {
+        (1.0 - a) * cur + a * inst
+    }
 }
