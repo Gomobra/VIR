@@ -360,19 +360,29 @@ impl Generator {
         r: usize,
     ) -> Vec<Tensor<3>> {
         let n = z_hats.len().min(self.heads.len());
-        let mut out = Vec::with_capacity(n);
-        for k in 0..n {
-            let x = self.level_input_with(scales, k, z_hats[k].clone());
-            out.push(recurrent_forward(
-                &self.prelude,
-                &self.core,
-                &self.coda,
-                &self.adapter,
-                x,
-                r,
-            ));
+        if n == 0 {
+            return Vec::new();
         }
-        out
+        // B4: level-level independen (attention per-sequence, blok di-share).
+        // Batch jadi `[B·n, L, d]` → satu lintasan blok, bukan `n` lintasan.
+        // Numerik identik (matmul/LayerNorm/softmax per-baris), 5× lebih sedikit
+        // luncuran kernel + matmul lebih besar (GPU lebih terisi).
+        let inputs: Vec<Tensor<3>> = (0..n)
+            .map(|k| self.level_input_with(scales, k, z_hats[k].clone()))
+            .collect();
+        let [b, l, d] = inputs[0].dims();
+        let batched = Tensor::cat(inputs, 0);
+        let out = recurrent_forward(
+            &self.prelude,
+            &self.core,
+            &self.coda,
+            &self.adapter,
+            batched,
+            r,
+        );
+        (0..n)
+            .map(|k| out.clone().slice([k * b..(k + 1) * b, 0..l, 0..d]))
+            .collect()
     }
 
     /// Operator skala untuk konteks `ctx_len` (mis. `prefix + L`).
