@@ -59,7 +59,6 @@ use burn::prelude::*;
 use burn::tensor::{Device, Tensor, TensorData};
 use serde::{Deserialize, Serialize};
 use vir_common::VirError;
-use vir_model::ncm_loss;
 use vir_vq::{Codebook, MultiscaleVq, Quantizer, tensor_accuracy, vq_loss_chunked};
 
 use crate::burn_bridge::{BurnHybridSettings, burn_optimizer_with_paths};
@@ -342,14 +341,25 @@ fn gen_forward(
     let (corrupted, rate) = corrupt(&clean, ctx, cfg);
     let inputs = teacher_inputs(model, &corrupted, cfg.dim, &target_tokens.device());
     let logits = model.generator.forward(&inputs);
-    let loss = ncm_loss(&logits, &clean, weights);
-    let mut per_level = Vec::with_capacity(logits.len());
-    let mut perplexity = Vec::with_capacity(logits.len());
-    for (k, logit) in logits.iter().enumerate() {
-        let ce = level_ce(logit, &clean[k]);
-        per_level.push(ce * weights[k]);
+    // Satu CE per level: dipakai untuk loss tracked DAN metrik (hindari hitung CE
+    // dua kali — mahal pada vocab besar). `level_losses` = w_k·CE_k per level.
+    let terms = vir_model::level_losses(&logits, &clean, weights);
+    let mut total: Option<Tensor<1>> = None;
+    let mut per_level = Vec::with_capacity(terms.len());
+    let mut perplexity = Vec::with_capacity(terms.len());
+    for (k, term) in terms.iter().enumerate() {
+        total = Some(match total.take() {
+            Some(acc) => acc + term.clone(),
+            None => term.clone(),
+        });
+        per_level.push(term.clone().into_scalar::<f32>());
+        let ce = term
+            .clone()
+            .div_scalar(weights[k].max(f32::EPSILON))
+            .into_scalar::<f32>();
         perplexity.push(ce.exp());
     }
+    let loss = total.unwrap_or_else(|| Tensor::zeros([1], &logits[0].device()));
     let (utilization, _) = codebook_stats(&model.vq, &clean);
     let loss_total = loss.clone().into_scalar::<f32>();
     let tokens = target_tokens.dims().iter().product::<usize>();
@@ -432,18 +442,6 @@ fn codebook_stats(vq: &MultiscaleVq<Codebook>, indices: &[Tensor<2, Int>]) -> (V
         perplexity.push(stats.perplexity);
     }
     (utilization, perplexity)
-}
-
-/// CE satu level (tanpa bobot) dari logits dan target kode.
-fn level_ce(logits: &Tensor<3>, target: &Tensor<2, Int>) -> f32 {
-    let loss = vir_model::level_losses(
-        std::slice::from_ref(logits),
-        std::slice::from_ref(target),
-        &[1.0],
-    );
-    loss.first()
-        .map(|t| t.clone().into_scalar::<f32>())
-        .unwrap_or(0.0)
 }
 
 // ---------------------------------------------------------------------------
