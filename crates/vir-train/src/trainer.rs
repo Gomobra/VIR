@@ -367,6 +367,11 @@ pub struct RunOutcome {
     pub transitioned: bool,
     /// Loss total langkah terakhir.
     pub loss: f32,
+    /// Throughput steady-state (token/detik) sejak akhir warmup.
+    ///
+    /// Diisi jalur GPU-native ([`crate::native::NativeTrainer`]); jalur host
+    /// mengisi `0.0`. `0.0` juga berarti "tak diukur".
+    pub tok_s: f64,
 }
 
 /// Trainer dua tahap.
@@ -553,6 +558,7 @@ impl Trainer {
             gate_passed,
             transitioned,
             loss: self.last_loss,
+            tok_s: 0.0,
         })
     }
 

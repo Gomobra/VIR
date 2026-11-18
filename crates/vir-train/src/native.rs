@@ -1161,6 +1161,7 @@ impl NativeTrainer {
             gate_passed,
             transitioned: self.transitions > 0,
             loss: self.last_loss,
+            tok_s: self.tokens_per_sec(),
         }
     }
 }
