@@ -59,20 +59,28 @@ code("""r = subprocess.run([VIR,'make-shard','--out','/kaggle/working/mini_shard
 P('make-shard rc', r.returncode, r.stdout.strip(), r.stderr.strip())
 assert r.returncode == 0""")
 
-code("""# --- 1) Mesin kita: vir train --native (fp32), batch 64, 30 langkah ---
+code("""# --- 1) Mesin kita: vir train --native (fp32), warmup 5 + 30 langkah terukur ---
 CFG = '/tmp/VIR/configs/mini_train.json'
-STEPS = 30
+STEPS = 35          # 5 warmup (tak terukur) + 30 terukur
+WARMUP = 5
 BATCH = 64
 SEQLEN = 32
 t = time.time()
-r = subprocess.run([VIR,'train','--native','--data','/kaggle/working/mini_shard.bin',
+r = subprocess.run([VIR,'train','--native','--warmup',str(WARMUP),
+                    '--data','/kaggle/working/mini_shard.bin',
                     '--out','/kaggle/working/run_vir','--steps',str(STEPS),
                     '--batch',str(BATCH),'--stage','gen','--seq-len',str(SEQLEN),
                     '--config',CFG,'--json'], capture_output=True, text=True, timeout=900)
 vir_dt = round(time.time()-t, 2)
-vir_tok = round(STEPS*BATCH*SEQLEN/vir_dt, 1) if vir_dt>0 else 0.0
+vir_tok = 0.0
+try:
+    vj = json.loads(r.stdout.strip().splitlines()[-1])
+    vir_tok = float(vj.get('tok_s', 0.0))
+except Exception as e:
+    P('parse vir json gagal', e)
 res = {'vir_native': {'rc': r.returncode, 'dt_s': vir_dt, 'tok_s': vir_tok,
-                      'precision': 'fp32', 'out': r.stdout[-200:], 'err': r.stderr[-300:]}}
+                      'precision': 'fp32', 'warmup': WARMUP,
+                      'out': r.stdout[-200:], 'err': r.stderr[-300:]}}
 P('VIR_NATIVE', json.dumps(res['vir_native']))""")
 
 code("""# --- 2) PyTorch: transformer setara, 5-level CE (seperti NCM VIR) ---
@@ -80,6 +88,7 @@ import torch, torch.nn as nn, math
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 DEV = 'cuda'
+PT_STEPS = 30        # langkah terukur PyTorch (setara 30 terukur vir)
 D, H, LAYERS, V, LEVELS = 64, 4, 6, 512, 5
 
 class Blk(nn.Module):
@@ -124,9 +133,9 @@ def bench(use_bf16, tag):
     for _ in range(3): one()          # warmup
     torch.cuda.synchronize(); t0 = time.time()
     last = 0.0
-    for _ in range(STEPS): last = one()
+    for _ in range(PT_STEPS): last = one()
     torch.cuda.synchronize(); dt = round(time.time()-t0, 2)
-    tok = round(STEPS*BATCH*SEQLEN/dt, 1) if dt>0 else 0.0
+    tok = round(PT_STEPS*BATCH*SEQLEN/dt, 1) if dt>0 else 0.0
     return {'rc': 0, 'dt_s': dt, 'tok_s': tok,
             'precision': 'bf16' if use_bf16 else 'fp32', 'loss': round(last, 4)}
 
