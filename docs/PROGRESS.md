@@ -55,7 +55,7 @@ di riwayat commit; lihat `gh run list`.
   G1 ditegakkan `tests/e2e` (E-010 pelaporan jujur `recon` apa adanya).
 - **F2.1–F2.4** `vir-model`: recurrent depth (prelude/core/coda, injeksi, r
   sampling), halting (Fixed/Entropy), block-AR, CFG level logit, MBR select — 36 tes.
-- **F2.5 latihan nyata** `vir-train`/`vir-cli`: `vir train` (single-GPU, `VirStepFn`+`Trainer`) & `vir train --world N` (DDP data-parallel, `DevicePool`+`HostAllReduce`+`DdpStepFn`) — **DDP terbukti di 2×T4 (Kaggle)**. **GPU-native** `vir train --native` (`NativeTrainer`, param tetap di GPU, `GradientsParams::from_params` freeze, Muon 2D via `burn_optimizer_with_paths`, safetensors by-name) — CI hijau; 68 tes vir-train (termasuk `tests/native.rs`: jalan, safetensors round-trip, resume).
+- **F2.5 latihan nyata** `vir-train`/`vir-cli`: `vir train` (single-GPU, `VirStepFn`+`Trainer`) & `vir train --world N` (DDP data-parallel, `DevicePool`+`HostAllReduce`+`DdpStepFn`) — **DDP terbukti di 2×T4 (Kaggle)**. **GPU-native** `vir train --native` (`NativeTrainer`, param tetap di GPU, `GradientsParams::from_params` freeze, Muon 2D via `burn_optimizer_with_paths`, safetensors by-name) — **1.393× lebih cepat dari roundtrip di 2×T4 (Kaggle, 153.8 vs 110.4 tok/s)**, CI hijau; 68 tes vir-train (termasuk `tests/native.rs`: jalan, safetensors round-trip, resume).
 - **F3.1** `vir-sandbox`: Policy (builder), ResourceLimits, allowlist syscall, isolasi kernel nyata (`tests/isolation.rs` 9 tes: loop/OOM/fork/write luar workdir/TCP/syscall) + threat-model (E-015),
   `seccomp::describe`, Landlock/seccomp di balik feature `sandbox` (job `vir-sandbox`
   build `--features sandbox`) — 20 tes.
@@ -106,6 +106,7 @@ di riwayat commit; lihat `gh run list`.
 - **G2 (vir-kaggle-g2-cuda)**: build vir-vq CUDA + test → `build_rc 0, test_rc 0`, ~19 mnt.
 - **G3 (vir-kaggle-g3)**: build vir-train CUDA (Burn 0.22.1) + test → 5 tes lulus, ~17 mnt.
 - **DDP multi-GPU (vir-kaggle-ddp-matrix, F2.5.e)**: build `vir-cli` CUDA sekali (18 mnt) + `vir make-shard` (68k token, config mini dim64 K5 L32) + `vir train --world 1` & `--world 2` (DDP 2×T4). **HASIL (nyata):** world=1 `rc 0, 20 steps, 84.6s`; world=2 `rc 0, 20 steps, 100.2s` — keduanya `{"status":"ok"}`. **Multi-GPU DDP terbukti jalan di 2×T4.** Bug ditemukan & diperbaiki via Kaggle (R2): DevicePool::detect into_vec, vir train cfg.total_len() + warmup proporsional, make-shard, config mini (default NCM penuh timeout krn autotune kernel + berat). Cache `vir-bin.tar.gz` (50MB) disimpan utk reuse (build berikutnya ~0).
+- **Benchmark native vs roundtrip (vir-kaggle-native-bench, F2.5.c/1.393×)**: build `vir-cli` CUDA + shard sama (68k token, mini dim64 K5 L32) + dua run 40 langkah konfigurasi identik. **HASIL (nyata, 2×T4):** roundtrip `rc 0, 92.75s, 110.4 tok/s`; native `rc 0, 66.57s, 153.8 tok/s` → **native 1.393× lebih cepat (~39%)**. Membuktikan `NativeTrainer` (param tetap di GPU, tanpa roundtrip PCIe) **jalan di GPU & lebih cepat** — optimisasi R1 terukur.
 
 ## Catatan
 
