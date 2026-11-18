@@ -8,3 +8,4 @@ proptest-regressions
 # Cargo.lock HARUS dikomit (PRD F0.1)
 !Cargo.locktarget/
 crates/vir-modal/target/
+target
