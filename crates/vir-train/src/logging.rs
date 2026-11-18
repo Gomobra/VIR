@@ -35,6 +35,12 @@ pub struct StepRecord {
     pub grad_norm: f32,
     /// Laju korupsi sebenarnya pada batch ini (bila korupsi aktif).
     pub corruption_rate: Option<f32>,
+    /// Durasi satu langkah penuh (forward + backward + step) dalam milidetik.
+    ///
+    /// Diisi jalur GPU-native ([`crate::native::NativeTrainer`]); jalur host
+    /// (`Trainer`) tidak mengukurnya dan mengisi `0.0`. Dipakai menghitung
+    /// steady-state dari JSONL tanpa mengandalkan jam sejak konstruksi.
+    pub dt_ms: f32,
     /// Metrik rekonstruksi untuk gerbang tahap 1 (bila dilaporkan).
     pub recon: Option<f32>,
 }

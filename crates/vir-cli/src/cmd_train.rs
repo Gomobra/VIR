@@ -167,6 +167,9 @@ pub(crate) struct Args {
     /// Pakai trainer GPU-native (tanpa roundtrip host↔GPU; hanya world=1)
     #[arg(long)]
     pub native: bool,
+    /// Langkah warmup tak terukur sebelum pengukuran (W0; hanya --native)
+    #[arg(long, default_value_t = 0)]
+    pub warmup: u64,
     /// Tahap awal: vq | gen
     #[arg(long, default_value = "gen")]
     pub stage: String,
@@ -222,6 +225,7 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         &tcfg,
         args.batch,
         args.native,
+        args.warmup,
     )?;
     report(&outcome, vocab, world, args.json);
     Ok(())
@@ -255,6 +259,7 @@ fn train_config(cfg: &VirTrainConfig, stage: Stage, steps: u64, seed: Option<u64
 }
 
 /// Bangun sumber data (N replika untuk DDP) dan jalankan trainer.
+#[allow(clippy::too_many_arguments)]
 fn train(
     cfg: &VirTrainConfig,
     data: &str,
@@ -263,9 +268,10 @@ fn train(
     tcfg: &TrainConfig,
     batch: usize,
     native: bool,
+    warmup: u64,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if native {
-        return train_native(cfg, data, dir, world, tcfg, batch);
+        return train_native(cfg, data, dir, world, tcfg, batch, warmup);
     }
     let stage = tcfg.stage;
     if world <= 1 {
@@ -312,6 +318,7 @@ fn train_native(
     world: usize,
     tcfg: &TrainConfig,
     batch: usize,
+    warmup: u64,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if world > 1 {
         return Err(CliError::other(
@@ -327,6 +334,7 @@ fn train_native(
         tcfg.clone(),
     )
     .map_err(|e| CliError::other(e.to_string()))?;
+    trainer.set_warmup(warmup);
     trainer
         .open(dir)
         .map_err(|e| CliError::other(e.to_string()))?;

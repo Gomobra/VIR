@@ -19,7 +19,7 @@
 //! ```text
 //! batch (host Vec<i64>, hanya data) → tensor device
 //! forward → loss → loss.backward()
-//! grads = GradientsParams::from_grads(grads, &model)
+//! grads = GradientsParams::from_params(&mut grads, &model, &keep)
 //! model = opt.step(lr, model, grads)     // AdamW + grup Muon, di device
 //! ```
 //!
@@ -27,7 +27,7 @@
 //! |---|---|---|
 //! | sumber bobot | `ParamStore` host | model di device |
 //! | H2D per langkah | semua param | batch token saja |
-//! | D2H per langkah | semua grad + codebook | **nol** (kecuali metrik skalar) |
+//! | D2H per langkah | semua grad + codebook | **nol** (metrik hanya saat log) |
 //! | optimizer | Muon/AdamW manual (`crate::optim`) | `ModuleOptimizer` Burn (`burn_bridge`) |
 //! | checkpoint | `state.json` + `tensors.bin` | `native_state.json` + `model.safetensors` |
 //!
@@ -38,9 +38,29 @@
 //!
 //! `ModuleOptimizer` hanya punya dua grup (AdamW default + Muon berdasarkan
 //! predikat path) dan tidak punya konsep "beku". Karena itu gradien parameter
-//! beku **dihapus dari `Gradients`** sebelum `opt.step` ([`drop_frozen_grads`]).
-//! Tanpa grad, `ModuleOptimizerMapper` tidak menyentuh parameter tersebut sama
+//! beku tidak pernah dimasukkan ke `GradientsParams` yang diberikan ke
+//! `opt.step` (daftar `ParamId` non-beku di [`non_frozen_param_ids`]). Tanpa
+//! grad, `ModuleOptimizerMapper` tidak menyentuh parameter tersebut sama
 //! sekali — bobot dan state optimizernya tidak berubah.
+//!
+//! # Metrik hanya saat log (W1)
+//!
+//! Metrik host (per_level, perplexity, utilization, recon, codebook stats)
+//! menuntut sinkronisasi device→host. Karena hanya dibaca oleh log JSONL dan
+//! gerbang, metrik **tidak** dihitung tiap langkah: `native_forward` hanya
+//! mengembalikan loss tracked + bahan metrik bila langkah itu memang jatuh
+//! tempo (`log_every` atau evaluasi gerbang). Ekstraksi metrik (satu-satunya
+//! `into_scalar`/histogram) terjadi di [`NativeTrainer::log_step`]. Efek
+//! sampingnya: graf autodiff tidak ditahan antar langkah.
+//!
+//! # Pengukuran yang adil (W0)
+//!
+//! Kompilasi kernel dan autotune terjadi pada langkah pertama; tok/s yang
+//! dihitung sejak konstruksi trainer karena itu terlalu rendah. [`set_warmup`]
+//! menjalankan N langkah nyata (forward/backward/step) yang tidak menghitung
+//! metrik, tidak menulis log, dan tidak menambah `tokens_done`. Jam tok/s
+//! dimulai ulang setelah warmup, dan [`StepRecord::dt_ms`] mencatat durasi satu
+//! langkah penuh agar steady-state bisa diukur dari JSONL.
 //!
 //! # State optimizer pada resume
 //!
@@ -49,11 +69,11 @@
 //! nol). Konsekuensinya langkah pertama setelah resume bukan langkah identik
 //! dengan jalan tanpa henti. Jalur host (`crate::trainer::Trainer`) tetap
 //! menyimpan seluruh state optimizer byte demi byte, jadi pemakainya yang
-//! butuh resume identik memakai jalur itu. Lihat modul `bench` untuk perbandingan.
+//! butuh resume identik memakai jalur itu.
 
 use std::time::{Duration, Instant};
 
-use burn::module::{Module, Param};
+use burn::module::{Module, Param, ParamId};
 use burn::optim::{GradientsParams, ModuleOptimizer};
 use burn::prelude::*;
 use burn::tensor::{Device, Tensor, TensorData};
@@ -198,11 +218,11 @@ fn escape_json(s: &str) -> String {
 ///
 /// Path diambil dari `enter_module`/`exit_module` (derive tidak memancarkan
 /// `visit_float_with_path`), jadi konsisten dengan `crate::params`.
-pub fn non_frozen_param_ids(model: &VirTrainModel, stage: Stage) -> Vec<burn::module::ParamId> {
+pub fn non_frozen_param_ids(model: &VirTrainModel, stage: Stage) -> Vec<ParamId> {
     struct Finder {
         stage: Stage,
         path: Vec<String>,
-        ids: Vec<burn::module::ParamId>,
+        ids: Vec<ParamId>,
     }
     impl burn::module::ModuleVisitor for Finder {
         fn enter_module(&mut self, name: &str, _c: &str) {
@@ -253,15 +273,73 @@ pub struct NativeStepCtx<'a> {
 
 /// Hasil satu langkah native.
 pub struct NativeStepOut {
-    /// Metrik host (untuk log/gerbang).
-    pub out: StepOut,
-    /// Loss tensor (masih di device; dipakai `backward`).
+    /// Loss tracked (masih di device; dipakai `backward`).
     pub loss: Tensor<1>,
     /// Jumlah token yang diproses (`B·L`).
     pub tokens: usize,
+    /// Bahan metrik; `Some` hanya pada langkah yang memang mengukur (W1).
+    pub metrics: Option<RawMetrics>,
+}
+
+/// Bahan metrik satu langkah, masih di device.
+///
+/// Hanya ada pada langkah yang mengukur (log/gerbang), sehingga tidak ada
+/// sinkronisasi device→host pada langkah biasa.
+pub enum RawMetrics {
+    /// Tahap 1 (VQ + decoder).
+    Vq(VqMetrics),
+    /// Tahap 2 (generator NCM).
+    Gen(GenMetrics),
+}
+
+impl RawMetrics {
+    /// Ekstrak metrik host dari bahan metrik.
+    ///
+    /// Satu-satunya tempat `into_scalar`/histogram kode dipanggil; hanya
+    /// dijalankan dari [`NativeTrainer::log_step`] (tiap `log_every`).
+    pub fn to_step_out(&self, model: &VirTrainModel) -> StepOut {
+        match self {
+            Self::Vq(m) => vq_metrics(m, model),
+            Self::Gen(m) => gen_metrics(m, model),
+        }
+    }
+}
+
+/// Bahan metrik tahap 1 (`vq_forward`).
+pub struct VqMetrics {
+    /// Laten `z [B, L, d]`.
+    pub z: Tensor<3>,
+    /// Rekonstruksi kumulatif per level `ẑ^(k)`.
+    pub levels: Vec<Tensor<3>>,
+    /// Indeks kode per level.
+    pub indices: Vec<Tensor<2, Int>>,
+    /// Token hasil argmax decoder `[B, L]`.
+    pub pred: Tensor<2, Int>,
+    /// Token target `[B, L]`.
+    pub target: Tensor<2, Int>,
+    /// Token valid per level (`B·ℓ_k`).
+    pub level_tokens: Vec<f32>,
+}
+
+/// Bahan metrik tahap 2 (`gen_forward`).
+pub struct GenMetrics {
+    /// Suku loss berbobot per level (`w_k·CE_k`).
+    pub terms: Vec<Tensor<1>>,
+    /// Bobot level (`w_k`), untuk `perplexity = exp(CE_k)`.
+    pub weights: Vec<f32>,
+    /// Kode bersih per level (target NCM).
+    pub indices: Vec<Tensor<2, Int>>,
+    /// Laju korupsi pada batch ini.
+    pub rate: Option<f32>,
+    /// Token valid per level (`B·ℓ_k`).
+    pub level_tokens: Vec<f32>,
 }
 
 /// Satu langkah forward native: model (device) + batch → loss tracked.
+///
+/// `want_metrics` menyertakan bahan metrik (W1). Bahan itu hanya berlaku untuk
+/// langkah yang jatuh tempo log/gerbang, jadi langkah biasa tidak menahan graf
+/// autodiff dan tidak menyinkronkan apa pun ke host.
 pub fn native_forward(
     model: &mut VirTrainModel,
     ctx: &mut NativeStepCtx<'_>,
@@ -269,6 +347,7 @@ pub fn native_forward(
     weights: &[f32],
     source: &mut ShardBatchSource,
     device: &Device,
+    want_metrics: bool,
 ) -> Result<NativeStepOut, VirError> {
     let (tokens, shape) = source
         .next_batch()
@@ -282,8 +361,8 @@ pub fn native_forward(
     }
     let target = Tensor::<2, Int>::from_ints(TensorData::new(tokens, shape), device);
     match ctx.stage {
-        Stage::Vq => vq_forward(model, ctx, cfg, &target),
-        Stage::Generator => gen_forward(model, ctx, cfg, weights, &target),
+        Stage::Vq => vq_forward(model, ctx, cfg, &target, want_metrics),
+        Stage::Generator => gen_forward(model, ctx, cfg, weights, &target, want_metrics),
     }
 }
 
@@ -293,6 +372,7 @@ fn vq_forward(
     ctx: &mut NativeStepCtx<'_>,
     cfg: &VirTrainConfig,
     target: &Tensor<2, Int>,
+    want_metrics: bool,
 ) -> Result<NativeStepOut, VirError> {
     let z = model.embed_tokens(target);
     let enc = model
@@ -306,24 +386,21 @@ fn vq_forward(
         cfg.commitment_cost,
         cfg.chunk,
     );
-    let loss_value = loss.clone().into_scalar::<f32>();
-    let pred = model.dec.argmax_tokens(enc.z_hat);
-    let recon = tensor_accuracy(&pred, target) as f32;
-    let per_level = recon_errors(&z, &enc.levels);
-    let (utilization, perplexity) = codebook_stats(&model.vq, &enc.indices);
     let tokens = target.dims().iter().product::<usize>();
-    Ok(NativeStepOut {
-        out: StepOut {
-            loss_total: loss_value,
-            per_level,
+    let metrics = want_metrics.then(|| {
+        RawMetrics::Vq(VqMetrics {
+            pred: model.dec.argmax_tokens(enc.z_hat.clone()),
+            z,
+            levels: enc.levels,
+            indices: enc.indices,
+            target: target.clone(),
             level_tokens: level_tokens(cfg, target.dims()[0]),
-            utilization,
-            perplexity,
-            recon: Some(recon),
-            corruption_rate: None,
-        },
+        })
+    });
+    Ok(NativeStepOut {
         loss,
         tokens,
+        metrics,
     })
 }
 
@@ -334,6 +411,7 @@ fn gen_forward(
     cfg: &VirTrainConfig,
     weights: &[f32],
     target_tokens: &Tensor<2, Int>,
+    want_metrics: bool,
 ) -> Result<NativeStepOut, VirError> {
     let z = model.embed_tokens(target_tokens).detach();
     let enc = model.encode(z);
@@ -341,41 +419,37 @@ fn gen_forward(
     let (corrupted, rate) = corrupt(&clean, ctx, cfg);
     let inputs = teacher_inputs(model, &corrupted, cfg.dim, &target_tokens.device());
     let logits = model.generator.forward(&inputs);
-    // Satu CE per level: dipakai untuk loss tracked DAN metrik (hindari hitung CE
-    // dua kali — mahal pada vocab besar). `level_losses` = w_k·CE_k per level.
+    // Satu CE per level: dipakai untuk loss tracked DAN metrik (hindari hitung
+    // CE dua kali — mahal pada vocab besar). `terms` = `w_k·CE_k` per level.
     let terms = vir_model::level_losses(&logits, &clean, weights);
+    let loss = sum_terms(&terms, &target_tokens.device());
+    let tokens = target_tokens.dims().iter().product::<usize>();
+    let metrics = want_metrics.then(|| {
+        RawMetrics::Gen(GenMetrics {
+            terms,
+            weights: weights.to_vec(),
+            indices: clean,
+            rate,
+            level_tokens: level_tokens(cfg, target_tokens.dims()[0]),
+        })
+    });
+    Ok(NativeStepOut {
+        loss,
+        tokens,
+        metrics,
+    })
+}
+
+/// Jumlah suku loss berbobot; nol bila daftar kosong.
+fn sum_terms(terms: &[Tensor<1>], device: &Device) -> Tensor<1> {
     let mut total: Option<Tensor<1>> = None;
-    let mut per_level = Vec::with_capacity(terms.len());
-    let mut perplexity = Vec::with_capacity(terms.len());
-    for (k, term) in terms.iter().enumerate() {
+    for term in terms {
         total = Some(match total.take() {
             Some(acc) => acc + term.clone(),
             None => term.clone(),
         });
-        per_level.push(term.clone().into_scalar::<f32>());
-        let ce = term
-            .clone()
-            .div_scalar(weights[k].max(f32::EPSILON))
-            .into_scalar::<f32>();
-        perplexity.push(ce.exp());
     }
-    let loss = total.unwrap_or_else(|| Tensor::zeros([1], &logits[0].device()));
-    let (utilization, _) = codebook_stats(&model.vq, &clean);
-    let loss_total = loss.clone().into_scalar::<f32>();
-    let tokens = target_tokens.dims().iter().product::<usize>();
-    Ok(NativeStepOut {
-        out: StepOut {
-            loss_total,
-            per_level,
-            level_tokens: level_tokens(cfg, target_tokens.dims()[0]),
-            utilization,
-            perplexity,
-            recon: None,
-            corruption_rate: rate,
-        },
-        loss,
-        tokens,
-    })
+    total.unwrap_or_else(|| Tensor::zeros([1], device))
 }
 
 /// Korupsi kode masukan (PRD F1.7 langkah 2); target tetap bersih.
@@ -444,6 +518,51 @@ fn codebook_stats(vq: &MultiscaleVq<Codebook>, indices: &[Tensor<2, Int>]) -> (V
     (utilization, perplexity)
 }
 
+/// Metrik tahap 1 dari bahan `vq_forward` (sinkronisasi D2H).
+fn vq_metrics(m: &VqMetrics, model: &VirTrainModel) -> StepOut {
+    let recon = tensor_accuracy(&m.pred, &m.target) as f32;
+    let per_level = recon_errors(&m.z, &m.levels);
+    let (utilization, perplexity) = codebook_stats(&model.vq, &m.indices);
+    StepOut {
+        loss_total: 0.0,
+        per_level,
+        level_tokens: m.level_tokens.clone(),
+        utilization,
+        perplexity,
+        recon: Some(recon),
+        corruption_rate: None,
+    }
+}
+
+/// Metrik tahap 2 dari bahan `gen_forward` (sinkronisasi D2H).
+fn gen_metrics(m: &GenMetrics, model: &VirTrainModel) -> StepOut {
+    let (per_level, perplexity) = level_metrics(&m.terms, &m.weights);
+    let (utilization, _) = codebook_stats(&model.vq, &m.indices);
+    StepOut {
+        loss_total: 0.0,
+        per_level,
+        level_tokens: m.level_tokens.clone(),
+        utilization,
+        perplexity,
+        recon: None,
+        corruption_rate: m.rate,
+    }
+}
+
+/// Loss per level (sudah berbobot) dan perplexity `exp(CE_k)` dari suku
+/// `w_k·CE_k`. Rumus identik dengan versi yang dihitung tiap langkah.
+fn level_metrics(terms: &[Tensor<1>], weights: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let mut per_level = Vec::with_capacity(terms.len());
+    let mut perplexity = Vec::with_capacity(terms.len());
+    for (k, term) in terms.iter().enumerate() {
+        per_level.push(term.clone().into_scalar::<f32>());
+        let w = weights.get(k).copied().unwrap_or(0.0).max(f32::EPSILON);
+        let ce = term.clone().div_scalar(w).into_scalar::<f32>();
+        perplexity.push(ce.exp());
+    }
+    (per_level, perplexity)
+}
+
 // ---------------------------------------------------------------------------
 // NativeTrainer
 // ---------------------------------------------------------------------------
@@ -482,17 +601,17 @@ pub struct NativeTrainer {
     ckpt_dir: String,
     /// Jumlah transisi tahap.
     pub transitions: u32,
-    /// Loss total langkah terakhir.
+    /// Loss total langkah terakhir (host; disinkronkan saat log/akhir run).
     pub last_loss: f32,
     /// Metrik rekonstruksi terbaik (gerbang).
     pub best_recon: f32,
-    /// Token yang sudah diproses kumulatif.
+    /// Token yang sudah diproses kumulatif (tidak termasuk warmup).
     pub tokens_done: u64,
     /// Jumlah gradien beku yang dibuang pada langkah terakhir.
     last_dropped: usize,
     /// Tokenizer sudah disalin ke generator?
     tokenizer_loaded: bool,
-    /// Jam mulai untuk takar tok/s.
+    /// Jam mulai untuk takar tok/s (dimulai ulang setelah warmup).
     started: Instant,
     /// Tok/s eksponensial (EMA) agar angka stabil.
     tok_s: f64,
@@ -500,6 +619,12 @@ pub struct NativeTrainer {
     last_sample: Instant,
     /// Token pada pengukuran sebelumnya.
     last_sample_tokens: u64,
+    /// Cache `(tahap, ParamId non-beku)`; hanya dihitung saat tahap berubah (B11).
+    keep: (Stage, Vec<ParamId>),
+    /// Loss tracked langkah terakhir; di-sync saat log dan sekali di akhir run.
+    last_loss_t: Option<Tensor<1>>,
+    /// Sisa langkah warmup (W0); dijalankan sekali, lalu dinolkan.
+    warmup: u64,
 }
 
 impl NativeTrainer {
@@ -550,6 +675,7 @@ impl NativeTrainer {
         let now = Instant::now();
         let stage0 = tcfg.stage;
         let seed = cfg.seed;
+        let keep = (stage0, non_frozen_param_ids(&model, stage0));
         Ok(Self {
             config: tcfg,
             model,
@@ -576,6 +702,9 @@ impl NativeTrainer {
             tok_s: 0.0,
             last_sample: now,
             last_sample_tokens: 0,
+            keep,
+            last_loss_t: None,
+            warmup: 0,
         })
     }
 
@@ -607,6 +736,16 @@ impl NativeTrainer {
         self.config.steps = steps;
     }
 
+    /// Setel jumlah langkah warmup (W0).
+    ///
+    /// Warmup dijalankan sekali oleh [`Self::run`]: langkah nyata
+    /// (forward/backward/step) untuk memicu kompilasi kernel dan autotune,
+    /// tanpa metrik, log, atau `tokens_done`. Jam tok/s dimulai ulang setelah
+    /// warmup, sehingga angka yang dilaporkan adalah steady-state.
+    pub fn set_warmup(&mut self, warmup: u64) {
+        self.warmup = warmup;
+    }
+
     /// Logger aktif.
     pub fn logger_mut(&mut self) -> Option<&mut JsonlLogger> {
         self.logger.as_mut()
@@ -617,7 +756,7 @@ impl NativeTrainer {
         self.gate.passed
     }
 
-    /// Tok/s rata-rata sejak trainer dibuat.
+    /// Tok/s rata-rata sejak akhir warmup (lihat [`Self::set_warmup`]).
     pub fn tokens_per_sec(&self) -> f64 {
         let secs = self.started.elapsed().as_secs_f64();
         if secs <= 0.0 {
@@ -646,84 +785,11 @@ impl NativeTrainer {
 
     /// Jalankan sampai anggaran langkah habis.
     pub fn run(&mut self) -> Result<(), VirError> {
+        self.run_warmup()?;
         while self.step < self.config.steps {
-            let lr = self.config.lr.lr(self.step);
-            let stage = self.stage;
-            let step = self.step;
-            let stage_step = self.stage_step;
-            let rng = &mut self.rng;
-            let corruption = self.corruption.as_mut();
-            let mut ctx = NativeStepCtx {
-                stage,
-                step,
-                stage_step,
-                lr,
-                rng,
-                corruption,
-            };
-            let out = native_forward(
-                &mut self.model,
-                &mut ctx,
-                &self.model_cfg,
-                &self.weights,
-                &mut self.source,
-                &self.device,
-            )?;
-            if !out.loss.is_tracked() {
-                return Err(VirError::Internal(
-                    "loss tidak terlacak autodiff (device tanpa gradien?)".into(),
-                ));
-            }
-            if stage == Stage::Generator && !self.tokenizer_loaded {
-                let vq = &self.model.vq;
-                let generator = &mut self.model.generator;
-                generator
-                    .load_tokenizer(vq)
-                    .map_err(|e| VirError::Internal(format!("load tokenizer: {e}")))?;
-                self.tokenizer_loaded = true;
-            }
-            self.last_loss = out.out.loss_total;
-            self.tokens_done += out.tokens as u64;
-            let mut grads = out.loss.backward();
-            let keep = non_frozen_param_ids(&self.model, stage);
-            self.last_dropped = 0;
-            let grads = GradientsParams::from_params(&mut grads, &self.model, &keep);
-            // ModuleOptimizer::step mengonsumsi model; klon device-side (bukan PCIe).
-            let model = self.model.clone();
-            self.model = self.opt.step(lr, model, grads);
-            self.step += 1;
-            self.stage_step += 1;
-            self.sample_tok_s();
-            if let Some(v) = out.out.recon {
-                self.best_recon = self.track_best(v);
-            }
-            if self.config.log_every > 0 && self.step.is_multiple_of(self.config.log_every) {
-                self.log_step(&out.out, lr)?;
-            }
-            if self.config.checkpoint_every > 0
-                && self.step.is_multiple_of(self.config.checkpoint_every)
-            {
-                self.save()?;
-            }
-            if let Some(gate) = self
-                .config
-                .gate
-                .filter(|_| self.stage == Stage::Vq && !self.gate.passed)
-                && let Some(v) = out.out.recon.filter(|_| gate.due(self.stage_step))
-                && self.gate.update(&gate, v, self.step)
-            {
-                self.log_event(
-                    "gate_passed",
-                    &format!(
-                        "{} = {:.4} (ambang {:.4})",
-                        gate.metric.name(),
-                        v,
-                        gate.threshold
-                    ),
-                )?;
-                self.enter_generator()?;
-            }
+            self.train_step(true)?;
         }
+        self.sync_last_loss();
         Ok(())
     }
 
@@ -736,10 +802,237 @@ impl NativeTrainer {
         out
     }
 
+    /// Langkah warmup (W0): graf sama, tanpa penghitung/log/metrik.
+    ///
+    /// Berjalan sekali per trainer; sesudahnya `warmup` dinolkan agar `run` yang
+    /// dipanggil lagi (mis. `run_steps` bertahap) tidak mengulang warmup.
+    fn run_warmup(&mut self) -> Result<(), VirError> {
+        let warmup = self.warmup;
+        if warmup == 0 {
+            return Ok(());
+        }
+        for _ in 0..warmup {
+            self.train_step(false)?;
+        }
+        self.warmup = 0;
+        self.reset_clock();
+        self.log_event("warmup", &format!("{warmup} langkah warmup"))
+    }
+
+    /// Mulai pengukuran tok/s dari sini (bukan dari konstruksi trainer).
+    fn reset_clock(&mut self) {
+        let now = Instant::now();
+        self.started = now;
+        self.last_sample = now;
+        self.last_sample_tokens = self.tokens_done;
+        self.tok_s = 0.0;
+    }
+
+    /// Satu langkah penuh: forward → backward → `opt.step`.
+    ///
+    /// `measured = false` (warmup) menjalankan graf yang sama tetapi tidak
+    /// menyentuh penghitung, log, metrik, atau gerbang.
+    fn train_step(&mut self, measured: bool) -> Result<(), VirError> {
+        let t0 = Instant::now();
+        let lr = self.config.lr.lr(self.step);
+        let want_metrics = measured && self.metrics_due();
+        let out = self.forward(lr, want_metrics)?;
+        let tokens = out.tokens;
+        let metrics = out.metrics;
+        self.backward_and_step(lr, out.loss)?;
+        let dt_ms = elapsed_ms(t0);
+        if measured {
+            self.finish_step(tokens, metrics, lr, dt_ms)?;
+        }
+        Ok(())
+    }
+
+    /// `true` bila langkah berikutnya harus mengukur metrik (log/gerbang).
+    fn metrics_due(&self) -> bool {
+        self.log_due(self.step + 1) || self.gate_due(self.stage_step + 1)
+    }
+
+    /// `true` bila langkah `step` (1-based) menulis baris log.
+    fn log_due(&self, step: u64) -> bool {
+        self.config.log_every > 0 && step.is_multiple_of(self.config.log_every)
+    }
+
+    /// `true` bila gerbang tahap 1 jatuh tempo pada `stage_step` (1-based).
+    fn gate_due(&self, stage_step: u64) -> bool {
+        match self.config.gate {
+            Some(g) => self.stage == Stage::Vq && !self.gate.passed && g.due(stage_step),
+            None => false,
+        }
+    }
+
+    /// Forward satu langkah (device); `want_metrics` meminta bahan metrik.
+    ///
+    /// Memuat tokenizer ke generator bila belum (tahap 2, sekali saja) — sama
+    /// seperti versi sebelumnya; tanpa ini `embed_codes` salah.
+    fn forward(&mut self, lr: f64, want_metrics: bool) -> Result<NativeStepOut, VirError> {
+        if self.stage == Stage::Generator && !self.tokenizer_loaded {
+            let vq = &self.model.vq;
+            let generator = &mut self.model.generator;
+            generator
+                .load_tokenizer(vq)
+                .map_err(|e| VirError::Internal(format!("load tokenizer: {e}")))?;
+            self.tokenizer_loaded = true;
+        }
+        let stage = self.stage;
+        let step = self.step;
+        let stage_step = self.stage_step;
+        let rng = &mut self.rng;
+        let corruption = self.corruption.as_mut();
+        let mut ctx = NativeStepCtx {
+            stage,
+            step,
+            stage_step,
+            lr,
+            rng,
+            corruption,
+        };
+        native_forward(
+            &mut self.model,
+            &mut ctx,
+            &self.model_cfg,
+            &self.weights,
+            &mut self.source,
+            &self.device,
+            want_metrics,
+        )
+    }
+
+    /// Backward + `opt.step` di device; hanya gradien non-beku yang diikutkan.
+    fn backward_and_step(&mut self, lr: f64, loss: Tensor<1>) -> Result<(), VirError> {
+        if !loss.is_tracked() {
+            return Err(VirError::Internal(
+                "loss tidak terlacak autodiff (device tanpa gradien?)".into(),
+            ));
+        }
+        self.last_loss_t = Some(loss.clone());
+        let mut grads = loss.backward();
+        self.refresh_keep();
+        let grads = GradientsParams::from_params(&mut grads, &self.model, self.keep_ids());
+        // ModuleOptimizer::step mengonsumsi model; klon device-side (bukan PCIe).
+        let model = self.model.clone();
+        self.model = self.opt.step(lr, model, grads);
+        Ok(())
+    }
+
+    /// Segarkan cache `ParamId` non-beku bila tahap berubah (B11).
+    ///
+    /// Bentuk model tetap sepanjang latihan, jadi satu entri `(stage, ids)`
+    /// cukup; transisi VQ → Generator adalah satu-satunya perubahan.
+    fn refresh_keep(&mut self) {
+        let stage = self.stage;
+        if self.keep.0 != stage || self.keep.1.is_empty() {
+            self.keep = (stage, non_frozen_param_ids(&self.model, stage));
+        }
+    }
+
+    /// `ParamId` non-beku untuk tahap aktif (lihat [`Self::refresh_keep`]).
+    fn keep_ids(&self) -> &Vec<ParamId> {
+        &self.keep.1
+    }
+
+    /// Selesaikan langkah terukur: penghitung, metrik, checkpoint, gerbang.
+    fn finish_step(
+        &mut self,
+        tokens: usize,
+        metrics: Option<RawMetrics>,
+        lr: f64,
+        dt_ms: f32,
+    ) -> Result<(), VirError> {
+        self.step += 1;
+        self.stage_step += 1;
+        self.tokens_done += tokens as u64;
+        self.sample_tok_s();
+        let recon = match metrics {
+            Some(raw) => self.log_step(&raw, lr, dt_ms)?,
+            None => None,
+        };
+        self.maybe_checkpoint()?;
+        self.maybe_gate(recon)
+    }
+
+    /// Tulis satu baris JSONL; metrik host diekstrak di sini (satu-satunya D2H).
+    ///
+    /// Mengembalikan nilai rekonstruksi (bila ada) untuk gerbang tahap 1.
+    fn log_step(&mut self, raw: &RawMetrics, lr: f64, dt_ms: f32) -> Result<Option<f32>, VirError> {
+        let mut out = raw.to_step_out(&self.model);
+        if let Some(t) = &self.last_loss_t {
+            out.loss_total = t.clone().into_scalar::<f32>();
+        }
+        if let Some(v) = out.recon {
+            self.best_recon = self.track_best(v);
+        }
+        let rec = StepRecord {
+            stage: self.stage.code(),
+            step: self.step,
+            stage_step: self.stage_step,
+            lr: lr as f32,
+            loss_total: out.loss_total,
+            per_level: out.per_level.clone(),
+            level_tokens: out.level_tokens.clone(),
+            utilization: out.utilization.clone(),
+            perplexity: out.perplexity.clone(),
+            grad_norm: 0.0,
+            corruption_rate: out.corruption_rate,
+            recon: out.recon,
+            dt_ms,
+        };
+        if let Some(log) = self.logger.as_mut() {
+            log.log(&rec)?;
+        }
+        Ok(out.recon)
+    }
+
+    /// Simpan checkpoint bila jatuh tempo.
+    fn maybe_checkpoint(&mut self) -> Result<(), VirError> {
+        let due = self.config.checkpoint_every > 0
+            && self.step.is_multiple_of(self.config.checkpoint_every);
+        if due {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Evaluasi gerbang tahap 1 bila jatuh tempo; transisi bila lulus.
+    fn maybe_gate(&mut self, recon: Option<f32>) -> Result<(), VirError> {
+        let gate = self
+            .config
+            .gate
+            .filter(|_| self.stage == Stage::Vq && !self.gate.passed);
+        let Some(gate) = gate else { return Ok(()) };
+        let Some(v) = recon.filter(|_| gate.due(self.stage_step)) else {
+            return Ok(());
+        };
+        if !self.gate.update(&gate, v, self.step) {
+            return Ok(());
+        }
+        self.log_event(
+            "gate_passed",
+            &format!(
+                "{} = {:.4} (ambang {:.4})",
+                gate.metric.name(),
+                v,
+                gate.threshold
+            ),
+        )?;
+        self.enter_generator()
+    }
+
+    /// Sinkron loss tracked terakhir ke host (satu D2H per `run`).
+    fn sync_last_loss(&mut self) {
+        if let Some(t) = self.last_loss_t.take() {
+            self.last_loss = t.into_scalar::<f32>();
+        }
+    }
+
     /// Transisi tahap 1 → tahap 2.
     ///
-    /// Pada jalur native "bekukan VQ" berarti gradiennya dibuang tiap langkah
-    /// ([`drop_frozen_grads`]); tidak ada state yang perlu dipindah.
+    /// Pada jalur native "bekukan VQ" berarti gradiennya tidak dimasukkan ke
+    /// `GradientsParams` lagi; tidak ada state yang perlu dipindah.
     pub fn enter_generator(&mut self) -> Result<(), VirError> {
         self.stage = Stage::Generator;
         self.stage_step = 0;
@@ -800,6 +1093,7 @@ impl NativeTrainer {
         );
         let weights = crate::loss::level_weight(&state.model.levels, state.model.alpha);
         let now = Instant::now();
+        let keep = (state.stage, non_frozen_param_ids(&model, state.stage));
         Ok(Self {
             config: state.config,
             model,
@@ -826,6 +1120,9 @@ impl NativeTrainer {
             tok_s: 0.0,
             last_sample: now,
             last_sample_tokens: state.tokens_done,
+            keep,
+            last_loss_t: None,
+            warmup: 0,
         })
     }
 
@@ -845,28 +1142,6 @@ impl NativeTrainer {
             self.best_recon = v;
         }
         self.best_recon
-    }
-
-    /// Tulis satu baris JSONL per langkah.
-    fn log_step(&mut self, out: &StepOut, lr: f64) -> Result<(), VirError> {
-        let rec = StepRecord {
-            stage: self.stage.code(),
-            step: self.step,
-            stage_step: self.stage_step,
-            lr: lr as f32,
-            loss_total: out.loss_total,
-            per_level: out.per_level.clone(),
-            level_tokens: out.level_tokens.clone(),
-            utilization: out.utilization.clone(),
-            perplexity: out.perplexity.clone(),
-            grad_norm: 0.0,
-            corruption_rate: out.corruption_rate,
-            recon: out.recon,
-        };
-        match self.logger.as_mut() {
-            Some(log) => log.log(&rec),
-            None => Ok(()),
-        }
     }
 
     /// Tulis satu peristiwa JSONL.
@@ -932,4 +1207,9 @@ fn atomic_write(path: &str, bytes: &[u8]) -> Result<(), VirError> {
 /// Durasi berjalan untuk instrumentasi (dipakai bench).
 pub fn elapsed_since(start: Instant) -> Duration {
     start.elapsed()
+}
+
+/// Milidetik sejak `t0` (untuk `StepRecord::dt_ms`).
+fn elapsed_ms(t0: Instant) -> f32 {
+    t0.elapsed().as_secs_f32() * 1000.0
 }

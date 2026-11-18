@@ -25,6 +25,7 @@ fn step_record(step: u64) -> StepRecord {
         perplexity: vec![2.0, 3.0],
         grad_norm: 0.9,
         corruption_rate: Some(0.25),
+        dt_ms: 12.5,
         recon: Some(0.8),
     }
 }

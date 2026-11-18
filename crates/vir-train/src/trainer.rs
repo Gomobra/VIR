@@ -652,6 +652,8 @@ impl Trainer {
             perplexity: out.perplexity.clone(),
             grad_norm: gnorm,
             corruption_rate: out.corruption_rate,
+            // Jalur host tidak mengukur durasi per langkah (W0 = jalur native).
+            dt_ms: 0.0,
             recon: out.recon,
         };
         match self.logger.as_mut() {

@@ -55,6 +55,24 @@ fn native_trainer_jalan() {
 }
 
 #[test]
+fn native_warmup_tak_dihitung_sebagai_langkah() {
+    let dir = std::env::temp_dir().join(format!("vir-native-warmup-{}", std::process::id()));
+    let mut trainer = NativeTrainer::new(cfg(), source("w"), Default::default(), Stage::Generator)
+        .expect("rakit");
+    trainer.set_warmup(2);
+    trainer.open(dir.to_str().expect("dir")).expect("open");
+    trainer.run_steps(3).expect("3 langkah");
+    // Warmup (2) dijalankan tanpa menambah langkah terukur → outcome.steps = 3.
+    assert_eq!(
+        trainer.outcome(false).steps,
+        3,
+        "warmup tak menambah langkah"
+    );
+    let tps = trainer.tokens_per_sec();
+    assert!(tps.is_finite() && tps >= 0.0, "tok/s finite: {tps}");
+}
+
+#[test]
 fn safetensors_roundtrip_identik() {
     let device = vir_train::model::train_device(Default::default(), 5);
     let cfg = cfg();
