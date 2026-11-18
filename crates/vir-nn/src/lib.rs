@@ -36,20 +36,53 @@ pub fn rope_cos_sin(seq_len: usize, head_dim: usize, base: f32) -> (Vec<f32>, Ve
     (cos, sin)
 }
 
-/// Terapkan RoPE ke x [B, T, D].
-pub fn apply_rope(x: Tensor<3>, base: f32) -> Tensor<3> {
+/// Basis frekuensi default RoPE (`base=10000.0`, gaya GPT-NeoX).
+const ROPE_BASE: f32 = 10000.0;
+
+/// Bangun tabel RoPE `cos`/`sin` `[t, d]` di `device` dari rumus
+/// [`rope_cos_sin`]. Dipisah dari [`apply_rope`] agar tabel yang hanya
+/// bergantung `(t, d, base)` dapat dibangun **sekali** lalu dipakai untuk
+/// beberapa tensor (mis. q dan k satu blok attention) tanpa recompute
+/// trigonometri + upload H2D berulang. Numerik identik dengan [`apply_rope`].
+pub fn rope_tables(
+    seq_len: usize,
+    head_dim: usize,
+    base: f32,
+    device: &Device,
+) -> (Tensor<2>, Tensor<2>) {
+    let (cos, sin) = rope_cos_sin(seq_len, head_dim, base);
+    let cos = Tensor::<2>::from_floats(
+        burn::tensor::TensorData::new(cos, [seq_len, head_dim]),
+        device,
+    );
+    let sin = Tensor::<2>::from_floats(
+        burn::tensor::TensorData::new(sin, [seq_len, head_dim]),
+        device,
+    );
+    (cos, sin)
+}
+
+/// Terapkan RoPE ke x `[B, T, D]` memakai tabel `cos`/`sin` `[T, D]` yang
+/// sudah dibuat oleh [`rope_tables`]. Bentuk `cos`/`sin` harus cocok dengan
+/// `(T, D)` dari `x`. Ini inti numerik dari [`apply_rope`].
+pub fn apply_rope_with(x: Tensor<3>, cos: &Tensor<2>, sin: &Tensor<2>) -> Tensor<3> {
     let [b, t, d] = x.dims();
     let half = d / 2;
-    let device = x.device();
-    let (cos, sin) = rope_cos_sin(t, d, base);
-    let cos = Tensor::<2>::from_floats(burn::tensor::TensorData::new(cos, [t, d]), &device)
-        .unsqueeze_dim(0);
-    let sin = Tensor::<2>::from_floats(burn::tensor::TensorData::new(sin, [t, d]), &device)
-        .unsqueeze_dim(0);
+    let cos = cos.clone().unsqueeze_dim(0);
+    let sin = sin.clone().unsqueeze_dim(0);
     let x1 = x.clone().slice([0..b, 0..t, 0..half]);
     let x2 = x.clone().slice([0..b, 0..t, half..d]);
-    let rotated = burn::tensor::Tensor::cat(vec![x2.clone().neg(), x1], 2);
+    let rotated = burn::tensor::Tensor::cat(vec![x2.neg(), x1], 2);
     x * cos + rotated * sin
+}
+
+/// Terapkan RoPE ke x [B, T, D]. Membangun tabel `cos`/`sin` dari
+/// `(T, D, base)` lalu memanggil [`apply_rope_with`].
+pub fn apply_rope(x: Tensor<3>, base: f32) -> Tensor<3> {
+    let [_, t, d] = x.dims();
+    let device = x.device();
+    let (cos, sin) = rope_tables(t, d, base, &device);
+    apply_rope_with(x, &cos, &sin)
 }
 
 /// Mask block-diagonal: token level k hanya melihat blok level k.
@@ -180,17 +213,24 @@ impl Block {
         let h = self.num_heads;
         let hd = self.head_dim;
         let xn = self.ln1.forward(x.clone());
-        let q = if self.use_rope {
-            apply_rope(self.wq.forward(xn.clone()), 10000.0)
+        // Tabel RoPE hanya bergantung (t, d, base): bangun sekali, pakai untuk
+        // q dan k. Menghapus recompute trigonometri + upload H2D kedua.
+        let rope = if self.use_rope {
+            Some(rope_tables(t, d, ROPE_BASE, &x.device()))
         } else {
-            self.wq.forward(xn.clone())
+            None
+        };
+        let q = self.wq.forward(xn.clone());
+        let q = match &rope {
+            Some((cos, sin)) => apply_rope_with(q, cos, sin),
+            None => q,
         }
         .reshape([b, t, h, hd])
         .swap_dims(1, 2);
-        let k = if self.use_rope {
-            apply_rope(self.wk.forward(xn.clone()), 10000.0)
-        } else {
-            self.wk.forward(xn.clone())
+        let k = self.wk.forward(xn.clone());
+        let k = match &rope {
+            Some((cos, sin)) => apply_rope_with(k, cos, sin),
+            None => k,
         }
         .reshape([b, t, h, hd])
         .swap_dims(1, 2);

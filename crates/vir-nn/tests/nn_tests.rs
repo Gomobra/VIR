@@ -6,7 +6,8 @@
 use burn::prelude::*;
 use burn::tensor::{Bool, Distribution, TensorData};
 use vir_nn::{
-    Block, RmsNorm, SwiGluMlp, apply_rope, block_diagonal_mask, prefix_lm_mask, rope_cos_sin,
+    Block, RmsNorm, SwiGluMlp, apply_rope, apply_rope_with, block_diagonal_mask, prefix_lm_mask,
+    rope_cos_sin, rope_tables,
 };
 
 /// Baca tensor `[b, t, d]` sebagai `Vec<f32>` baris-major.
@@ -100,6 +101,57 @@ fn rope_dot_depends_only_on_position_difference() {
 
     // Bukan konstan: selisih berbeda menghasilkan titik berbeda.
     assert!((a - d0).abs() > 1e-3, "invarian tak boleh konstan");
+}
+
+#[test]
+fn rope_tables_shape_and_matches_rope_cos_sin() {
+    let device = Device::default();
+    let (t, d, base) = (5usize, 8usize, 10_000.0f32);
+    let (cos, sin) = rope_tables(t, d, base, &device);
+    assert_eq!(cos.dims(), [t, d]);
+    assert_eq!(sin.dims(), [t, d]);
+    let (hcos, hsin) = rope_cos_sin(t, d, base);
+    let got_cos = cos.to_data().try_to_vec::<f32>().expect("cos f32");
+    let got_sin = sin.to_data().try_to_vec::<f32>().expect("sin f32");
+    assert_eq!(got_cos, hcos);
+    assert_eq!(got_sin, hsin);
+}
+
+#[test]
+fn apply_rope_with_matches_apply_rope() {
+    let device = Device::default();
+    let (b, t, d, base) = (2usize, 4usize, 8usize, 10_000.0f32);
+    let data = pattern_input(b, t, d);
+    let x = to_tensor(&data, b, t, d, &device);
+    let via_apply = read3(&apply_rope(x.clone(), base));
+    let (cos, sin) = rope_tables(t, d, base, &device);
+    let via_with = read3(&apply_rope_with(x, &cos, &sin));
+    // Identik bit-demi-bit: rumus & operasi sama.
+    assert_eq!(via_apply, via_with);
+}
+
+#[test]
+fn rope_tables_reused_gives_identical_result() {
+    // Reuse satu tabel untuk dua tensor (q & k): sama dengan apply_rope per-tensor.
+    let device = Device::default();
+    let (b, t, d, base) = (1usize, 3usize, 8usize, 10_000.0f32);
+    let q = to_tensor(&pattern_input(1, t, d), b, t, d, &device);
+    let k = to_tensor(
+        &pattern_input(1, t, d)
+            .iter()
+            .rev()
+            .copied()
+            .collect::<Vec<_>>(),
+        b,
+        t,
+        d,
+        &device,
+    );
+    let (cos, sin) = rope_tables(t, d, base, &device);
+    let qr = read3(&apply_rope_with(q.clone(), &cos, &sin));
+    let kr = read3(&apply_rope_with(k.clone(), &cos, &sin));
+    assert_eq!(qr, read3(&apply_rope(q, base)));
+    assert_eq!(kr, read3(&apply_rope(k, base)));
 }
 
 // ---------------------------------------------------------------------------
