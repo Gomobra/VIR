@@ -73,13 +73,18 @@ r = subprocess.run([VIR,'train','--native','--warmup',str(WARMUP),
                     '--config',CFG,'--json'], capture_output=True, text=True, timeout=900)
 vir_dt = round(time.time()-t, 2)
 vir_tok = 0.0
+vir_phase = {}
 try:
     vj = json.loads(r.stdout.strip().splitlines()[-1])
     vir_tok = float(vj.get('tok_s', 0.0))
+    vir_phase = {kk: float(vj.get(kk, 0.0)) for kk in ('fwd_ms', 'bwd_ms', 'opt_ms')}
 except Exception as e:
     P('parse vir json gagal', e)
 res = {'vir_native': {'rc': r.returncode, 'dt_s': vir_dt, 'tok_s': vir_tok,
                       'precision': 'fp32', 'warmup': WARMUP,
+                      'fwd_ms': vir_phase.get('fwd_ms', 0.0),
+                      'bwd_ms': vir_phase.get('bwd_ms', 0.0),
+                      'opt_ms': vir_phase.get('opt_ms', 0.0),
                       'out': r.stdout[-200:], 'err': r.stderr[-300:]}}
 P('VIR_NATIVE', json.dumps(res['vir_native']))""")
 
