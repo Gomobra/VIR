@@ -28,7 +28,7 @@ const MUON_MOMENTUM: f32 = 0.95;
 pub fn batched_newton_schulz(x: Tensor<3>) -> Tensor<3> {
     let [n, m, k] = x.dims();
     let trans = m > k;
-    let x = if trans { x.transpose(1, 2) } else { x };
+    let x = if trans { x.transpose() } else { x };
     // Normalisasi Frobenius per-matrik (per-batch).
     let norm = x
         .clone()
@@ -39,13 +39,13 @@ pub fn batched_newton_schulz(x: Tensor<3>) -> Tensor<3> {
         .clamp_min(1e-7);
     let mut x = x / norm.unsqueeze_dim(1).unsqueeze_dim(2);
     for _ in 0..NS_STEPS {
-        let a = x.clone().matmul(x.clone().transpose(1, 2)); // [N, m, m]
+        let a = x.clone().matmul(x.clone().transpose()); // [N, m, m]
         let ax = a.clone().matmul(x.clone()); // [N, m, k]
         let aax = a.matmul(ax.clone()); // [N, m, k]
         x = x.mul_scalar(NS_A) + ax.mul_scalar(NS_B) + aax.mul_scalar(NS_C);
     }
     let _ = n;
-    if trans { x.transpose(1, 2) } else { x }
+    if trans { x.transpose() } else { x }
 }
 
 /// Kunci momentum (ParamId numerik + bentuk).
@@ -82,7 +82,7 @@ impl BatchedMuon {
         let mut groups: HashMap<Vec<usize>, Vec<(u64, Tensor<2>)>> = HashMap::new();
         for (id, g) in collector.collected {
             let shape = g.dims();
-            groups.entry(shape).or_default().push((id, g));
+            groups.entry(shape.to_vec()).or_default().push((id, g));
         }
         // Pass 2: momentum + NS ter-batch per kelompok.
         let mut updates = HashMap::new();
