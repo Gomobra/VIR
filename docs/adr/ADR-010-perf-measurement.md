@@ -77,11 +77,30 @@ optimisasi jadi menebak-nebak.
   per-op Burn pada backward (graf autodiff ~1000 op) + kernel CubeCL scalar-FMA
   (ADR-001 0.77×). Bukan sesuatu yang bisa ditutup optimisasi inkremental.
 
+## Perbandingan ADIL apple-to-apple (vir vs PyTorch VIR, model SAMA)
+
+Notebook `vir-kaggle-fair`: PyTorch implementasi VIR **model sama** (multiscale
+VQ + recurrent depth prelude1+2×(core2+inject)+coda1 + RMSNorm + RoPE +
+attention causal (SDPA) + SwiGLU + 5 level ℓ=[2,4,8,16,32] + Muon (Newton-
+Schulz 5 iter) + AdamW). T4 sama, batch 64, L=32, warmup.
+
+| | tok/s | ms/step |
+|---|---|---|
+| **vir (Burn) VIR** | 9 738 | 222 (fwd 60 / bwd 111 / opt 51) |
+| **PyTorch VIR** (model sama) | 16 291 | 126 |
+| **ratio** | **0.598×** | — |
+
+**Koreksi penting:** pada **kerja setara** (model VIR sama, bukan GPT baseline),
+PyTorch hanya **1.67× lebih cepat** — BUKAN 6.5×. Sebagian besar gap "6.5×"
+sebelumnya berasal dari **model kita melakukan lebih banyak kerja** (5 level
+multiscale + VQ + recurrent depth) vs GPT baseline PyTorch, bukan dari framework.
+Gap per-kerja-sebenarnya = **1.67×**, jauh lebih dekat & berpotensi ditutup.
+
+**Rincian gap (1.67×):** opt (Muon) 51ms vs ~16ms (PyTorch Muon pakai cuBLAS @;
+vir pakai CubeCL) = ~35ms; fwd 60 vs ~40 (SDPA vs naive attention); bwd 111 vs
+~70 (dispatch autodiff). Total gap ~96ms.
+
 ## B4 (batch-level) — dicoba, GAGAL (terdokumentasi)
-Ide: batch 5 level jadi 1 lintasan blok (30→6 blok). **Gagal**: level punya
-panjang berbeda (ℓ_k = [1,4,8,...]), `cat` dim0 error shape. Butuh padding +
-mask antar-level (kompleks, berisiko numerik) — dan kalaupun berhasil, hanya
-~2× (tetap ~6× di bawah PyTorch). **Di-revert** (kode hijau).
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture** (`burn-capture`) untuk forward: hilangkan overhead
