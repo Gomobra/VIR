@@ -159,6 +159,11 @@ Sisa gap 5% (b64): fwd 39 / bwd 69 / opt 18ms vs pt 128ms → butuh −6ms. Leve
 terjelas: **batch Muon Newton-Schulz** (240→60 luncuran, opt 18→~9ms) atau fusi
 RoPE/RmsNorm (kernel). Keduanya = optimisasi tingkat lanjut (risky/multi-hari).
 
+**RoPE q&k gabung (uji):** vir 15 065 (0.933×) — **NO-OP** (dalam noise 0.95±0.02)
+→ **membuktikan RoPE elementwise BUKAN bottleneck**. Yang dominan = **matmul
+backward (CubeCL 0.77× cuBLAS) + Muon (18ms)**. Fokus berikut: **batch Muon**
+(opt 18→~9ms) — satu-satunya lever jelas ke >1.0× (butuh custom optimizer).
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
   adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
