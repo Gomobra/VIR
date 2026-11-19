@@ -124,13 +124,24 @@ mask PER-LEVEL (attention双向/bidireksional → real token melihat padding), d
 Burn `forward_masked` hanya satu mask `[T,T]` utk semua batch → tak bisa per-level.
 **Di-revert** (kode hijau).
 
-## bf16/fp16 (tensor core) — bf16 TERUKUR GAGAL di T4
-`vir train --native --dtype bf16` (Device::configure BF16) → **rc 101**:
-`Shared memory budget exceeded: kernel requests 69632 bytes, hardware allows
-65536 bytes per cube`. CubeCL/cubek matmul bf16 autotune memilih tile > 64KB
-shared-mem Turing (T4). fp16 (kernel cubek sama, elemen 2-byte) berpotensi kena
-masalah sama. **Presisi reduksi (tensor core) TERHALANG di T4** oleh config kernel
-cubek — bukan oleh kode kita.
+## bf16/fp16 (tensor core) — bf16 GAGAL, fp16 JALAN tapi kecil
+`vir train --native --dtype bf16` → **rc 101**: `Shared memory budget exceeded:
+kernel requests 69632 bytes, hardware allows 65536` (cubek matmul bf16 autotune
+> 64KB shared-mem Turing/T4).
+`--dtype fp16` → **rc 0, 10 702 tok/s (0.64×)** (dari fp32 9 781, +9%): opt
+(Muon) 40→33ms & fwd 58→54ms lebih cepat (tensor core), TAPI **bwd 105→110ms
+TIDAK berubah** → fwd+bwd (164ms) tetap > total PyTorch (124ms). **Presisi
+reduksi mempercepat compute (fwd/opt) tapi tidak bwd (dispatch autodiff).**
+
+## KESIMPULAN DEFINITIF (semua lever sah sudah dicoba)
+**Objektif "di atas PyTorch" TIDAK tercapai.** Rasio terbaik ≈ **0.64–0.70×**,
+dibatasi **bwd (dispatch autodiff Burn ~105ms/langkah)** yang:
+- tak dipengaruhi fp16/bf16 (bukan compute),
+- tak bisa di-batch (level beda panjang ℓ_k),
+- tak bisa di-CUDA-graph (burn-capture = ekspor, bukan replay training).
+Menutup gap = menulis ulang autodiff Burn / kernel CubeCL ke paritas PyTorch =
+kerja framework-level. Di T4, bf16 (tensor core 2×) bahkan terhalang shared-mem
+cubek (68KB > 64KB).
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
