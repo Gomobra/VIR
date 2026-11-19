@@ -222,10 +222,10 @@ impl Block {
         } else {
             None
         };
-        let q = self.wqkv.forward(xn.clone());
-        let q = q.clone().slice([0..b, 0..t, 0..d]);
-        let k = q.clone().slice([0..b, 0..t, d..2 * d]);
-        let v = q.slice([0..b, 0..t, 2 * d..3 * d]);
+        let qkv = self.wqkv.forward(xn.clone());
+        let q = qkv.clone().slice([0..b, 0..t, 0..d]);
+        let k = qkv.clone().slice([0..b, 0..t, d..2 * d]);
+        let v = qkv.slice([0..b, 0..t, 2 * d..3 * d]);
         let q = match &rope {
             Some((cos, sin)) => apply_rope_with(q, cos, sin),
             None => q,
