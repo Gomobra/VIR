@@ -37,7 +37,8 @@ pub fn batched_newton_schulz(x: Tensor<3>) -> Tensor<3> {
         .sum_dim(1)
         .sqrt()
         .clamp_min(1e-7);
-    let mut x = x / norm.unsqueeze_dim(1).unsqueeze_dim(2);
+    let norm = norm.reshape([n, 1, 1]);
+    let mut x = x / norm;
     for _ in 0..NS_STEPS {
         let a = x.clone().matmul(x.clone().transpose()); // [N, m, m]
         let ax = a.clone().matmul(x.clone()); // [N, m, k]
@@ -99,7 +100,7 @@ impl BatchedMuon {
             }
             let stacked = Tensor::stack(bufs, 0); // [N, m, n]
             let upd = batched_newton_schulz(stacked).mul_scalar(lr as f32);
-            let [n, m, k] = upd.dims();
+            let [_, m, k] = upd.dims();
             for (i, (id, _)) in items.iter().enumerate() {
                 let t = upd.clone().slice([i..i + 1, 0..m, 0..k]).squeeze_dim(0);
                 updates.insert(*id, t);
