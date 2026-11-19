@@ -418,7 +418,7 @@ fn gen_forward(
     let clean = enc.indices;
     let (corrupted, rate) = corrupt(&clean, ctx, cfg);
     let inputs = teacher_inputs(model, &corrupted, cfg.dim, &target_tokens.device());
-    let logits = model.generator.forward(&inputs);
+    let logits = model.generator.forward_batched(&inputs);
     // Satu CE per level: dipakai untuk loss tracked DAN metrik (hindari hitung
     // CE dua kali — mahal pada vocab besar). `terms` = `w_k·CE_k` per level.
     let terms = vir_model::level_losses(&logits, &clean, weights);
@@ -659,19 +659,19 @@ impl NativeTrainer {
         device: Device,
         tcfg: TrainConfig,
     ) -> Result<Self, VirError> {
-        Self::with_train_config_dtype(cfg, source, device, tcfg, false)
+        Self::with_train_config_dtype(cfg, source, device, tcfg, None)
     }
 
-    /// Rakit trainer native dengan `TrainConfig` + pilihan dtype (bf16/fp32).
+    /// Rakit trainer native dengan `TrainConfig` + pilihan dtype (fp16/bf16/fp32).
     ///
-    /// `bf16 = true` mengonfigurasi device ke bfloat16 (tensor core) sebelum
-    /// model dibuat (PRD: BF16). Default `false` = fp32.
+    /// `dtype = Some(..)` mengonfigurasi device (tensor core) sebelum model
+    /// dibuat (PRD: BF16). `None` = fp32 (default).
     pub fn with_train_config_dtype(
         cfg: VirTrainConfig,
         source: ShardBatchSource,
         device: Device,
         tcfg: TrainConfig,
-        bf16: bool,
+        dtype: Option<burn::tensor::FloatDType>,
     ) -> Result<Self, VirError> {
         tcfg.validate()?;
         if source.seq_len() != cfg.total_len() {
@@ -681,7 +681,7 @@ impl NativeTrainer {
                 cfg.total_len()
             )));
         }
-        let device = train_device_dtype(device, cfg.seed, bf16)?;
+        let device = train_device_dtype(device, cfg.seed, dtype)?;
         let model = VirTrainModel::new(&cfg, &device)?;
         let opt = burn_optimizer_with_paths(
             &BurnHybridSettings::default(),

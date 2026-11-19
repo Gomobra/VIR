@@ -364,27 +364,31 @@ pub fn train_device(device: Device, seed: u64) -> Device {
     device
 }
 
-/// Device latih dengan dtype float default dikonfigurasi (bf16 bila diminta).
+/// Device latih dengan dtype float default dikonfigurasi (fp16/bf16 bila diminta).
 ///
 /// `Device::configure` (Burn 0.22.1) mengunci default dtype **sebelum** tensor/
-/// model dibuat. Mengembalikan error bila bf16 diminta tetapi device tak
-/// mendukungnya (`supports_dtype`).
-pub fn train_device_dtype(device: Device, seed: u64, bf16: bool) -> Result<Device, VirError> {
+/// model dibuat. `None` = fp32 (default). Mengembalikan error bila dtype diminta
+/// tetapi device tak mendukungnya (`supports_dtype`).
+pub fn train_device_dtype(
+    device: Device,
+    seed: u64,
+    dtype: Option<burn::tensor::FloatDType>,
+) -> Result<Device, VirError> {
     let mut device = if device.is_autodiff() {
         device
     } else {
         device.autodiff()
     };
     let _guard = init_guard();
-    if bf16 {
-        if !device.supports_dtype(burn::tensor::FloatDType::BF16) {
-            return Err(VirError::Internal(
-                "device tidak mendukung bf16".to_string(),
-            ));
+    if let Some(dt) = dtype {
+        if !device.supports_dtype(dt) {
+            return Err(VirError::Internal(format!(
+                "device tidak mendukung dtype {dt:?}"
+            )));
         }
         device
-            .configure((burn::tensor::FloatDType::BF16, burn::tensor::IntDType::I32))
-            .map_err(|e| VirError::Internal(format!("configure bf16 gagal: {e}")))?;
+            .configure((dt, burn::tensor::IntDType::I32))
+            .map_err(|e| VirError::Internal(format!("configure dtype gagal: {e}")))?;
     }
     device.seed(seed);
     Ok(device)

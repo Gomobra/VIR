@@ -332,7 +332,11 @@ fn train_native(
             "--native belum mendukung --world > 1 (DDP native belum ada)",
         ));
     }
-    let bf16 = matches!(dtype.to_ascii_lowercase().as_str(), "bf16" | "bfloat16");
+    let dtype = match dtype.to_ascii_lowercase().as_str() {
+        "fp16" | "f16" | "half" => Some(vir_train::FloatDType::F16),
+        "bf16" | "bfloat16" => Some(vir_train::FloatDType::BF16),
+        _ => None,
+    };
     let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
         .map_err(|e| CliError::other(e.to_string()))?;
     let mut trainer = vir_train::NativeTrainer::with_train_config_dtype(
@@ -340,7 +344,7 @@ fn train_native(
         source,
         Default::default(),
         tcfg.clone(),
-        bf16,
+        dtype,
     )
     .map_err(|e| CliError::other(e.to_string()))?;
     trainer.set_warmup(warmup);
