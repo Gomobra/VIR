@@ -61,21 +61,31 @@ assert r.returncode == 0
 CFG = '/tmp/VIR/configs/mini_train.json'
 BATCH = 64; SEQLEN = 32; STEPS = 33; WARMUP = 5""")
 
-code("""# --- 1) vir train --native (Burn), warmup 5 + 28 terukur ---
-t = time.time()
-r = subprocess.run([VIR,'train','--native','--warmup',str(WARMUP),
-                    '--data','/kaggle/working/mini_shard.bin','--out','/kaggle/working/run_vir',
-                    '--steps',str(STEPS),'--batch',str(BATCH),'--stage','gen',
-                    '--seq-len',str(SEQLEN),'--config',CFG,'--json'],
-                   capture_output=True, text=True, timeout=1200)
-vir_dt = round(time.time()-t,2); vir_tok=0.0; vir_ph={}
-try:
-    vj = json.loads(r.stdout.strip().splitlines()[-1]); vir_tok=float(vj.get('tok_s',0.0))
-    vir_ph = {k: round(float(vj.get(k,0.0)),1) for k in ('fwd_ms','bwd_ms','opt_ms')}
-except Exception as e:
-    P('parse vir gagal', e)
-res = {'vir': {'tok_s': vir_tok, 'dt_s': vir_dt, 'rc': r.returncode, 'phase': vir_ph}}
-P('VIR', json.dumps(res['vir']))""")
+code("""# --- 1) vir train --native: fp32 vs bf16 (Device::configure tensor core) ---
+CFG = '/tmp/VIR/configs/mini_train.json'
+STEPS = 33
+WARMUP = 5
+
+def run_vir(dtype):
+    t = time.time()
+    r = subprocess.run([VIR,'train','--native','--warmup',str(WARMUP),'--dtype',dtype,
+                        '--data','/kaggle/working/mini_shard.bin',
+                        '--out',f'/kaggle/working/run_vir_{dtype}',
+                        '--steps',str(STEPS),'--batch',str(BATCH),'--stage','gen',
+                        '--seq-len',str(SEQLEN),'--config',CFG,'--json'],
+                       capture_output=True, text=True, timeout=1200)
+    dt = round(time.time()-t,2); tok=0.0; ph={}
+    try:
+        vj = json.loads(r.stdout.strip().splitlines()[-1]); tok=float(vj.get('tok_s',0.0))
+        ph = {k: round(float(vj.get(k,0.0)),1) for k in ('fwd_ms','bwd_ms','opt_ms')}
+    except Exception as e:
+        P('parse vir gagal', dtype, e)
+    return {'rc': r.returncode, 'tok_s': tok, 'dt_s': dt, 'phase': ph,
+            'err': r.stderr[-300:]}
+
+res = {}
+res['vir_fp32'] = run_vir('fp32'); P('VIR_FP32', json.dumps(res['vir_fp32']))
+res['vir_bf16'] = run_vir('bf16'); P('VIR_BF16', json.dumps(res['vir_bf16']))""")
 
 code("""# --- 2) PyTorch VIR: model SAMA, RMSNorm+RoPE+SDPA+SwiGLU+Muon+AdamW ---
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -202,8 +212,9 @@ def bench_pt():
 
 res['pt_vir'] = bench_pt(); P('PT_VIR', json.dumps(res['pt_vir']))
 open('/kaggle/working/result.json','w').write(json.dumps(res, indent=2))
-v=res['vir']['tok_s']; p=res['pt_vir']['tok_s']
-if v>0 and p>0: P('ratio vir/pt_vir', round(v/p,3), 'x')
+for vk in ('vir_fp32','vir_bf16'):
+    v=res[vk]['tok_s']; p=res['pt_vir']['tok_s']
+    if v>0 and p>0: P(f'ratio {vk}/pt_vir', round(v/p,3), 'x')
 P('DONE'); LOG.close()""")
 
 nb = {"cells": CELLS,
