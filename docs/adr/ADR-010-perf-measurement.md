@@ -56,10 +56,34 @@ optimisasi jadi menebak-nebak.
 - **Backward (49%)** = turunan dari op-count forward; mengecilkan op forward
   (B4) mengecilkan backward secara proporsional.
 
+## Matriks skala (Kaggle 2×T4, warmup 3 + 30 terukur, vir vs PyTorch @ batch)
+
+| batch | vir tok/s | PyTorch fp32 tok/s | ratio | vir fwd/bwd/opt (ms) |
+|---|---|---|---|---|
+| 64  | 11 494  | 146 286 | **0.079×** | 51 / 95 / 50 |
+| 256 | 38 478  | 296 096 | 0.13×  | 42 / 105 / 38 |
+| 512 | 46 412  | 303 407 | **0.153×** | 40 / 246 / 66 |
+
+**Temuan:**
+- Rasio **membaik** dgn batch (vir lebih launch-bound → amortisasi lebih baik),
+  tapi **plateau ~0.15×** saat compute-bound (b256→b512 vir hanya 1.2× utk 2×
+  batch; PyTorch saturasi ~300k).
+- **fwd ~40ms KONSTAN** dari b64→b512 (8× data) = **launch-bound murni** (overhead
+  tetap). **bwd naik 95→246ms** = compute-bound, dan pada b512 **bwd 246ms >
+  seluruh langkah PyTorch (54ms)** → backward autodiff kita ~4.5× lebih lambat
+  dari *total* PyTorch.
+- **Kesimpulan definitif: vir plateau ~15% PyTorch di SEMUA batch → tidak bisa
+  mengalahkan PyTorch untuk beban training ini.** Batas = overhead dispatch
+  per-op Burn pada backward (graf autodiff ~1000 op) + kernel CubeCL scalar-FMA
+  (ADR-001 0.77×). Bukan sesuatu yang bisa ditutup optimisasi inkremental.
+
+## B4 (batch-level) — dicoba, GAGAL (terdokumentasi)
+Ide: batch 5 level jadi 1 lintasan blok (30→6 blok). **Gagal**: level punya
+panjang berbeda (ℓ_k = [1,4,8,...]), `cat` dim0 error shape. Butuh padding +
+mask antar-level (kompleks, berisiko numerik) — dan kalaupun berhasil, hanya
+~2× (tetap ~6× di bawah PyTorch). **Di-revert** (kode hijau).
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
-- **B4 — batch-level forward**: 5 level → 1 forward `[B·K, L, d]` + mask
-  antar-level (30 blok → 6 blok). Potensi ~2–3× bila benar-benar launch-bound;
-  butuh ekuivalensi numerik & hati-hati (recurrent depth, teacher forcing).
 - **W4 — CUDA graph capture** (`burn-capture`) untuk forward: hilangkan overhead
   dispatch; **Evaluasi** (Burn 0.22 capture_inference-oriented, training input
   variabel).
