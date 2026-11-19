@@ -98,3 +98,13 @@ pub fn burn_optimizer_with_paths(
     };
     adamw.with_group(group, muon, None)
 }
+
+/// Optimizer AdamW-only (tanpa grup Muon) — untuk `BatchedMuon` terpisah.
+pub fn adamw_only_optimizer(cfg: &BurnHybridSettings) -> ModuleOptimizer {
+    AdamWConfig::new()
+        .with_beta_1(cfg.beta1)
+        .with_beta_2(cfg.beta2)
+        .with_epsilon(cfg.eps)
+        .with_weight_decay(cfg.weight_decay)
+        .init()
+}

@@ -81,7 +81,7 @@ use serde::{Deserialize, Serialize};
 use vir_common::VirError;
 use vir_vq::{Codebook, MultiscaleVq, Quantizer, tensor_accuracy, vq_loss_chunked};
 
-use crate::burn_bridge::{BurnHybridSettings, burn_optimizer_with_paths};
+use crate::burn_bridge::{BurnHybridSettings, adamw_only_optimizer};
 use crate::checkpoint::{CHECKPOINT_VERSION, LOG_FILE};
 use crate::corruption::Corruption;
 use crate::data::{BatchSource, ShardBatchSource};
@@ -575,6 +575,8 @@ pub struct NativeTrainer {
     pub model: VirTrainModel,
     /// Optimizer Burn (AdamW + grup Muon).
     pub opt: ModuleOptimizer,
+    /// Muon Newton–Schulz ter-batch (F2.5, param 2D).
+    pub muon: crate::batched_muon::BatchedMuon,
     /// Konfigurasi model.
     pub model_cfg: VirTrainConfig,
     /// Sumber batch (data host → tensor device).
@@ -683,10 +685,8 @@ impl NativeTrainer {
         }
         let device = train_device_dtype(device, cfg.seed, dtype)?;
         let model = VirTrainModel::new(&cfg, &device)?;
-        let opt = burn_optimizer_with_paths(
-            &BurnHybridSettings::default(),
-            crate::params::two_d_param_paths(&model),
-        );
+        let opt = adamw_only_optimizer(&BurnHybridSettings::default());
+        let muon = crate::batched_muon::BatchedMuon::new();
         let weights = crate::loss::level_weight(&cfg.levels, cfg.alpha);
         let gate = match tcfg.gate {
             Some(g) => GateTracker::new(g.metric),
@@ -700,6 +700,7 @@ impl NativeTrainer {
             config: tcfg,
             model,
             opt,
+            muon,
             model_cfg: cfg,
             source,
             device,
@@ -954,9 +955,10 @@ impl NativeTrainer {
         self.refresh_keep();
         let grads = GradientsParams::from_params(&mut grads, &self.model, self.keep_ids());
         let to = Instant::now();
-        // ModuleOptimizer::step mengonsumsi model; klon device-side (bukan PCIe).
-        let model = self.model.clone();
-        self.model = self.opt.step(lr, model, grads);
+        // F2.5: Muon Newton-Schulz TER-BATCH (2D) + AdamW (semua param; 2D ditimpa Muon).
+        let updates = self.muon.compute(&self.model, &grads, lr);
+        let model = self.opt.step(lr, self.model.clone(), grads);
+        self.model = crate::batched_muon::apply_muon(model, &updates);
         let opt_ms = elapsed_ms(to);
         Ok((bwd_ms, opt_ms))
     }
@@ -1129,10 +1131,8 @@ impl NativeTrainer {
         let device = train_device(Default::default(), state.model.seed);
         let model = VirTrainModel::new(&state.model, &device)?;
         let model = params::import_safetensors(model, &tensors)?;
-        let opt = burn_optimizer_with_paths(
-            &BurnHybridSettings::default(),
-            crate::params::two_d_param_paths(&model),
-        );
+        let opt = adamw_only_optimizer(&BurnHybridSettings::default());
+        let muon = crate::batched_muon::BatchedMuon::new();
         let weights = crate::loss::level_weight(&state.model.levels, state.model.alpha);
         let now = Instant::now();
         let keep = (state.stage, non_frozen_param_ids(&model, state.stage));
@@ -1140,6 +1140,7 @@ impl NativeTrainer {
             config: state.config,
             model,
             opt,
+            muon,
             model_cfg: state.model,
             source,
             device,
