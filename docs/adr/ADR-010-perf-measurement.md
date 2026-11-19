@@ -100,6 +100,22 @@ Gap per-kerja-sebenarnya = **1.67×**, jauh lebih dekat & berpotensi ditutup.
 vir pakai CubeCL) = ~35ms; fwd 60 vs ~40 (SDPA vs naive attention); bwd 111 vs
 ~70 (dispatch autodiff). Total gap ~96ms.
 
+## A/B: Muon hanya bobot blok (head/embed/codebook→AdamW) — terukur
+
+Notebook `vir-kaggle-fair` v2 (Muon dibatasi ke bobot blok transformer
+`.weight`, sisanya AdamW — praktik standar). T4, batch 64, warmup.
+
+| | tok/s | fwd/bwd/opt (ms) |
+|---|---|---|
+| vir (Muon blok) | **11 483** | 49 / 88 / **34** |
+| PyTorch VIR | 16 526 | ~126 total |
+| **ratio** | **0.695×** | — |
+
+**Kemajuan:** opt **51→34ms (-33%)**, ratio **0.598→0.695×**, gap **1.67→1.44×**.
+Sisa gap: bwd 88 vs ~70 (dispatch autodiff) + opt 34 vs ~16 (CubeCL vs cuBLAS
+NS) + fwd 49 vs ~40 (naive attention vs SDPA). Semua = overhead framework/kernel,
+bukan tuning.
+
 ## B4 (batch-level) — dicoba, GAGAL (terdokumentasi)
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
