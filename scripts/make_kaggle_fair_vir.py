@@ -59,7 +59,7 @@ code("""r = subprocess.run([VIR,'make-shard','--out','/kaggle/working/mini_shard
 P('make-shard rc', r.returncode, r.stdout.strip(), r.stderr.strip())
 assert r.returncode == 0
 CFG = '/tmp/VIR/configs/mini_train.json'
-BATCH = 64; SEQLEN = 32; STEPS = 33; WARMUP = 5""")
+BATCH = 128; SEQLEN = 32; STEPS = 33; WARMUP = 5""")
 
 code("""# --- 1) vir train --native: fp32 vs bf16 (Device::configure tensor core) ---
 CFG = '/tmp/VIR/configs/mini_train.json'
