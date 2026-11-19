@@ -143,6 +143,22 @@ Menutup gap = menulis ulang autodiff Burn / kernel CubeCL ke paritas PyTorch =
 kerja framework-level. Di T4, bf16 (tensor core 2×) bahkan terhalang shared-mem
 cubek (68KB > 64KB).
 
+## Gabung proyeksi (QKV 3→1, gate+up 2→1) — TERUKUR, LOMB AT
+Menggabungkan `wq/wk/wv` → `wqkv` (1 matmul) dan `w_gate/w_up` → `w_gate_up`
+(1 matmul) di `Block` (numerik identik: bobot diklasi). Efek (T4, b64):
+- **fwd 58→39ms, bwd 105→69ms, opt 40→17ms** (opt turun krn param Muon 5→2/blok).
+- **tok/s 9 781→15 245 = 0.952×** (dari 0.585×) — **nyaris parity PyTorch VIR**.
+
+**Pelajaran:** beban launch-bound → mengurangi jumlah matmul/luncuran (gabung
+proyeksi) sangat efektif. Peluang lanjut: batch besar (amortisasi) + fusi RoPE/
+RmsNorm (kernel) untuk >1.0×.
+
+**Batch 128 (uji):** vir 28 066 vs pt 31 858 = **0.881×** (turun dari b64 0.952×)
+→ batch besar TIDAK menolong (PyTorch skalanya lebih baik); **b64 sweet spot**.
+Sisa gap 5% (b64): fwd 39 / bwd 69 / opt 18ms vs pt 128ms → butuh −6ms. Lever
+terjelas: **batch Muon Newton-Schulz** (240→60 luncuran, opt 18→~9ms) atau fusi
+RoPE/RmsNorm (kernel). Keduanya = optimisasi tingkat lanjut (risky/multi-hari).
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
   adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
