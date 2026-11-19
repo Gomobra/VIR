@@ -418,7 +418,7 @@ fn gen_forward(
     let clean = enc.indices;
     let (corrupted, rate) = corrupt(&clean, ctx, cfg);
     let inputs = teacher_inputs(model, &corrupted, cfg.dim, &target_tokens.device());
-    let logits = model.generator.forward_batched(&inputs);
+    let logits = model.generator.forward(&inputs);
     // Satu CE per level: dipakai untuk loss tracked DAN metrik (hindari hitung
     // CE dua kali — mahal pada vocab besar). `terms` = `w_k·CE_k` per level.
     let terms = vir_model::level_losses(&logits, &clean, weights);

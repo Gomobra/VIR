@@ -394,39 +394,6 @@ impl Generator {
             .collect()
     }
 
-    /// Forward ter-batch (jalur latih): gabungkan K level jadi `[B·K, L, d]`,
-    /// satu lintasan blok, potong balik per level.
-    ///
-    /// **Numerik identik** dengan [`Self::forward`] karena tiap elemen batch
-    /// independen (attention kausal per-elemen, RMSNorm per-baris) — hanya
-    /// mengurangi jumlah luncuran kernel K× (30→6 blok). Prasyarat: semua level
-    /// sama panjang `L` (jalur latih: `teacher_inputs` membangun `[B, L, d]`).
-    pub fn forward_batched(&self, z_hats: &[Tensor<3>]) -> Vec<Tensor<3>> {
-        let n = z_hats.len().min(self.heads.len());
-        if n == 0 {
-            return Vec::new();
-        }
-        let inputs: Vec<Tensor<3>> = (0..n)
-            .map(|k| self.level_input_with(&self.scales, k, z_hats[k].clone()))
-            .collect();
-        let [b, l, d] = inputs[0].dims();
-        let batched = Tensor::cat(inputs, 0);
-        let feat = recurrent_forward(
-            &self.prelude,
-            &self.core,
-            &self.coda,
-            &self.adapter,
-            batched,
-            self.num_loops,
-        );
-        (0..n)
-            .map(|k| {
-                let f = feat.clone().slice([k * b..(k + 1) * b, 0..l, 0..d]);
-                self.heads[k].forward(f)
-            })
-            .collect()
-    }
-
     /// Forward dengan operator skala eksplisit (konteks `prefix + L`).
     pub fn forward_with(&self, scales: &LevelScales, z_hats: &[Tensor<3>]) -> Vec<Tensor<3>> {
         let features = self.forward_features_with(scales, z_hats, self.num_loops);
