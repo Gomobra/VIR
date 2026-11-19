@@ -117,6 +117,20 @@ NS) + fwd 49 vs ~40 (naive attention vs SDPA). Semua = overhead framework/kernel
 bukan tuning.
 
 ## B4 (batch-level) — dicoba, GAGAL (terdokumentasi)
+Ide: batch 5 level jadi 1 lintasan blok (30→6 blok). **Gagal**: level_input
+memanggil `scales.down(k)` yang **menurunkan L→ℓ_k** (level input beda panjang
+`[B,2,d],[B,4,d],[B,8,d]...`), jadi `cat` dim0 error. Batch butuh padding +
+mask PER-LEVEL (attention双向/bidireksional → real token melihat padding), dan
+Burn `forward_masked` hanya satu mask `[T,T]` utk semua batch → tak bisa per-level.
+**Di-revert** (kode hijau).
+
+## bf16/fp16 (tensor core) — bf16 TERUKUR GAGAL di T4
+`vir train --native --dtype bf16` (Device::configure BF16) → **rc 101**:
+`Shared memory budget exceeded: kernel requests 69632 bytes, hardware allows
+65536 bytes per cube`. CubeCL/cubek matmul bf16 autotune memilih tile > 64KB
+shared-mem Turing (T4). fp16 (kernel cubek sama, elemen 2-byte) berpotensi kena
+masalah sama. **Presisi reduksi (tensor core) TERHALANG di T4** oleh config kernel
+cubek — bukan oleh kode kita.
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
