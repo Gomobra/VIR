@@ -27,6 +27,7 @@
 //! let out = trainer.run(&mut |ctx, store| { /* forward+backward, isi grad */ })?;
 //! ```
 
+pub mod batched_muon;
 pub mod burn_bridge;
 pub mod burn_step;
 pub mod checkpoint;
