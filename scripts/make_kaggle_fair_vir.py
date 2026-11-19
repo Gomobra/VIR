@@ -85,7 +85,7 @@ def run_vir(dtype):
 
 res = {}
 res['vir_fp32'] = run_vir('fp32'); P('VIR_FP32', json.dumps(res['vir_fp32']))
-res['vir_bf16'] = run_vir('bf16'); P('VIR_BF16', json.dumps(res['vir_bf16']))""")
+res['vir_fp16'] = run_vir('fp16'); P('VIR_FP16', json.dumps(res['vir_fp16']))""")
 
 code("""# --- 2) PyTorch VIR: model SAMA, RMSNorm+RoPE+SDPA+SwiGLU+Muon+AdamW ---
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -212,7 +212,7 @@ def bench_pt():
 
 res['pt_vir'] = bench_pt(); P('PT_VIR', json.dumps(res['pt_vir']))
 open('/kaggle/working/result.json','w').write(json.dumps(res, indent=2))
-for vk in ('vir_fp32','vir_bf16'):
+for vk in ('vir_fp32','vir_fp16'):
     v=res[vk]['tok_s']; p=res['pt_vir']['tok_s']
     if v>0 and p>0: P(f'ratio {vk}/pt_vir', round(v/p,3), 'x')
 P('DONE'); LOG.close()""")
