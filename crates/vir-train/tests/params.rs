@@ -1,6 +1,6 @@
 //! Tes `two_d_param_paths` (F2.5): Muon hanya pada bobot blok transformer.
 
-use vir_train::model::{train_device, VirTrainConfig, VirTrainModel};
+use vir_train::model::{VirTrainConfig, VirTrainModel, train_device};
 use vir_train::params::two_d_param_paths;
 
 fn cfg() -> VirTrainConfig {
@@ -24,11 +24,14 @@ fn cfg() -> VirTrainConfig {
 }
 
 #[test]
-fn two_d_paths hanya_bobot_blok_dan_tidak_kosong() {
+fn two_d_paths_hanya_bobot_blok_dan_tidak_kosong() {
     let device = train_device(Default::default(), 5);
     let model = VirTrainModel::new(&cfg(), &device).expect("model");
     let paths = two_d_param_paths(&model);
-    assert!(!paths.is_empty(), "Muon harus punya param (blok transformer)");
+    assert!(
+        !paths.is_empty(),
+        "Muon harus punya param (blok transformer)"
+    );
     for p in &paths {
         assert!(p.ends_with(".weight"), "hanya bobot: {p}");
         let is_block = p.contains("prelude")
