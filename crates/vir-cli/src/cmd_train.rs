@@ -316,6 +316,7 @@ fn train(
 }
 
 /// Jalur GPU-native (tanpa roundtrip host↔GPU; hanya single device).
+#[allow(clippy::too_many_arguments)]
 fn train_native(
     cfg: &VirTrainConfig,
     data: &str,
