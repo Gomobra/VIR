@@ -226,18 +226,21 @@ impl Block {
         let q = qkv.clone().slice([0..b, 0..t, 0..d]);
         let k = qkv.clone().slice([0..b, 0..t, d..2 * d]);
         let v = qkv.slice([0..b, 0..t, 2 * d..3 * d]);
-        let q = match &rope {
-            Some((cos, sin)) => apply_rope_with(q, cos, sin),
-            None => q,
-        }
-        .reshape([b, t, h, hd])
-        .swap_dims(1, 2);
-        let k = match &rope {
-            Some((cos, sin)) => apply_rope_with(k, cos, sin),
-            None => k,
-        }
-        .reshape([b, t, h, hd])
-        .swap_dims(1, 2);
+        // Gabung q&k → satu RoPE (hemat luncuran; cos/sin sama utk q & k).
+        let qk = Tensor::cat(vec![q, k], 0); // [2b, t, d]
+        let qk = match &rope {
+            Some((cos, sin)) => apply_rope_with(qk, cos, sin),
+            None => qk,
+        };
+        let q = qk
+            .clone()
+            .slice([0..b, 0..t, 0..d])
+            .reshape([b, t, h, hd])
+            .swap_dims(1, 2);
+        let k = qk
+            .slice([b..2 * b, 0..t, 0..d])
+            .reshape([b, t, h, hd])
+            .swap_dims(1, 2);
         let v = v.reshape([b, t, h, hd]).swap_dims(1, 2);
         let kt = k.clone().swap_dims(2, 3);
         let mut scores = q.matmul(kt) / (hd as f32).sqrt();
