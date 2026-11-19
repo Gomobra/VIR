@@ -353,8 +353,27 @@ pub fn two_d_param_paths(model: &VirTrainModel) -> Vec<String> {
             found
                 .into_iter()
                 .filter(|f| f.rows > 1 && f.cols > 1)
+                // Muon hanya untuk matriks bobot blok transformer (prelude/core/
+                // coda) — praktik standar (embeddings, codebook, head, proj, adapter
+                // → AdamW). Memangkas\lceil Newton-Schulz (matmul kecil mahal).
+                .filter(|f| is_block_weight(&f.name))
                 .map(|f| f.name)
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// `true` bila path adalah bobot blok transformer (prelude/core/coda).
+fn is_block_weight(path: &str) -> bool {
+    path.ends_with(".weight")
+        && (path.contains("prelude")
+            || path.contains("core")
+            || path.contains("coda")
+            || path.contains(".wq.")
+            || path.contains(".wk.")
+            || path.contains(".wv.")
+            || path.contains(".wo.")
+            || path.contains(".wg.")
+            || path.contains(".wu.")
+            || path.contains(".wd."))
 }
