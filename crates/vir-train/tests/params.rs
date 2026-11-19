@@ -37,13 +37,10 @@ fn two_d_paths_hanya_bobot_blok_dan_tidak_kosong() {
         let is_block = p.contains("prelude")
             || p.contains("core")
             || p.contains("coda")
-            || p.contains(".wq.")
-            || p.contains(".wk.")
-            || p.contains(".wv.")
+            || p.contains(".wqkv.")
             || p.contains(".wo.")
-            || p.contains(".wg.")
-            || p.contains(".wu.")
-            || p.contains(".wd.");
+            || p.contains(".w_gate_up.")
+            || p.contains(".w_down.");
         assert!(is_block, "harus bobot blok, dapat: {p}");
         // Head/embedding/codebook tidak boleh masuk Muon.
         assert!(!p.contains("head"), "head bukan blok: {p}");

@@ -12,7 +12,7 @@
 //! | model → grads | [`collect_grads`] | `ModuleVisitor` + `Gradients` |
 //!
 //! Nama slot adalah path modul berbatas titik (mis.
-//! `generator.core.0.wq.weight`),
+//! `generator.core.0.wqkv.weight`),
 //! sehingga checkpoint bisa diinspeksi dan peran tahap diturunkan dari path.
 
 use std::collections::HashSet;
@@ -39,7 +39,7 @@ struct Found {
 ///
 /// - `codebook`/`quantizer`/`phis` → [`ParamRole::Tokenizer`] (dibekukan;
 ///   codebook belajar EMA, salinan tokenizer di generator tidak dilatih).
-/// - `generator.*` (mis. `generator.core.0.wq.weight`) → [`ParamRole::Generator`].
+/// - `generator.*` (mis. `generator.core.0.wqkv.weight`) → [`ParamRole::Generator`].
 /// - sisanya (embed, `vq.*.phi`, decoder) → [`ParamRole::Vq`].
 ///
 /// Segmen pertama path adalah nama field pada [`VirTrainModel`], jadi generator
@@ -369,11 +369,8 @@ fn is_block_weight(path: &str) -> bool {
         && (path.contains("prelude")
             || path.contains("core")
             || path.contains("coda")
-            || path.contains(".wq.")
-            || path.contains(".wk.")
-            || path.contains(".wv.")
+            || path.contains(".wqkv.")
             || path.contains(".wo.")
-            || path.contains(".wg.")
-            || path.contains(".wu.")
-            || path.contains(".wd."))
+            || path.contains(".w_gate_up.")
+            || path.contains(".w_down."))
 }

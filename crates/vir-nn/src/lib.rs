@@ -9,7 +9,6 @@ use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 use burn::tensor::Bool;
 use burn::tensor::Device;
-use vir_common::VirError;
 
 /// RoPE gaya GPT-NeoX: pasangan (i, i+half), sudut pos·θ^(-2i/d).
 pub fn rope_cos_sin(seq_len: usize, head_dim: usize, base: f32) -> (Vec<f32>, Vec<f32>) {
@@ -150,23 +149,29 @@ impl RmsNorm {
 
 #[derive(Module, Debug)]
 pub struct SwiGluMlp {
-    pub w_gate: Linear,
-    pub w_up: Linear,
+    /// Gabungan gate+up `[2*hidden, dim]` (1 matmul, bukan 2 — hemat luncuran).
+    pub w_gate_up: Linear,
     pub w_down: Linear,
+    /// Lebar tersembunyi (setengah dari `w_gate_up` keluaran).
+    pub hidden: usize,
 }
 
 impl SwiGluMlp {
     pub fn new(dim: usize, hidden: usize, device: &Device) -> Self {
         Self {
-            w_gate: LinearConfig::new(dim, hidden).init(device),
-            w_up: LinearConfig::new(dim, hidden).init(device),
+            w_gate_up: LinearConfig::new(dim, hidden * 2).init(device),
             w_down: LinearConfig::new(hidden, dim).init(device),
+            hidden,
         }
     }
 
     pub fn forward(&self, x: Tensor<3>) -> Tensor<3> {
-        let gate = burn::tensor::activation::silu(self.w_gate.forward(x.clone()));
-        let up = self.w_up.forward(x);
+        let [b, t, _] = x.dims();
+        let h = self.hidden;
+        let gu = self.w_gate_up.forward(x); // [b, t, 2h]
+        let gate = gu.clone().slice([0..b, 0..t, 0..h]);
+        let up = gu.slice([0..b, 0..t, h..2 * h]);
+        let gate = burn::tensor::activation::silu(gate);
         self.w_down.forward(gate * up)
     }
 }
@@ -174,9 +179,8 @@ impl SwiGluMlp {
 #[derive(Module, Debug)]
 pub struct Block {
     pub ln1: RmsNorm,
-    pub wq: Linear,
-    pub wk: Linear,
-    pub wv: Linear,
+    /// Gabungan q,k,v `[3d, d]` (1 matmul, bukan 3 — hemat luncuran).
+    pub wqkv: Linear,
     pub wo: Linear,
     pub ln2: RmsNorm,
     pub mlp: SwiGluMlp,
@@ -191,9 +195,7 @@ impl Block {
         let hidden = (dim * 4 / 3 * 2 / 8) * 8;
         Self {
             ln1: RmsNorm::new(dim, device),
-            wq: LinearConfig::new(dim, dim).init(device),
-            wk: LinearConfig::new(dim, dim).init(device),
-            wv: LinearConfig::new(dim, dim).init(device),
+            wqkv: LinearConfig::new(dim, dim * 3).init(device),
             wo: LinearConfig::new(dim, dim).init(device),
             ln2: RmsNorm::new(dim, device),
             mlp: SwiGluMlp::new(dim, hidden, device),
@@ -220,21 +222,23 @@ impl Block {
         } else {
             None
         };
-        let q = self.wq.forward(xn.clone());
+        let q = self.wqkv.forward(xn.clone());
+        let q = q.clone().slice([0..b, 0..t, 0..d]);
+        let k = q.clone().slice([0..b, 0..t, d..2 * d]);
+        let v = q.slice([0..b, 0..t, 2 * d..3 * d]);
         let q = match &rope {
             Some((cos, sin)) => apply_rope_with(q, cos, sin),
             None => q,
         }
         .reshape([b, t, h, hd])
         .swap_dims(1, 2);
-        let k = self.wk.forward(xn.clone());
         let k = match &rope {
             Some((cos, sin)) => apply_rope_with(k, cos, sin),
             None => k,
         }
         .reshape([b, t, h, hd])
         .swap_dims(1, 2);
-        let v = self.wv.forward(xn).reshape([b, t, h, hd]).swap_dims(1, 2);
+        let v = v.reshape([b, t, h, hd]).swap_dims(1, 2);
         let kt = k.clone().swap_dims(2, 3);
         let mut scores = q.matmul(kt) / (hd as f32).sqrt();
         if let Some(m) = mask {
@@ -386,12 +390,4 @@ fn kda_chunk_state(
         }
     }
     out
-}
-
-pub fn nn_smoke() -> Result<(), VirError> {
-    let device = Device::default();
-    let blk = Block::new(64, 4, &device);
-    let x: Tensor<3> = Tensor::ones([2, 4, 64], &device);
-    let _ = blk.forward(x);
-    Ok(())
 }
