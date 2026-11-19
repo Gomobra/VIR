@@ -170,6 +170,9 @@ pub(crate) struct Args {
     /// Langkah warmup tak terukur sebelum pengukuran (W0; hanya --native)
     #[arg(long, default_value_t = 0)]
     pub warmup: u64,
+    /// Presisi latih native: fp32 | bf16 (tensor core; hanya --native)
+    #[arg(long, default_value = "fp32")]
+    pub dtype: String,
     /// Tahap awal: vq | gen
     #[arg(long, default_value = "gen")]
     pub stage: String,
@@ -226,6 +229,7 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         args.batch,
         args.native,
         args.warmup,
+        &args.dtype,
     )?;
     report(&outcome, vocab, world, args.json);
     Ok(())
@@ -269,9 +273,10 @@ fn train(
     batch: usize,
     native: bool,
     warmup: u64,
+    dtype: &str,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if native {
-        return train_native(cfg, data, dir, world, tcfg, batch, warmup);
+        return train_native(cfg, data, dir, world, tcfg, batch, warmup, dtype);
     }
     let stage = tcfg.stage;
     if world <= 1 {
@@ -319,19 +324,22 @@ fn train_native(
     tcfg: &TrainConfig,
     batch: usize,
     warmup: u64,
+    dtype: &str,
 ) -> Result<vir_train::RunOutcome, CliError> {
     if world > 1 {
         return Err(CliError::other(
             "--native belum mendukung --world > 1 (DDP native belum ada)",
         ));
     }
+    let bf16 = matches!(dtype.to_ascii_lowercase().as_str(), "bf16" | "bfloat16");
     let source = ShardBatchSource::from_shard(data, batch, cfg.total_len(), cfg.seed, false)
         .map_err(|e| CliError::other(e.to_string()))?;
-    let mut trainer = vir_train::NativeTrainer::with_train_config(
+    let mut trainer = vir_train::NativeTrainer::with_train_config_dtype(
         cfg.clone(),
         source,
         Default::default(),
         tcfg.clone(),
+        bf16,
     )
     .map_err(|e| CliError::other(e.to_string()))?;
     trainer.set_warmup(warmup);

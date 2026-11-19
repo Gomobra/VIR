@@ -86,7 +86,7 @@ use crate::checkpoint::{CHECKPOINT_VERSION, LOG_FILE};
 use crate::corruption::Corruption;
 use crate::data::{BatchSource, ShardBatchSource};
 use crate::logging::{EventRecord, JsonlLogger, StepRecord};
-use crate::model::{VirTrainConfig, VirTrainModel, train_device};
+use crate::model::{VirTrainConfig, VirTrainModel, train_device, train_device_dtype};
 use crate::optim::ParamRole;
 use crate::params;
 use crate::rng::Rng;
@@ -659,6 +659,20 @@ impl NativeTrainer {
         device: Device,
         tcfg: TrainConfig,
     ) -> Result<Self, VirError> {
+        Self::with_train_config_dtype(cfg, source, device, tcfg, false)
+    }
+
+    /// Rakit trainer native dengan `TrainConfig` + pilihan dtype (bf16/fp32).
+    ///
+    /// `bf16 = true` mengonfigurasi device ke bfloat16 (tensor core) sebelum
+    /// model dibuat (PRD: BF16). Default `false` = fp32.
+    pub fn with_train_config_dtype(
+        cfg: VirTrainConfig,
+        source: ShardBatchSource,
+        device: Device,
+        tcfg: TrainConfig,
+        bf16: bool,
+    ) -> Result<Self, VirError> {
         tcfg.validate()?;
         if source.seq_len() != cfg.total_len() {
             return Err(VirError::Config(format!(
@@ -667,7 +681,7 @@ impl NativeTrainer {
                 cfg.total_len()
             )));
         }
-        let device = train_device(device, cfg.seed);
+        let device = train_device_dtype(device, cfg.seed, bf16)?;
         let model = VirTrainModel::new(&cfg, &device)?;
         let opt = burn_optimizer_with_paths(
             &BurnHybridSettings::default(),
