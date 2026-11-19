@@ -103,9 +103,10 @@ vir pakai CubeCL) = ~35ms; fwd 60 vs ~40 (SDPA vs naive attention); bwd 111 vs
 ## B4 (batch-level) — dicoba, GAGAL (terdokumentasi)
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
-- **W4 — CUDA graph capture** (`burn-capture`) untuk forward: hilangkan overhead
-  dispatch; **Evaluasi** (Burn 0.22 capture_inference-oriented, training input
-  variabel).
+- **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
+  adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
+  replay untuk training. Tak ada API capture→replay input-baru untuk
+  forward+backward training. (Terverifikasi via Context7/docs.)
 - **Muon**: tak mengubah `ns_steps` (kualitas, PRD:604); opsi: bf16 matmul NS,
   atau fused kernel NS (CubeCL) — besar.
 - **Autotune cache persisten** (B3): cold start ~146s → ~0 (total-time & etika
