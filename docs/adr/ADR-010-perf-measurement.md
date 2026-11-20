@@ -172,15 +172,15 @@ lintas param 2D se-bentuk (`crates/vir-train/src/batched_muon.rs`, two-pass:
 `map` tulis-balik via `DispatchTensor`). Terintegrasi di `NativeTrainer`
 (`adamw_only_optimizer` + `BatchedMuon`).
 
-**Hasil (Kaggle T4, batch 64, L32, warmup 5, model SAMA):**
-- **opt 18 → 4.4ms (-75%)** (luncuran NS 560→~140).
-- **vir fp32 = 16 490 tok/s vs PyTorch VIR fp32 = 16 063 → 1.027× (DI ATAS, ADIL fp32-vs-fp32)**.
-- vir fp16 = 14 011 vs PyTorch fp16 = 14 194 → 0.987× (parity).
-- (Catatan: run sebelumnya vir fp32 15 053 / pt 15 374 = 0.979×; run ini 16 490/16 063 = 1.027× → noise ±3%, tapi konsisten ~parity/above.)
+**Hasil (Kaggle T4, batch 64, L32, warmup 5, 98 langkah terukur, model SAMA):**
+- **opt 18 → 4.3ms (-76%)** (luncuran NS 560→~140).
+- **vir fp32 = 17 722 tok/s vs PyTorch VIR fp32 = 15 498 → 1.143× (14.3% DI ATAS, ADIL fp32-vs-fp32)**.
+- **vir fp16 = 15 477 vs PyTorch VIR fp16 = 13 918 → 1.112× (11.2% di atas, ADIL fp16-vs-fp16)**.
+- (Run 30-langkah: 0.90–1.03× → noise ±10%; 98-langkah stabil → 1.11–1.14×.)
 
 **Kesimpulan: objektif "optimisasi di atas PyTorch" TERCAPAI** pada beban adil
-(fp32, model VIR sama, T4 sama) — vir 1.027× PyTorch VIR. Gabungan: batched Muon
-(terobosan) + gabung QKV/gate_up + W0/W1/B6.
+(fp32 & fp16, model VIR sama, T4 sama) — vir **1.11–1.14× PyTorch VIR**. Gabungan:
+batched Newton-Schulz Muon (terobosan) + gabung QKV/gate_up + W0/W1/B6.
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
