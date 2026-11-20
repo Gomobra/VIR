@@ -70,13 +70,13 @@ int main(){
         //            C=A@B   -> cublasSgemm(OP_N,OP_N, N,M,K, B,K, A,K, C,N)
         //            C=A^T@B -> cublasSgemm(OP_T,OP_N, M,N,K, A,K, B,K, C,M? ) ; ldc=N
         // Z1[N,H] = X[N,D] @ W1^T[H,D]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, H, D, &alpha, X, D, dW1, D, &beta, Z1, N));
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, H, D, &alpha, X, D, dW1, D, &beta, Z1, H));
         gelu_fwd<<<bH,th,0,s>>>(Z1, A1, N*H);
         // Y[N,D] = A1[N,H] @ W2^T[D,H]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, D, H, &alpha, A1, H, dW2, H, &beta, Y, N));
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, D, H, &alpha, A1, H, dW2, H, &beta, Y, D));
         mse_grad<<<bD,th,0,s>>>(Y, T, dY, N*D);
         // dA1[N,H] = dY[N,D] @ W2[D,H]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, H, N, D, &alpha, dW2, D, dY, D, &beta, dA1, N));
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, H, N, D, &alpha, dW2, D, dY, D, &beta, dA1, H));
         gelu_bwd<<<bH,th,0,s>>>(Z1, dA1, dZ1, N*H);
         // dW2[D,H] = dY^T[N,D] @ A1[N,H]
         CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, D, H, N, &alpha, dY, D, A1, H, &beta, gW2, H));
