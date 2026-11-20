@@ -352,6 +352,8 @@ fn train_native(
         .open(dir)
         .map_err(|e| CliError::other(e.to_string()))?;
     trainer.run().map_err(|e| CliError::other(e.to_string()))?;
+    // Simpan model akhir agar `vir generate` bisa memakainya.
+    trainer.save().map_err(|e| CliError::other(e.to_string()))?;
     Ok(trainer.outcome(trainer.gate_passed()))
 }
 
