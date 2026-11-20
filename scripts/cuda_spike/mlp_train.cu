@@ -1,0 +1,99 @@
+// Proof-of-concept: training loop C++/CUDA murni (cuBLAS) utk MLP 2-layer.
+// Forward+backward manual, SGD. Ukur tok/s vs PyTorch.
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <chrono>
+
+#define CHECK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){printf("CUDA err %s @%d\n",cudaGetErrorString(e),__LINE__);exit(1);} } while(0)
+#define CK(x) do { cublasStatus_t s=(x); if(s!=CUBLAS_STATUS_SUCCESS){printf("cuBLAS err %d @%d\n",(int)s,__LINE__);exit(1);} } while(0)
+
+// elementwise: A1 = gelu(Z1) ; dZ1 = dA1 * gelu'(Z1) ; dY = (Y-T)/n
+__global__ void gelu_fwd(const float* z, float* a, int n){
+    int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n) return;
+    float x=z[i]; a[i]=0.5f*x*(1.0f+erff(x*0.7071067811865476f));
+}
+__global__ void gelu_bwd(const float* z, const float* da, float* dz, int n){
+    int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n) return;
+    float x=z[i]; float c=0.7071067811865476f;
+    float g=0.5f*(1.0f+erff(x*c)) + 0.5f*x*expf(-x*x)*0.7978845608f;
+    dz[i]=da[i]*g;
+}
+__global__ void mse_grad(const float* y, const float* t, float* dy, int n){
+    int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n) return;
+    dy[i]=(y[i]-t[i])/(float)n;
+}
+__global__ void sgd(float* w, const float* gw, float lr, int n){
+    int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n) return;
+    w[i]-=lr*gw[i];
+}
+
+int main(){
+    const int B=64, L=32, D=64, H=256, N=B*L;
+    const int STEPS=200, WARMUP=20;
+    cublasHandle_t h; CK(cublasCreate(&h));
+    const float alpha=1.0f, beta=0.0f;
+    // params (row-major): W1[D,H], b1[H], W2[H,D], b2[D]
+    std::vector<float> hW1(D*H), hb1(H), hW2(H*D), hb2(D);
+    srand(0);
+    for(auto&v:hW1) v=((rand()%1000)/1000.0f-0.5f)*0.1f;
+    for(auto&v:hb1) v=0.0f;
+    for(auto&v:hW2) v=((rand()%1000)/1000.0f-0.5f)*0.1f;
+    for(auto&v:hb2) v=0.0f;
+    float *dW1,*db1,*dW2,*db2,*gW1,*gb1,*gW2,*gb2;
+    CHECK(cudaMalloc(&dW1,sizeof(float)*D*H)); CHECK(cudaMalloc(&db1,sizeof(float)*H));
+    CHECK(cudaMalloc(&dW2,sizeof(float)*H*D)); CHECK(cudaMalloc(&db2,sizeof(float)*D));
+    CHECK(cudaMalloc(&gW1,sizeof(float)*D*H)); CHECK(cudaMalloc(&gb1,sizeof(float)*H));
+    CHECK(cudaMalloc(&gW2,sizeof(float)*H*D)); CHECK(cudaMalloc(&gb2,sizeof(float)*D));
+    CHECK(cudaMemcpy(dW1,hW1.data(),sizeof(float)*D*H,cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(db1,hb1.data(),sizeof(float)*H,cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(dW2,hW2.data(),sizeof(float)*H*D,cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(db2,hb2.data(),sizeof(float)*D,cudaMemcpyHostToDevice));
+    float *X,*Z1,*A1,*dZ1,*dA1,*Y,*dY;
+    CHECK(cudaMalloc(&X,sizeof(float)*N*D)); CHECK(cudaMalloc(&Z1,sizeof(float)*N*H));
+    CHECK(cudaMalloc(&A1,sizeof(float)*N*H)); CHECK(cudaMalloc(&dZ1,sizeof(float)*N*H));
+    CHECK(cudaMalloc(&dA1,sizeof(float)*N*H)); CHECK(cudaMalloc(&Y,sizeof(float)*N*D));
+    CHECK(cudaMalloc(&dY,sizeof(float)*N*D));
+    std::vector<float> hX(N*D), hT(N*D);
+    for(auto&v:hX) v=((rand()%1000)/1000.0f-0.5f);
+    for(auto&v:hT) v=((rand()%1000)/1000.0f-0.5f);
+    CHECK(cudaMemcpy(X,hX.data(),sizeof(float)*N*D,cudaMemcpyHostToDevice));
+    float *T; CHECK(cudaMalloc(&T,sizeof(float)*N*D));
+    CHECK(cudaMemcpy(T,hT.data(),sizeof(float)*N*D,cudaMemcpyHostToDevice));
+    cudaStream_t s; CHECK(cudaStreamCreate(&s)); cublasSetStream(h,s);
+    int threads=256; int blocks=(N*H+threads-1)/threads;
+    int blocksD=(N*D+threads-1)/threads;
+
+    auto step = [&](){
+        // forward: Z1 = X@W1^T + b1 (row-major: Z1[N,H] = X[N,D] @ W1^T[D,H])
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, H, N, D, &alpha, dW1, H, X, D, &beta, Z1, H));
+        gelu_fwd<<<blocks,threads,0,s>>>(Z1, A1, N*H);
+        // Y[N,D] = A1[N,H] @ W2^T[H,D]
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, D, N, H, &alpha, dW2, D, A1, H, &beta, Y, D));
+        // loss ~ 0.5*mean((Y-T)^2); dY = (Y-T)/n
+        mse_grad<<<blocksD,threads,0,s>>>(Y, T, dY, N*D);
+        // backward: dA1[N,H] = dY[N,D] @ W2[H,D]^T = dY @ W2^T
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, H, N, D, &alpha, dW2, D, dY, D, &beta, dA1, H));
+        gelu_bwd<<<blocks,threads,0,s>>>(Z1, dA1, dZ1, N*H);
+        // dW2[H,D] = dY^T[N,D]^T ... dW2 = dY^T @ A1 ; dW2[D,H]?? 
+        // W2 is [H,D], Y=A1@W2^T. dW2 = dY^T @ A1 = [D,H]?? W2 is [H,D]. 
+        // dW2 = (dY^T @ A1)^T = A1^T @ dY = [H,N]@[N,D]=[H,D]. 
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, H, D, N, &alpha, A1, H, dY, D, &beta, gW2, H));
+        // dW1[D,H] = dZ1^T @ X = [H,N]@[N,D]... W1 is [D,H]. dW1 = X^T @ dZ1 = [D,N]@[N,H]=[D,H]
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, D, H, N, &alpha, X, D, dZ1, H, &beta, gW1, D));
+        // SGD
+        sgd<<<blocks,threads,0,s>>>(dW1, gW1, 1e-3f, D*H);
+        sgd<<<blocks,threads,0,s>>>(dW2, gW2, 1e-3f, H*D);
+    };
+    for(int i=0;i<WARMUP;i++){ step(); } CHECK(cudaStreamSynchronize(s));
+    auto t0=std::chrono::high_resolution_clock::now();
+    for(int i=0;i<STEPS;i++){ step(); }
+    CHECK(cudaStreamSynchronize(s));
+    auto t1=std::chrono::high_resolution_clock::now();
+    double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
+    double tok=(double)STEPS*N;
+    printf("C++/CUDA: %d steps, %.2f ms, %.1f us/step, %.1f tok/s\n", STEPS, ms, ms*1000.0/STEPS, tok/(ms/1000.0));
+    return 0;
+}
