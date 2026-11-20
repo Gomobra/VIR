@@ -102,7 +102,7 @@ class Net(nn.Module):
         super().__init__()
         s.tok=nn.Embedding(V,D); s.pos=nn.Embedding(SEQLEN,D)
         s.blocks=nn.ModuleList([Blk() for _ in range(LAYERS)]); s.ln=nn.LayerNorm(D)
-        s.heads=nn.ModuleList([nn.Linear(D,V,bias=False) for _ in range(LEVELS)])
+        s.heads=nn.ModuleList([nn.Linear(D,V,bias=False) for _ in range(len(LEVELS))])
     def forward(s,idx):
         T=idx.size(1); x=s.tok(idx)+s.pos(torch.arange(T,device=idx.device))[None]
         mask=torch.triu(torch.full((T,T),float('-inf'),device=idx.device),1)
