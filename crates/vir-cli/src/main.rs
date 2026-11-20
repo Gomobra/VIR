@@ -2,7 +2,6 @@
 //!
 //! Setiap subperintah hanya memanggil pustaka; tidak ada logika bisnis di sini.
 
-mod backend;
 mod cmd_eval;
 mod cmd_generate;
 mod cmd_make_shard;

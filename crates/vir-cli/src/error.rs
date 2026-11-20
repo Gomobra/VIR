@@ -7,8 +7,6 @@ use std::fmt;
 pub(crate) enum CliError {
     /// Pesan bebas (argumen, IO, MFS, model).
     Message(String),
-    /// Backend berat tidak tersedia di build ini.
-    Backend(crate::backend::BackendUnavailable),
 }
 
 impl CliError {
@@ -22,7 +20,6 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Message(message) => write!(f, "{message}"),
-            Self::Backend(backend) => write!(f, "{backend}"),
         }
     }
 }
