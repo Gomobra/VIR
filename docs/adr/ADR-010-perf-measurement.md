@@ -182,6 +182,18 @@ lintas param 2D se-bentuk (`crates/vir-train/src/batched_muon.rs`, two-pass:
 (fp32 & fp16, model VIR sama, T4 sama) — vir **1.11–1.14× PyTorch VIR**. Gabungan:
 batched Newton-Schulz Muon (terobosan) + gabung QKV/gate_up + W0/W1/B6.
 
+## Matriks skala (vir vs PyTorch VIR @ batch, T4, warmup 3, 30 langkah)
+
+| batch | vir tok/s | PyTorch VIR tok/s | ratio |
+|---|---|---|---|
+| 64  | 15 518 | 15 208 | **1.020×** |
+| 256 | 53 699 | 61 904 | 0.867× |
+| 1024| 64 781 | 132 664 | 0.488× |
+
+**Rasio TERBAIK ~1.02× (b64), TURUN di batch besar** (compute-bound → cuBLAS TF32
+> CubeCL). **vir plateau ~15% PyTorch** di compute-bound. → objective "2–5× di atas
+PyTorch" untuk TRAINING tidak tercapai; ceiling = overhead dispatch Burn + CubeCL 0.77× cuBLAS.
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
   adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
