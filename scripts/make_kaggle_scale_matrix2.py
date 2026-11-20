@@ -86,28 +86,81 @@ for b in BATCHES:
 
 code("""import torch, torch.nn as nn
 torch.backends.cuda.matmul.allow_tf32 = True
-DEV='cuda'; D, HH, LAYERS, V = 64, 4, 6, 512
-LEVELS = [2, 4, 8, 16, 32]
+DEV='cuda'
+D=64; HH=4; LEVELS=[2,4,8,16,32]; K=len(LEVELS); CB=256; V=512
+PRELUDE=1; CORE=2; CODA=1; LOOPS=2
+
+def rope_tables(t, hd, device):
+    inv=1.0/(10000.0**(torch.arange(0,hd,2,device=device).float()/hd))
+    ang=torch.outer(torch.arange(t,device=device).float(),inv)
+    return torch.cat([ang.cos(),ang.cos()],-1), torch.cat([ang.sin(),ang.sin()],-1)
+
+def apply_rope(x,cos,sin):
+    hd=x.size(-1); x1=x[...,:hd//2]; x2=x[...,hd//2:]
+    return x*cos[None,None] + torch.cat([-x2,x1],-1)*sin[None,None]
+
+class RMSNorm(nn.Module):
+    def __init__(s,d,eps=1e-6):
+        super().__init__(); s.w=nn.Parameter(torch.ones(d)); s.eps=eps
+    def forward(s,x):
+        return x*torch.rsqrt(x.pow(2).mean(-1,keepdim=True)+s.eps)*s.w
 
 class Blk(nn.Module):
     def __init__(s):
         super().__init__()
-        s.ln1=nn.LayerNorm(D); s.attn=nn.MultiheadAttention(D,HH,batch_first=True); s.ln2=nn.LayerNorm(D)
-        s.mlp=nn.Sequential(nn.Linear(D,4*D), nn.GELU(), nn.Linear(4*D,D))
-    def forward(s,x,mask):
-        a,_=s.attn(x,x,x,attn_mask=mask,need_weights=False); x=s.ln1(x+a); return s.ln2(x+s.mlp(x))
+        s.ln1=RMSNorm(D)
+        s.wq=nn.Linear(D,D,bias=False); s.wk=nn.Linear(D,D,bias=False)
+        s.wv=nn.Linear(D,D,bias=False); s.wo=nn.Linear(D,D,bias=False)
+        s.ln2=RMSNorm(D)
+        hid=(D*4//3*2//8)*8
+        s.wg=nn.Linear(D,hid,bias=False); s.wu=nn.Linear(D,hid,bias=False); s.wd=nn.Linear(hid,D,bias=False)
+    def forward(s,x):
+        b,t,_=x.shape; hd=D//HH
+        xn=s.ln1(x)
+        q=s.wq(xn).view(b,t,HH,hd).transpose(1,2)
+        k=s.wk(xn).view(b,t,HH,hd).transpose(1,2)
+        v=s.wv(xn).view(b,t,HH,hd).transpose(1,2)
+        cos,sin=rope_tables(t,hd,x.device)
+        q=apply_rope(q,cos,sin); k=apply_rope(k,cos,sin)
+        o=F.scaled_dot_product_attention(q,k,v,is_causal=True)
+        o=o.transpose(1,2).reshape(b,t,D)
+        x=x+s.wo(o)
+        xn2=s.ln2(x)
+        x=x+s.wd(F.silu(s.wg(xn2))*s.wu(xn2))
+        return x
 
-class Net(nn.Module):
+class VIR(nn.Module):
     def __init__(s):
         super().__init__()
-        s.tok=nn.Embedding(V,D); s.pos=nn.Embedding(SEQLEN,D)
-        s.blocks=nn.ModuleList([Blk() for _ in range(LAYERS)]); s.ln=nn.LayerNorm(D)
-        s.heads=nn.ModuleList([nn.Linear(D,V,bias=False) for _ in range(len(LEVELS))])
+        s.embed=nn.Embedding(V,D)
+        s.prelude=nn.ModuleList([Blk() for _ in range(PRELUDE)])
+        s.core=nn.ModuleList([Blk() for _ in range(CORE)])
+        s.coda=nn.ModuleList([Blk() for _ in range(CODA)])
+        s.adapter=nn.Linear(2*D,D,bias=False)
+        s.level_in=nn.ModuleList([nn.Linear(D,D,bias=False) for _ in range(K)])
+        s.codes=nn.ParameterList([nn.Parameter(torch.randn(CB,D)*0.02) for _ in range(K)])
+        s.heads=nn.ModuleList([nn.Linear(D,V,bias=False) for _ in range(K)])
+    def encode(s,z):
+        res=z
+        for k in range(K):
+            idx=torch.cdist(res.reshape(-1,D), s.codes[k]).argmin(-1)
+            res=res-s.codes[k][idx].view_as(res)
+    def recurrent(s,e):
+        x=e
+        for blk in s.prelude: x=blk(x)
+        for _ in range(max(1,LOOPS)):
+            inj=s.adapter(torch.cat([x,e],-1)); x=x+inj
+            for blk in s.core: x=blk(x)
+        for blk in s.coda: x=blk(x)
+        return x
     def forward(s,idx):
-        T=idx.size(1); x=s.tok(idx)+s.pos(torch.arange(T,device=idx.device))[None]
-        mask=torch.triu(torch.full((T,T),float('-inf'),device=idx.device),1)
-        for b in s.blocks: x=b(x,mask)
-        x=s.ln(x); return [h(x) for h in s.heads]
+        z=s.embed(idx).detach(); s.encode(z)
+        out=[]
+        for k in range(K):
+            L=LEVELS[k]
+            feat=s.recurrent(s.level_in[k](z[:, :L, :]))
+            out.append(s.heads[k](feat))
+        return out
 
 def newton_schulz(G, steps=5):
     X=G/(G.norm()+1e-7); tr=X.size(0)>X.size(1)
@@ -126,7 +179,7 @@ class Muon:
             buf.mul_(s.mom).add_(p.grad); p.add_(newton_schulz(buf), alpha=-s.lr)
 
 def bench_pt(batch, timeout=1200):
-    torch.manual_seed(0); m=Net().to(DEV)
+    torch.manual_seed(0); m=VIR().to(DEV)
     ps2=[p for p in m.parameters() if p.ndim==2]; ps1=[p for p in m.parameters() if p.ndim!=2]
     om=Muon(ps2); oa=torch.optim.AdamW(ps1,lr=1e-3)
     def one():
@@ -134,7 +187,7 @@ def bench_pt(batch, timeout=1200):
         oa.zero_grad(set_to_none=True)
         for p in ps2: p.grad=None
         logits=m(idx)
-        loss=sum(nn.functional.cross_entropy(lg.reshape(-1,V), tgt[:, :LEVELS[k]].reshape(-1)) for k,lg in enumerate(logits))/LEVELS
+        loss=sum(nn.functional.cross_entropy(lg.reshape(-1,V), tgt[:, :LEVELS[k]].reshape(-1)) for k,lg in enumerate(logits))/K
         loss.backward(); om.step(); oa.step()
     for _ in range(3): one()
     torch.cuda.synchronize(); t0=time.time()
