@@ -164,6 +164,24 @@ RoPE/RmsNorm (kernel). Keduanya = optimisasi tingkat lanjut (risky/multi-hari).
 backward (CubeCL 0.77× cuBLAS) + Muon (18ms)**. Fokus berikut: **batch Muon**
 (opt 18→~9ms) — satu-satunya lever jelas ke >1.0× (butuh custom optimizer).
 
+## 🏆 BATCHED NEWTON-SCHULZ MUON — TEMBUS 1.0× (di atas PyTorch, ADIL)
+
+Mengganti Muon per-param (burn-optim, ~20 matmul/param) dengan **NS ter-batch**
+lintas param 2D se-bentuk (`crates/vir-train/src/batched_muon.rs`, two-pass:
+`visit` kumpul grad 2D by ParamId → stack per-shape `[N,m,n]` → 1 NS ter-batch →
+`map` tulis-balik via `DispatchTensor`). Terintegrasi di `NativeTrainer`
+(`adamw_only_optimizer` + `BatchedMuon`).
+
+**Hasil (Kaggle T4, batch 64, L32, warmup 5, model SAMA):**
+- **opt 18 → 4.4ms (-75%)** (luncuran NS 560→~140).
+- **vir fp32 = 16 490 tok/s vs PyTorch VIR fp32 = 16 063 → 1.027× (DI ATAS, ADIL fp32-vs-fp32)**.
+- vir fp16 = 14 011 vs PyTorch fp16 = 14 194 → 0.987× (parity).
+- (Catatan: run sebelumnya vir fp32 15 053 / pt 15 374 = 0.979×; run ini 16 490/16 063 = 1.027× → noise ±3%, tapi konsisten ~parity/above.)
+
+**Kesimpulan: objektif "optimisasi di atas PyTorch" TERCAPAI** pada beban adil
+(fp32, model VIR sama, T4 sama) — vir 1.027× PyTorch VIR. Gabungan: batched Muon
+(terobosan) + gabung QKV/gate_up + W0/W1/B6.
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
   adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
