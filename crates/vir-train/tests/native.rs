@@ -103,3 +103,29 @@ fn resume_identik_antara_jalan_penuh_vs_resume() {
     t2.run_steps(2).expect("2 langkah");
     assert_eq!(t2.tokens_per_sec().is_finite(), true);
 }
+
+#[test]
+fn native_training_loss_menurun() {
+    // Kualitas training nyata (R1): overfit pola berulang → loss harus TURUN.
+    // Membuktikan batched Muon + AdamW benar-benar belajar, bukan sekadar cepat.
+    let p = std::env::temp_dir().join(format!("vir-native-pat-{}", std::process::id()));
+    let toks: Vec<u32> = (0..6000).map(|i| (i % 4) as u32).collect();
+    vir_data::write_shard(&p, &toks).expect("shard");
+    let src = || ShardBatchSource::from_shard(&p, 8, 4, 5, false).expect("source");
+    let dir = std::env::temp_dir().join(format!("vir-native-train-{}", std::process::id()));
+    let mut trainer =
+        NativeTrainer::new(cfg(), src(), Default::default(), Stage::Generator).expect("rakit");
+    trainer.open(dir.to_str().expect("dir")).expect("open");
+    trainer.run_steps(10).expect("10 langkah");
+    let early = trainer.outcome(false).loss;
+    trainer.run_steps(120).expect("120 langkah");
+    let late = trainer.outcome(false).loss;
+    assert!(
+        early.is_finite() && late.is_finite(),
+        "loss finite: {early}/{late}"
+    );
+    assert!(
+        late < early,
+        "loss harus turun saat belajar pola: {early} -> {late}"
+    );
+}
