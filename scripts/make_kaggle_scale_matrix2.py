@@ -84,7 +84,7 @@ res = {}
 for b in BATCHES:
     res[f'vir_{b}'] = run_vir(b); P('VIR', json.dumps(res[f'vir_{b}']))""")
 
-code("""import torch, torch.nn as nn
+code("""import torch, torch.nn as nn, torch.nn.functional as F
 torch.backends.cuda.matmul.allow_tf32 = True
 DEV='cuda'
 D=64; HH=4; LEVELS=[2,4,8,16,32]; K=len(LEVELS); CB=256; V=512
