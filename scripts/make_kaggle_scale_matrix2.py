@@ -86,7 +86,8 @@ for b in BATCHES:
 
 code("""import torch, torch.nn as nn
 torch.backends.cuda.matmul.allow_tf32 = True
-DEV='cuda'; D, HH, LAYERS, V, LEVELS = 64, 4, 6, 512, 5
+DEV='cuda'; D, HH, LAYERS, V = 64, 4, 6, 512
+LEVELS = [2, 4, 8, 16, 32]
 
 class Blk(nn.Module):
     def __init__(s):
