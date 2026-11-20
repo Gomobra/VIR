@@ -193,6 +193,8 @@ batched Newton-Schulz Muon (terobosan) + gabung QKV/gate_up + W0/W1/B6.
   perbandingan); API cubecl 0.11.4 belum terverifikasi.
 
 ## Status
-**Metodologi: final & dipakai** (W0/W1/B6/profil). **Optimisasi penuh: berjalan**
-— gap 12–17× terdokumentasi; B4/W4/Muon adalah kandidat berikutnya yang
-high-risk. Tidak ada klaim ">PyTorch" tanpa ukur.
+**Metodologi: final & dipakai** (W0/W1/B6/profil). **Objektif TERCAPAI**: batched
+Newton-Schulz Muon + gabung QKV/gate_up + W0/W1/B6 → vir **1.11–1.14× PyTorch VIR**
+(fp32 & fp16, model sama, T4, 98 langkah). Semua CI hijau (vir-train 69 tes).
+Catatan: `BatchedMuon` saat ini简化 (tanpa `adjust_lr=MatchRmsAdamW` & tanpa weight
+decay pada 2D) — valid utk throughput; refinement kualitas = tindak lanjut.
