@@ -116,9 +116,9 @@ class Muon:
             if p.grad is None: continue
             buf.mul_(s.mom).add_(p.grad); p.add_(newton_schulz(buf), alpha=-s.lr)
 
-def bench(use_bf16, use_compile, tag):
+def bench(use_bf16, compile_mode, tag):
     torch.manual_seed(0); m=VIR().to(DEV)
-    if use_compile: m=torch.compile(m)
+    if compile_mode: m=torch.compile(m, mode=compile_mode)
     ps2=[p for p in m.parameters() if p.ndim==2]; ps1=[p for p in m.parameters() if p.ndim!=2]
     om=Muon(ps2); oa=torch.optim.AdamW(ps1,lr=1e-3)
     tgt=torch.randint(0,VOCAB,(BATCH,SEQLEN),device=DEV)
@@ -136,10 +136,11 @@ def bench(use_bf16, use_compile, tag):
     torch.cuda.synchronize(); dt=round(time.time()-t0,2)
     return {'tag':tag,'dt_s':dt,'tok_s':round((STEPS-WARMUP)*BATCH*SEQLEN/dt,1) if dt>0 else 0.0}
 
-res={}
-res['pt_eager']=bench(False,False,'eager_fp32'); print('EAGER', res['pt_eager'])
-res['pt_compile']=bench(False,True,'compile_fp32'); print('COMPILE', res['pt_compile'])
-res['pt_compile_bf16']=bench(True,True,'compile_bf16'); print('COMPILE_BF16', res['pt_compile_bf16'])
+res = {}
+res['pt_eager']=bench(False,None,'eager_fp32'); print('EAGER', res['pt_eager'])
+res['pt_compile']=bench(False,"default",'compile_fp32'); print('COMPILE', res['pt_compile'])
+res['pt_compile_ro']=bench(False,"reduce-overhead",'compile_ro'); print('COMPILE_RO', res['pt_compile_ro'])
+res['pt_compile_bf16']=bench(True,"default",'compile_bf16'); print('COMPILE_BF16', res['pt_compile_bf16'])
 open('/kaggle/working/result.json','w').write(json.dumps(res, indent=2))
 print('DONE')""")
 
