@@ -1,5 +1,6 @@
 // Proof-of-concept: training loop C++/CUDA murni (cuBLAS) utk MLP 2-layer.
-// Bobot row-major: W1[H,D], b1[H], W2[D,H], b2[D] (seperti nn.Linear [out,in]).
+// Bobot disimpan TRANSPOSED [in,out] -> matmul standar (leading-dim valid).
+//   W1[D,H], b1[H], W2[H,D], b2[D]
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cstdio>
@@ -33,22 +34,23 @@ int main(){
     const int B=64, L=32, D=64, H=256, N=B*L;
     const int STEPS=200, WARMUP=20;
     cublasHandle_t h; CK(cublasCreate(&h));
+    cublasSetPointerMode(h, CUBLAS_POINTER_MODE_HOST);
     const float alpha=1.0f, beta=0.0f, lr=1e-3f;
-    // row-major: W1[H,D], b1[H], W2[D,H], b2[D]
-    std::vector<float> hW1(H*D), hb1(H), hW2(D*H), hb2(D);
+    // row-major, transposed: W1[D,H], b1[H], W2[H,D], b2[D]
+    std::vector<float> hW1(D*H), hb1(H), hW2(H*D), hb2(D);
     srand(0);
     for(auto&v:hW1) v=((rand()%1000)/1000.0f-0.5f)*0.1f;
     for(auto&v:hb1) v=0.0f;
     for(auto&v:hW2) v=((rand()%1000)/1000.0f-0.5f)*0.1f;
     for(auto&v:hb2) v=0.0f;
     float *dW1,*db1,*dW2,*db2,*gW1,*gb1,*gW2,*gb2;
-    CHECK(cudaMalloc(&dW1,sizeof(float)*H*D)); CHECK(cudaMalloc(&db1,sizeof(float)*H));
-    CHECK(cudaMalloc(&dW2,sizeof(float)*D*H)); CHECK(cudaMalloc(&db2,sizeof(float)*D));
-    CHECK(cudaMalloc(&gW1,sizeof(float)*H*D)); CHECK(cudaMalloc(&gb1,sizeof(float)*H));
-    CHECK(cudaMalloc(&gW2,sizeof(float)*D*H)); CHECK(cudaMalloc(&gb2,sizeof(float)*D));
-    CHECK(cudaMemcpy(dW1,hW1.data(),sizeof(float)*H*D,cudaMemcpyHostToDevice));
+    CHECK(cudaMalloc(&dW1,sizeof(float)*D*H)); CHECK(cudaMalloc(&db1,sizeof(float)*H));
+    CHECK(cudaMalloc(&dW2,sizeof(float)*H*D)); CHECK(cudaMalloc(&db2,sizeof(float)*D));
+    CHECK(cudaMalloc(&gW1,sizeof(float)*D*H)); CHECK(cudaMalloc(&gb1,sizeof(float)*H));
+    CHECK(cudaMalloc(&gW2,sizeof(float)*H*D)); CHECK(cudaMalloc(&gb2,sizeof(float)*D));
+    CHECK(cudaMemcpy(dW1,hW1.data(),sizeof(float)*D*H,cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(db1,hb1.data(),sizeof(float)*H,cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(dW2,hW2.data(),sizeof(float)*D*H,cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(dW2,hW2.data(),sizeof(float)*H*D,cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(db2,hb2.data(),sizeof(float)*D,cudaMemcpyHostToDevice));
     float *X,*Z1,*A1,*dZ1,*dA1,*Y,*dY,*T;
     CHECK(cudaMalloc(&X,sizeof(float)*N*D)); CHECK(cudaMalloc(&Z1,sizeof(float)*N*H));
@@ -63,27 +65,24 @@ int main(){
     cudaStream_t s; CHECK(cudaStreamCreate(&s)); cublasSetStream(h,s);
     int th=256; int bH=(N*H+th-1)/th; int bD=(N*D+th-1)/th;
 
-    // Row-major C[M,N]=A[M,K]@B[K,N]  -> cublasSgemm(OP_N,OP_N, N,M,K, alpha, B,K, A,K, beta, C,N)
-    // C[M,N]=A[M,K]@B^T[K... ] (B[N,K]) -> cublasSgemm(OP_N,OP_T, N,M,K, alpha, A,K, B,K, beta, C,N)
+    // Row-major C=A@B: cublasSgemm(OP_N,OP_N, n,m,k, alpha, B,n, A,k, beta, C,n)
     auto step = [&](){
-        // Row-major: C=A@B^T -> cublasSgemm(OP_N,OP_T, M,N,K, A,K, B,K, C,N)
-        //            C=A@B   -> cublasSgemm(OP_N,OP_N, N,M,K, B,K, A,K, C,N)
-        //            C=A^T@B -> cublasSgemm(OP_T,OP_N, M,N,K, A,K, B,K, C,M? ) ; ldc=N
+        // Row-major C=A@B^T: cublasSgemm(OP_T,OP_T, n,m,k, A,k, B,k, C,m?) ; ldc=row stride
         // Z1[N,H] = X[N,D] @ W1^T[H,D]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, H, D, &alpha, X, D, dW1, D, &beta, Z1, H));
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, H, D, &alpha, X, D, dW1, D, &beta, Z1, H));
         gelu_fwd<<<bH,th,0,s>>>(Z1, A1, N*H);
         // Y[N,D] = A1[N,H] @ W2^T[D,H]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, N, D, H, &alpha, A1, H, dW2, H, &beta, Y, D));
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, D, H, &alpha, A1, H, dW2, H, &beta, Y, D));
         mse_grad<<<bD,th,0,s>>>(Y, T, dY, N*D);
-        // dA1[N,H] = dY[N,D] @ W2[D,H]
-        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, H, N, D, &alpha, dW2, D, dY, D, &beta, dA1, H));
+        // dA1[N,H] = dY[N,D] @ W2^T
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, H, D, &alpha, dY, D, dW2, D, &beta, dA1, H));
         gelu_bwd<<<bH,th,0,s>>>(Z1, dA1, dZ1, N*H);
-        // dW2[D,H] = dY^T[N,D] @ A1[N,H]
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, D, H, N, &alpha, dY, D, A1, H, &beta, gW2, H));
-        // dW1[H,D] = dZ1^T[N,H] @ X[N,D]
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, H, D, N, &alpha, dZ1, H, X, D, &beta, gW1, D));
-        sgd<<<bH,th,0,s>>>(dW1, gW1, lr, H*D);
-        sgd<<<bH,th,0,s>>>(dW2, gW2, lr, D*H);
+        // dW2[H,D] = A1^T @ dY
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, H, D, N, &alpha, A1, H, dY, D, &beta, gW2, D));
+        // dW1[D,H] = X^T @ dZ1
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, D, H, N, &alpha, X, D, dZ1, H, &beta, gW1, D));
+        sgd<<<bH,th,0,s>>>(dW1, gW1, lr, D*H);
+        sgd<<<bH,th,0,s>>>(dW2, gW2, lr, H*D);
     };
     for(int i=0;i<WARMUP;i++){ step(); } CHECK(cudaStreamSynchronize(s));
     auto t0=std::chrono::high_resolution_clock::now();
