@@ -194,6 +194,20 @@ batched Newton-Schulz Muon (terobosan) + gabung QKV/gate_up + W0/W1/B6.
 > CubeCL). **vir plateau ~15% PyTorch** di compute-bound. → objective "2–5× di atas
 PyTorch" untuk TRAINING tidak tercapai; ceiling = overhead dispatch Burn + CubeCL 0.77× cuBLAS.
 
+## Inferensi (vir generate NCM vs PyTorch AR) — TERUKUR, di bawah PyTorch
+
+Notebook `vir-kaggle-gen`: latih mini → `vir generate` (NCM paralel) vs PyTorch AR
+(no-cache, KV-less). T4, batch 1, L=32.
+
+| | tok/s | catatan |
+|---|---|---|
+| vir generate (NCM) | 3.6 | 17.2s (compile langkah-1 dominasi) |
+| PyTorch AR (no-cache) | 400 | 0.08s/generate |
+
+**vir generate ±100× lebih lambat** (compile-dominated; steady-state ~0.1×). NCM
+paralel (5 forward) kalah karena dispatch Burn + lebih banyak kerja/token. **Inferensi
+juga di bawah PyTorch** → "above PyTorch" tak tercapai di training maupun inferensi.
+
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
   adalah backend yang *merekam graph untuk ekspor* (ONNX), bukan CUDA graph
