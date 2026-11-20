@@ -187,7 +187,7 @@ class Muon:
             buf.mul_(s.mom).add_(p.grad)
             p.add_(newton_schulz(buf), alpha=-s.lr)
 
-def bench_pt():
+def bench_pt(use_fp16=False):
     torch.manual_seed(0)
     m=VIR().to(DEV)
     ps2=[p for p in m.parameters() if p.ndim==2]
@@ -198,9 +198,10 @@ def bench_pt():
         idx=torch.randint(0,VOCAB,(BATCH,SEQLEN),device=DEV)
         opt_a.zero_grad(set_to_none=True)
         for p in ps2: p.grad=None
-        logits=m(idx)
-        loss=sum(F.cross_entropy(lg.reshape(-1,VOCAB), tgt[:, :LEVELS[k]].reshape(-1))
-                 for k,lg in enumerate(logits))/K
+        with torch.autocast('cuda', dtype=torch.float16, enabled=use_fp16):
+            logits=m(idx)
+            loss=sum(F.cross_entropy(lg.reshape(-1,VOCAB), tgt[:, :LEVELS[k]].reshape(-1))
+                     for k,lg in enumerate(logits))/K
         loss.backward(); opt_m.step(); opt_a.step()
         return float(loss)
     for _ in range(WARMUP): one()
@@ -208,13 +209,14 @@ def bench_pt():
     for _ in range(STEPS-WARMUP): last=one()
     torch.cuda.synchronize(); dt=round(time.time()-t0,2)
     return {'tok_s': round((STEPS-WARMUP)*BATCH*SEQLEN/dt,1) if dt>0 else 0.0,
-            'dt_s': dt, 'loss': round(last,4)}
+            'dt_s': dt, 'precision': 'fp16' if use_fp16 else 'fp32', 'loss': round(last,4)}
 
-res['pt_vir'] = bench_pt(); P('PT_VIR', json.dumps(res['pt_vir']))
+res['pt_vir'] = bench_pt(False); P('PT_VIR', json.dumps(res['pt_vir']))
+res['pt_vir_fp16'] = bench_pt(True); P('PT_VIR_FP16', json.dumps(res['pt_vir_fp16']))
 open('/kaggle/working/result.json','w').write(json.dumps(res, indent=2))
-for vk in ('vir_fp32','vir_fp16'):
-    v=res[vk]['tok_s']; p=res['pt_vir']['tok_s']
-    if v>0 and p>0: P(f'ratio {vk}/pt_vir', round(v/p,3), 'x')
+for vk, pk in (('vir_fp32','pt_vir'), ('vir_fp16','pt_vir_fp16'), ('vir_fp16','pt_vir')):
+    v=res[vk]['tok_s']; p=res[pk]['tok_s']
+    if v>0 and p>0: P(f'ratio {vk}/{pk}', round(v/p,3), 'x')
 P('DONE'); LOG.close()""")
 
 nb = {"cells": CELLS,
