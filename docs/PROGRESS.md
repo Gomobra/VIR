@@ -103,6 +103,15 @@ di riwayat commit; lihat `gh run list`.
 
 ## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
 
+- **C++/CUDA murni (vir-kaggle-mlpb, F2.5.c) — 2.85× PyTorch (bukti mesin sendiri):**
+  `scripts/cuda_spike/mlp_train.cu` (MLP 2-layer, cuBLAS + kernel CUDA, forward+
+  backward+SGD manual) vs PyTorch MLP identik. **HASIL (nyata, T4, b64, L32, 500
+  langkah):** C++/CUDA **6 194 783 tok/s (330.6 µs/step)** vs PyTorch eager
+  **2 176 124 tok/s (941.1 µs/step)** = **2.85× DI ATAS PyTorch** (compile-ro
+  1 790 086 = 3.46×); numerik valid (`finite=1`). **Reproducible** (v6 200-ls = 3.59×).
+  **Akar:** overhead dispatch Python (~7-8 kernel × ~100µs) dihilangkan. **Menbukti
+  mesin C++/CUDA murni > PyTorch pada training loop nyata (bukan single matmul).**
+  Cakupan: MLP mini (bukan VIR penuh); port VIR penuh = proyek framework-level.
 - **G2 (vir-kaggle-g2-cuda)**: build vir-vq CUDA + test → `build_rc 0, test_rc 0`, ~19 mnt.
 - **G3 (vir-kaggle-g3)**: build vir-train CUDA (Burn 0.22.1) + test → 5 tes lulus, ~17 mnt.
 - **DDP multi-GPU (vir-kaggle-ddp-matrix, F2.5.e)**: build `vir-cli` CUDA sekali (18 mnt) + `vir make-shard` (68k token, config mini dim64 K5 L32) + `vir train --world 1` & `--world 2` (DDP 2×T4). **HASIL (nyata):** world=1 `rc 0, 20 steps, 84.6s`; world=2 `rc 0, 20 steps, 100.2s` — keduanya `{"status":"ok"}`. **Multi-GPU DDP terbukti jalan di 2×T4.** Bug ditemukan & diperbaiki via Kaggle (R2): DevicePool::detect into_vec, vir train cfg.total_len() + warmup proporsional, make-shard, config mini (default NCM penuh timeout krn autotune kernel + berat). Cache `vir-bin.tar.gz` (50MB) disimpan utk reuse (build berikutnya ~0).

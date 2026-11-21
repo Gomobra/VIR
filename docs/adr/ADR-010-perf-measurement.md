@@ -224,3 +224,32 @@ Newton-Schulz Muon + gabung QKV/gate_up + W0/W1/B6 → vir **1.11–1.14× PyTor
 (fp32 & fp16, model sama, T4, 98 langkah). Semua CI hijau (vir-train 69 tes).
 Catatan: `BatchedMuon` saat ini简化 (tanpa `adjust_lr=MatchRmsAdamW` & tanpa weight
 decay pada 2D) — valid utk throughput; refinement kualitas = tindak lanjut.
+
+## C++/CUDA murni (mesin sendiri, BUKAN PyTorch) — 2.85× PyTorch (bukti konsep)
+
+Notebook `vir-kaggle-mlpb` + `scripts/cuda_spike/mlp_train.cu`: training loop MLP
+2-layer (D64→H256→D64, GELU, MSE, SGD) **C++/CUDA murni** (cuBLAS `Sgemm` +
+kernel CUDA elementwise), forward+backward+update manual. T4, batch 64, L32,
+warmup 20, 500 langkah terukur. Pembanding: PyTorch MLP identik (eager & compile).
+
+| Engine | µs/step | tok/s | vs PyTorch eager |
+|---|---|---|---|
+| PyTorch eager | 941.1 | 2 176 124 | 1.00× |
+| PyTorch compile (reduce-overhead) | 1144.1 | 1 790 086 | 0.82× |
+| **C++/CUDA murni (cuBLAS)** | **330.6** | **6 194 783** | **2.85×** ✅ |
+
+- **Reproducible** (v6 200-langkah = 3.59×; v7 500-langkah = 2.85×), numerik
+  valid (`finite=1`, W1/A1/W2 ter-update nyata — bukan throughput palsu).
+- **Mengalahkan PyTorch eager 2.85×** (compile-ro 3.46×) pada **training loop nyata**
+  (forward+backward+SGD penuh) — **bukan** single matmul (yang hanya 1.24×).
+- **Akar**: overhead dispatch Python (~7–8 kernel × ~100µs) dihilangkan. C++ = 6
+  gemm + 5 kernel elementwise @ ~330µs; PyTorch = ~941µs (dispatch-bound).
+- **Anomali compile-ro**: `mode="reduce-overhead"` + SGD + `zero_grad` pada model
+  mini → graph replay overhead > kernel gain (compile-ro 0.82× eager). Pada VIR
+  penuh (lebih besar) compile-ro unggul (57k vs 16k, lihat ADR-010 bagian PyTorch).
+
+**Kejujuran cakupan:** ini MLP 2-layer (beban mini), **bukan VIR penuh** (5-level
+multiscale + recurrent + Muon). Membuktikan **mesin C++/CUDA murni bisa > PyTorch
+pada training** (2–5× tercapai), tapi port VIR penuh ke C++/CUDA = proyek framework-
+level (multi-hari). complements: vir (Burn) = 0.95–1.14× PyTorch VIR (framework gap);
+C++/CUDA = 2.85× (dispatch overhead hilang) pada MLP.
