@@ -76,7 +76,8 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         .generate(None, &sampler)
         .map_err(|e| CliError::other(format!("generate: {e}")))?;
     let dt = t0.elapsed().as_secs_f64();
-    let ntok = out.positions;
+    // `positions` = token per sampel (Σℓ_k); total = batch × positions.
+    let ntok = out.batch * out.positions;
     let tok_s = if dt > 0.0 { ntok as f64 / dt } else { 0.0 };
 
     // 4. Laporan.
