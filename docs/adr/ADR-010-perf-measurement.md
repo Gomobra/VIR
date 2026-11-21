@@ -238,7 +238,8 @@ dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 | Axis | Hasil | vs PyTorch | 2–5×? |
 |---|---|---|---|
 | **Inferensi NCM (vir generate)** | 1 093–38 111 tok/s | **2.8–3.95×** | ✅ |
-| **Training C++/CUDA 6-Block + Muon** | ~3–4.6× PyTorch eager | **3.85–4.56×** (2.8–3.5× compile-ro) | ✅ (6 blok + Muon, bukan full VIR) |
+| **Training C++/CUDA FULL VIR (VQ+6blk+5head+Muon)** | 3.44× PyTorch eager | **3.44×** (2.43× compile-ro) | ✅ (FULL VIR!) |
+| **Training C++/CUDA 6-Block + Muon** | ~3–4.6× PyTorch eager | **3.85–4.56×** (2.8–3.5× compile-ro) | ✅ (6 blok + Muon) |
 | **Training C++/CUDA 6-Block (recurrent depth)** | 3.11× PyTorch eager | **3.11×** (1.08× compile-ro) | ✅ (6 blok) |
 | **Training C++/CUDA 1-Block (blok VIR)** | 2.96× PyTorch eager | **2.96×** (1.76× compile-ro) | ✅ (blok) |
 | Training C++/CUDA murni (MLP PoC) | 2.85× PyTorch eager | 2.85× | ✅ (bukan VIR) |
@@ -247,14 +248,13 @@ dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 
 **Kesimpulan:**
 - **Inferensi: objective TERCAPAI** — NCM parallel decode VIR **2.8–3.95× di atas
-  PyTorch AR** (no-cache & KV-cache, batch 1 & 32, steady-state). Keunggulan arsitektur
-  non-AR; sebelumnya tersembunyi oleh cold-start (kompilasi kernel langkah-1).
-- **Training (blok VIR asli): 2.96× PyTorch eager** — C++/CUDA transformer block
-  (RMSNorm + causal attention + SwiGLU) mengalahkan PyTorch eager ~3×, compile-ro 1.76×.
-  **Full VIR** (5-level multiscale + recurrent + VQ + Muon) = lanjutan (menumpuk blok +
-  multiscale head + VQ + Muon, multi-hari).
+  PyTorch AR** (no-cache & KV-cache, batch 1 & 32, steady-state).
+- **Training: objective TERCAPAI (C++/CUDA full VIR)** — **FULL VIR** (VQ encode + 6-block
+  recurrent + 5-level multiscale heads + Muon) di C++/CUDA = **3.44× PyTorch eager, 2.43×
+  compile-ro**. Semua komponen VIR (VQ + multiscale + recurrent + Muon) tercakup.
 - **Training vir (Burn): ~1×** — framework gap (dispatch autodiff + CubeCL 0.77× cuBLAS),
-  tak bisa 2–5× tanpa ganti engine (C++/CUDA).
+  tak bisa 2–5× tanpa ganti engine (C++/CUDA). **Objective "di atas PyTorch" tercapai via
+  engine C++/CUDA** (bukan Burn).
 
 **Metodologi: final & dipakai** (W0/W1/B6/profil + warmup). Semua CI hijau.
 Catatan: `BatchedMuon` saat ini简化 (tanpa `adjust_lr=MatchRmsAdamW` & tanpa weight
@@ -370,3 +370,27 @@ Forward+backward+update manual. T4, N=2048, warmup 20, 500 langkah.
 
 **Status:** 6-blok + Muon = **~3–4.6× PyTorch eager** ✅. **Full VIR** (multiscale 5-head +
 VQ encode) = lanjutan.
+
+## C++/CUDA FULL VIR (VQ + 6-block + 5-level multiscale heads + Muon) — 3.44× eager / 2.43× compile-ro
+
+Notebook `vir-kaggle-vb` + `scripts/cuda_spike/transformer_vir.cu`: **VIR lengkap** —
+(1) **VQ encode** multiscale residual (5 codebook tetap, argmin + subtract), (2) **6-block
+recurrent** (RMSNorm+attn+SwiGLU), (3) **5-level multiscale heads** (head_k pada ℓ_k slice
+[2,4,8,16,32]), (4) **CE loss**, (5) **Muon** (2D blok) + SGD (head/1D). T4, N=2048, 500 langkah.
+
+| Engine | µs/step | tok/s | vs PyTorch eager |
+|---|---|---|---|
+| PyTorch VIR eager | 50 902 | 40 233 | 1.00× |
+| PyTorch VIR compile (reduce-overhead) | 35 872 | 57 091 | 0.71× |
+| **C++/CUDA VIR (full)** | **14 787** | **138 501** | **3.44×** ✅ |
+
+- **Stabil**: `finite=1`, `Xnorm=0.07` (hidden wajar). Loss C++ = **sum** (24 740 ≈ 3968 pos
+  × log(512)=6.24, model untrained/uniform — bukan bug; grad sudah di-average /M).
+- **3.44× PyTorch eager, 2.43× compile-ro** — **FULL VIR di C++/CUDA mengalahkan PyTorch
+  2.4–3.4×** (VQ + multiscale + recurrent + Muon, semua komponen VIR).
+- **Bug diperbaiki (R2):** `K`/`V` (level count/vocab) bentrok dgn tensor `K[b]`/`V[b]`
+  (attention) → rename `NK`/`VOCAB`.
+
+**Status objective (training):** FULL VIR (VQ + multiscale + recurrent + Muon) di C++/CUDA =
+**3.44× PyTorch eager** ✅ (2–5× tercapai). vir (Burn) tetap ~1× (framework gap, tak bisa
+2–5× tanpa ganti engine).
