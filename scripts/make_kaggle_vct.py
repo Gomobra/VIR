@@ -27,8 +27,17 @@ code("""import subprocess, time, os, json, struct, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
 def P(*a):
     s = ' '.join(str(x) for x in a); print(s); LOG.write(s + '\\n'); LOG.flush()
-subprocess.run(['git','clone','--depth','1','https://github.com/Gomobra/VIR.git','/tmp/VIR'], check=True)
-src = '/tmp/VIR/scripts/cuda_spike/vir_cuda_train.cu'
+print(subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.split('\\n')[-2])
+print('notebook embedded .cu (no clone)')""")
+
+code("""%%writefile /tmp/vir_cuda_train.cu
+""" + open('scripts/cuda_spike/vir_cuda_train.cu').read())
+
+code("""import subprocess, time, os, json, numpy as np
+LOG = open('/kaggle/working/log.txt', 'w')
+def P(*a):
+    s = ' '.join(str(x) for x in a); print(s); LOG.write(s + '\\n'); LOG.flush()
+src = '/tmp/vir_cuda_train.cu'
 b = subprocess.run(['nvcc','-O3','-o','/tmp/vct',src,'-lcublas'], capture_output=True, text=True)
 P('nvcc rc', b.returncode, b.stderr[-2000:])
 assert b.returncode == 0, 'compile gagal'""")
