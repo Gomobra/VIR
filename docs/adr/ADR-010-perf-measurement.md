@@ -238,18 +238,21 @@ dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 | Axis | Hasil | vs PyTorch | 2–5×? |
 |---|---|---|---|
 | **Inferensi NCM (vir generate)** | 1 093–38 111 tok/s | **2.8–3.95×** | ✅ |
-| Training vir (Burn/CubeCL) | 0.95–1.14× PyTorch VIR | ~1× | ❌ |
+| **Training C++/CUDA Transformer Block (blok VIR)** | 2.96× PyTorch eager | **2.96×** (1.76× compile-ro) | ✅ (blok, bukan full VIR) |
 | Training C++/CUDA murni (MLP PoC) | 2.85× PyTorch eager | 2.85× | ✅ (bukan VIR) |
+| Training vir (Burn/CubeCL) | 0.95–1.14× PyTorch VIR | ~1× | ❌ |
 | C++/CUDA single matmul | 1.24× | <2× | ❌ |
 
 **Kesimpulan:**
 - **Inferensi: objective TERCAPAI** — NCM parallel decode VIR **2.8–3.95× di atas
   PyTorch AR** (no-cache & KV-cache, batch 1 & 32, steady-state). Keunggulan arsitektur
   non-AR; sebelumnya tersembunyi oleh cold-start (kompilasi kernel langkah-1).
-- **Training: objective BELUM tercapai untuk VIR** — vir (Burn) ~1× PyTorch VIR
-  (framework gap: dispatch autodiff + CubeCL 0.77× cuBLAS). C++/CUDA murni 2.85×
-  (bukti konsep MLP) menunjukkan ceiling "mesin sendiri" bisa >2×, tapi port VIR penuh
-  ke C++/CUDA = proyek framework-level (multi-hari, tanpa build lokal).
+- **Training (blok VIR asli): 2.96× PyTorch eager** — C++/CUDA transformer block
+  (RMSNorm + causal attention + SwiGLU) mengalahkan PyTorch eager ~3×, compile-ro 1.76×.
+  **Full VIR** (5-level multiscale + recurrent + VQ + Muon) = lanjutan (menumpuk blok +
+  multiscale head + VQ + Muon, multi-hari).
+- **Training vir (Burn): ~1×** — framework gap (dispatch autodiff + CubeCL 0.77× cuBLAS),
+  tak bisa 2–5× tanpa ganti engine (C++/CUDA).
 
 **Metodologi: final & dipakai** (W0/W1/B6/profil + warmup). Semua CI hijau.
 Catatan: `BatchedMuon` saat ini简化 (tanpa `adjust_lr=MatchRmsAdamW` & tanpa weight
@@ -283,3 +286,38 @@ multiscale + recurrent + Muon). Membuktikan **mesin C++/CUDA murni bisa > PyTorc
 pada training** (2–5× tercapai), tapi port VIR penuh ke C++/CUDA = proyek framework-
 level (multi-hari). complements: vir (Burn) = 0.95–1.14× PyTorch VIR (framework gap);
 C++/CUDA = 2.85× (dispatch overhead hilang) pada MLP.
+
+## C++/CUDA TRANSFORMER BLOCK (blok VIR asli) — 2.96× PyTorch eager / 1.76× compile-ro
+
+Notebook `vir-kaggle-tb` + `scripts/cuda_spike/transformer_block.cu`: **satu blok
+transformer lengkap** (pre-norm RMSNorm → causal self-attention QKV+softmax → RMSNorm
+→ SwiGLU, NoPE), forward+backward+SGD manual, C++/CUDA murni (cuBLAS `Sgemm` +
+`SgemmStridedBatched` + kernel CUDA RMSNorm/softmax/permute). T4, N=B*T=2048 (b64,
+L32), D64, HH4, HI256, warmup 20, 500 langkah.
+
+| Engine | µs/step | tok/s | vs PyTorch eager |
+|---|---|---|---|
+| PyTorch eager | 2 808 | 729 396 | 1.00× |
+| PyTorch compile (reduce-overhead) | 1 670 | 1 225 664 | 0.59× |
+| **C++/CUDA murni** | **949** | **2 158 159** | **2.96×** ✅ |
+
+- **Numerik valid**: `finite=1`, `mse=0.0835` (turun dari ~0.166 → backward benar,
+  model belajar; bukan throughput palsu).
+- **2.96× PyTorch eager**, **1.76× PyTorch compile-ro** — di atas PyTorch pada **blok
+  VIR asli** (RMSNorm + causal attention + SwiGLU), bukan MLP.
+- **Akar**: overhead dispatch Python (~20 kernel × ~100µs, terutama attention eager)
+  dihilangkan; C++ = ~20 kernel @ ~949µs, PyTorch eager = ~2.8ms (dispatch-bound).
+- **Lever attention**: C++ attention (naive softmax + batched cuBLAS) ~620µs vs PyTorch
+  eager attention ~1.87ms (SDPA + transpose/reshape overhead). compile-ro PyTorch
+  (flash attention + graphs) lebih sulit dikalahkan (1.76×), tapi tetap di atas.
+
+**Status terhadap objective (training VIR):**
+- Blok VIR asli (RMSNorm + attention + SwiGLU) di C++/CUDA = **2.96× PyTorch eager** ✅.
+- **Full VIR** (5-level multiscale + recurrent depth + VQ + Muon) = **belum** (menumpuk
+  blok + multiscale head + VQ + Muon = proyek multi-hari lanjutan).
+- vir (Burn) training = 0.95–1.14× PyTorch VIR (framework gap, tak bisa 2–5×).
+
+**Langkah berikut (bila dilanjut):** tumpuk 6 blok (prelude+core×loops+coda) → multiscale
+5-head + VQ encode → Muon (Newton-Schulz) → loop training penuh. Tiap tahap diukur vs
+PyTorch VIR. The transformer block (2.96×) is the strongest evidence so far that the
+C++/CUDA engine beats PyTorch on VIR's real primitives.
