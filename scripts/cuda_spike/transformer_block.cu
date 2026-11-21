@@ -123,12 +123,12 @@ int main(){
     CHECK(cudaMemcpy(Wu,hWu.data(),sizeof(float)*D*HI,cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(Wd,hWd.data(),sizeof(float)*HI*D,cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(g2,hg2.data(),sizeof(float)*D,cudaMemcpyHostToDevice));
-    float *Xin,*Xa,*Xo,*Xn1,*Ri1,*Xn2,*Ri2,*QKV,*Q,*K,*V,*SC,*PR,*AT,*ATN,*ATO,*GT,*UP,*HH,*MO;
+    float *Xin,*Xa,*Xo,*Xn1,*Ri1,*Xn2,*Ri2,*QKV,*Q,*K,*V,*SC,*PR,*AT,*ATN,*ATO,*GT,*UP,*HA,*MO;
     float *dXo,*dXa,*dXn1,*dXn2,*dTmp,*dQKV,*dQ,*dK,*dV,*dSC,*dPR,*dAT,*dATN,*dGT,*dUP,*dHH,*Tg;
     ALLOC2(Xin,Xa,N*D); ALLOC1(Xo,N*D); ALLOC2(Xn1,Ri1,N*D); ALLOC2(Xn2,Ri2,N*D);
     ALLOC1(QKV,N*3*D); ALLOC1(Q,BH*T*hd); ALLOC1(K,BH*T*hd); ALLOC1(V,BH*T*hd);
     ALLOC1(SC,BH*T*T); ALLOC1(PR,BH*T*T); ALLOC1(AT,BH*T*hd); ALLOC1(ATN,N*D); ALLOC1(ATO,N*D);
-    ALLOC1(GT,N*HI); ALLOC1(UP,N*HI); ALLOC1(HH,N*HI); ALLOC1(MO,N*D);
+    ALLOC1(GT,N*HI); ALLOC1(UP,N*HI); ALLOC1(HA,N*HI); ALLOC1(MO,N*D);
     ALLOC1(dXo,N*D); ALLOC1(dXa,N*D); ALLOC1(dXn1,N*D); ALLOC1(dXn2,N*D); ALLOC1(dTmp,N*D);
     ALLOC1(dQKV,N*3*D); ALLOC1(dQ,BH*T*hd); ALLOC1(dK,BH*T*hd); ALLOC1(dV,BH*T*hd);
     ALLOC1(dSC,BH*T*T); ALLOC1(dPR,BH*T*T); ALLOC1(dAT,BH*T*hd); ALLOC1(dATN,N*D);
@@ -154,8 +154,8 @@ int main(){
         rmsnorm_fwd<<<N,64,0,s>>>(Xa,g2,Xn2,Ri2,N,D);
         gemmNN(h,Xn2,Wg,GT,N,HI,D,alpha,beta);
         gemmNN(h,Xn2,Wu,UP,N,HI,D,alpha,beta);
-        silu_mul<<<bHI,th,0,s>>>(GT,UP,HH,N*HI);
-        gemmNN(h,HH,Wd,MO,N,D,HI,alpha,beta);
+        silu_mul<<<bHI,th,0,s>>>(GT,UP,HA,N*HI);
+        gemmNN(h,HA,Wd,MO,N,D,HI,alpha,beta);
         add_<<<bHD,th,0,s>>>(Xa,MO,N*D);                   // Xo = Xa + mlpout
         // ===== LOSS GRAD =====
         mse_grad<<<bHD,th,0,s>>>(Xo,Tg,dXo,N*D);
