@@ -32,7 +32,7 @@ print(subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdou
 import base64
 _cu = open('scripts/cuda_spike/vir_cuda_train.cu','rb').read()
 _b64 = base64.b64encode(_cu).decode()
-code("import base64\nCU = base64.b64decode('%s').decode()\nopen('/tmp/vir_cuda_train.cu','w').write(CU)\nprint('wrote', len(CU), 'chars')" % _b64)
+code("import base64\nCU = base64.b64decode('%s').decode()\nopen('/tmp/vir_cuda_train.cu','w').write(CU)\nlines=CU.split(chr(10))\nprint('wrote', len(CU), 'chars; line167=', repr(lines[166]) if len(lines)>166 else 'N/A')" % _b64)
 
 code("""import subprocess, time, os, json, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
