@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <string>
 
 #define CHECK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){printf("CUDA err %s @%d\n",cudaGetErrorString(e),__LINE__);exit(1);} } while(0)
 #define CK(x) do { cublasStatus_t s=(x); if(s!=CUBLAS_STATUS_SUCCESS){printf("cuBLAS err %d @%d\n",(int)s,__LINE__);exit(1);} } while(0)
@@ -356,6 +357,6 @@ int main(int argc,char** argv){
     float hl=0; CHECK(cudaMemcpy(&hl,loss_dev,sizeof(float),cudaMemcpyDeviceToHost));
     printf("vir-cuda-train: %d steps, %.1f us/step, %.0f tok/s | loss=%.3f vocab=%d D=%d blocks=%d\n",
         STEPS, ms*1000.0/STEPS, (double)STEPS*N/(ms/1000.0), hl, VOCAB, D, NBLK);
-    write_checkpoint(g_out.c_str(),VOCAB,D,CB,NBLK,K,emb,cb,Wqkv,Wo,Wg,Wu,Wd,g1,g2,head);
+    write_checkpoint(g_out.c_str(),VOCAB,D,CB,NBLK,NK,emb,cb,Wqkv,Wo,Wg,Wu,Wd,g1,g2,head);
     return 0;
 }
