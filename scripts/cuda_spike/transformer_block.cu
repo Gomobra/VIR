@@ -150,13 +150,17 @@ int main(){
         bgemmNN(h,PR,V,AT,T,hd,T,sS,sQ,sQ,BH,alpha,beta);
         attn_merge<<<bHD,th,0,s>>>(AT,ATN,N,T,HH,hd);
         gemmNN(h,ATN,Wo,ATO,N,D,D,alpha,beta);
-        add_<<<bHD,th,0,s>>>(Xin,ATO,N*D);                 // Xa = Xin + attnout
+        // Xa = Xin + attnout (Xin tetap = input asli)
+        CHECK(cudaMemcpy(Xa,Xin,sizeof(float)*N*D,cudaMemcpyDeviceToDevice));
+        add_<<<bHD,th,0,s>>>(Xa,ATO,N*D);
         rmsnorm_fwd<<<N,64,0,s>>>(Xa,g2,Xn2,Ri2,N,D);
         gemmNN(h,Xn2,Wg,GT,N,HI,D,alpha,beta);
         gemmNN(h,Xn2,Wu,UP,N,HI,D,alpha,beta);
         silu_mul<<<bHI,th,0,s>>>(GT,UP,HA,N*HI);
         gemmNN(h,HA,Wd,MO,N,D,HI,alpha,beta);
-        add_<<<bHD,th,0,s>>>(Xa,MO,N*D);                   // Xo = Xa + mlpout
+        // Xo = Xa + mlpout
+        CHECK(cudaMemcpy(Xo,Xa,sizeof(float)*N*D,cudaMemcpyDeviceToDevice));
+        add_<<<bHD,th,0,s>>>(Xo,MO,N*D);
         // ===== LOSS GRAD =====
         mse_grad<<<bHD,th,0,s>>>(Xo,Tg,dXo,N*D);
         // ===== BACKWARD MLP =====

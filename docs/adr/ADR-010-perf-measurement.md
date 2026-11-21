@@ -238,7 +238,8 @@ dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 | Axis | Hasil | vs PyTorch | 2–5×? |
 |---|---|---|---|
 | **Inferensi NCM (vir generate)** | 1 093–38 111 tok/s | **2.8–3.95×** | ✅ |
-| **Training C++/CUDA Transformer Block (blok VIR)** | 2.96× PyTorch eager | **2.96×** (1.76× compile-ro) | ✅ (blok, bukan full VIR) |
+| **Training C++/CUDA 6-Block (recurrent depth)** | 3.11× PyTorch eager | **3.11×** (1.08× compile-ro) | ✅ (6 blok, bukan full VIR) |
+| **Training C++/CUDA 1-Block (blok VIR)** | 2.96× PyTorch eager | **2.96×** (1.76× compile-ro) | ✅ (blok) |
 | Training C++/CUDA murni (MLP PoC) | 2.85× PyTorch eager | 2.85× | ✅ (bukan VIR) |
 | Training vir (Burn/CubeCL) | 0.95–1.14× PyTorch VIR | ~1× | ❌ |
 | C++/CUDA single matmul | 1.24× | <2× | ❌ |
@@ -321,3 +322,27 @@ L32), D64, HH4, HI256, warmup 20, 500 langkah.
 5-head + VQ encode → Muon (Newton-Schulz) → loop training penuh. Tiap tahap diukur vs
 PyTorch VIR. The transformer block (2.96×) is the strongest evidence so far that the
 C++/CUDA engine beats PyTorch on VIR's real primitives.
+
+## C++/CUDA 6-BLOCK STACK (recurrent depth VIR) — 3.11× PyTorch eager / 1.08× compile-ro
+
+Notebook `vir-kaggle-st` + `scripts/cuda_spike/transformer_stack.cu`: **6 blok transformer
+bertumpuk** (struktur VIR: prelude + core×loops + coda = 6 blok kedalaman rekuren), tiap
+blok RMSNorm + causal attention + SwiGLU, forward+backward+SGD manual. T4, N=2048, D64,
+HH4, HI256, warmup 20, 500 langkah.
+
+| Engine | µs/step | tok/s | vs PyTorch eager |
+|---|---|---|---|
+| PyTorch 6-block eager | 13 906 | 147 283 | 1.00× |
+| PyTorch 6-block compile (reduce-overhead) | 4 814 | 425 505 | 0.35× |
+| **C++/CUDA 6-block** | **4 467** | **458 489** | **3.11×** ✅ |
+
+- **Numerik valid & stabil**: `finite=1`, `mse=0.1677` (mirip single-block ~0.166),
+  `X0=0.50` (bounded). **3.11× PyTorch eager, 1.08× compile-ro**.
+- **Bug diperbaiki (R2):** (1) `dHH` gemmTN K=HI→D (kontraksi = D); (2) input `X` tak
+  di-reset tiap langkah → komposisi eksponensial (X 0.77→30.8) → divergensi; ditambah
+  buffer input tetap `Xin` + reset. Setelah fix: stabil.
+- **Skala**: C++ 6-blok = 4.47ms (dari 1-blok 0.95ms, ~4.7×), PyTorch eager = 13.9ms
+  (dari 2.8ms, ~5×). Rasio ~3× konsisten di 1 & 6 blok → engine skala ke kedalaman VIR.
+
+**Status:** 6-blok (recurrent depth VIR) = **3.11× PyTorch eager** ✅. **Full VIR**
+(multiscale 5-head + VQ + Muon) = lanjutan (multi-hari).

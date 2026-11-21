@@ -103,14 +103,19 @@ di riwayat commit; lihat `gh run list`.
 
 ## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
 
+- **C++/CUDA 6-BLOCK STACK (vir-kaggle-st) — 3.11× PyTorch eager (recurrent depth VIR):**
+  `scripts/cuda_spike/transformer_stack.cu` (6 blok: RMSNorm + causal attention + SwiGLU,
+  forward+backward+SGD) vs PyTorch 6-block. **HASIL (T4, N=2048, 500 langkah):** C++/CUDA
+  **4 467 µs/step (458 489 tok/s)** vs PyTorch eager **13 906 µs (147 283)** = **3.11× DI ATAS**
+  (compile-ro 4 814 µs = 1.08×); numerik stabil (`finite=1`, `mse=0.1677`, `X0=0.50`).
+  **6 blok (kedalaman rekuren VIR) > PyTorch.** Bug fix: reset input `X=Xin` (komposisi).
 - **C++/CUDA TRANSFORMER BLOCK (vir-kaggle-tb) — 2.96× PyTorch eager (blok VIR asli):**
   `scripts/cuda_spike/transformer_block.cu` (RMSNorm + causal attention + SwiGLU,
   forward+backward+SGD manual, cuBLAS + `SgemmStridedBatched`) vs PyTorch transformer
   block sama. **HASIL (nyata, T4, N=2048, 500 langkah):** C++/CUDA **949 µs/step
   (2 158 159 tok/s)** vs PyTorch eager **2 808 µs/step (729 396)** = **2.96× DI ATAS**
-  (compile-ro 1 670 µs = 1.76×); numerik valid (`finite=1`, `mse=0.0835` turun dari
-  ~0.166 → backward benar). **Blok VIR asli (RMSNorm + attention + SwiGLU) > PyTorch.**
-  Full VIR (multiscale + VQ + Muon) = lanjutan multi-hari.
+  (compile-ro 1 670 µs = 1.76×); numerik valid. **Blok VIR asli (RMSNorm + attention +
+  SwiGLU) > PyTorch.**
 - **Inferensi NCM (vir-kaggle-gen) — 2.8–3.95× DI ATAS PyTorch (⚡ keunggulan arsitektur):**
   `vir generate` (NCM paralel, warmup 2, steady-state) vs PyTorch AR (no-cache & KV-cache).
   **HASIL (nyata, T4, batch 1 & 32):** b1 vir **1 093 tok/s** vs PyTorch AR **388** (no-cache)
