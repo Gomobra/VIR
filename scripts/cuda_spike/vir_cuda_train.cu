@@ -341,7 +341,7 @@ int main(int argc,char** argv){
             snprintf(nm,64,"blocks.%d.wu",b); dims(nm,D,4*D,false);
             snprintf(nm,64,"blocks.%d.wd",b); dims(nm,4*D,D,false); }
         for(int k=0;k<NK;k++){ char nm[32]; snprintf(nm,32,"heads.%d",k); dims(nm,VOCAB,D,k==NK-1); }
-        fprintf(mf,"]}\n"); fclose(mf);
+        fprintf(mf,"]}\n"); fflush(mf); fclose(mf);
         FILE* bf=fopen(binp.c_str(),"wb");
         auto wr=[&](const float* p,int n){ fwrite(p,sizeof(float),n,bf); };
         wr(emb,VOCAB*D);
@@ -353,5 +353,6 @@ int main(int argc,char** argv){
         fflush(stdout);
     }
     fflush(stdout);
+    cudaDeviceReset();
     std::_Exit(0);
 }
