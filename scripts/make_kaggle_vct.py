@@ -67,6 +67,9 @@ code("""# verifikasi checkpoint
 import os, json, math
 mp='/tmp/out/manifest.json'; bp='/tmp/out/model.bin'
 P('manifest exists:', os.path.exists(mp), 'model.bin exists:', os.path.exists(bp))
+if os.path.exists(mp):
+    raw=open(mp).read()
+    P('manifest raw:', raw[:500])
 if os.path.exists(mp) and os.path.exists(bp):
     m=json.load(open(mp)); P('format:', m.get('format'), 'n_tensors:', len(m['tensors']))
     exp=sum(int(math.prod(t['shape'])) for t in m['tensors'])
