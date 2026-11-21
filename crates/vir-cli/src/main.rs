@@ -2,13 +2,13 @@
 //!
 //! Setiap subperintah hanya memanggil pustaka; tidak ada logika bisnis di sini.
 
+mod cmd_cuda;
 mod cmd_eval;
 mod cmd_generate;
 mod cmd_make_shard;
 mod cmd_mem;
 mod cmd_rlm;
 mod cmd_train;
-mod cmd_cuda;
 mod error;
 mod smoke;
 

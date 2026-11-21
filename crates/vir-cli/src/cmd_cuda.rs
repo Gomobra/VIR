@@ -75,8 +75,8 @@ fn vocab_from_shard(path: &str) -> Result<usize, CliError> {
 fn export_tokens(data: &str, path: &str, max_tokens: usize) -> Result<usize, CliError> {
     let mut reader = vir_data::ShardReader::open(path)
         .map_err(|e| CliError::other(format!("baca shard: {e}")))?;
-    let mut out = std::fs::File::create(path)
-        .map_err(|e| CliError::other(format!("buat {path}: {e}")))?;
+    let mut out =
+        std::fs::File::create(path).map_err(|e| CliError::other(format!("buat {path}: {e}")))?;
     let mut n = 0usize;
     reader
         .for_each_block(|block: &[u32]| -> Result<(), vir_common::VirError> {
@@ -110,9 +110,11 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
         Some(v) => v,
         None => vocab_from_shard(&args.data)?,
     };
-    let max_tokens = args
-        .max_tokens
-        .unwrap_or_else(|| args.steps.saturating_mul(args.batch).saturating_mul(args.seq_len));
+    let max_tokens = args.max_tokens.unwrap_or_else(|| {
+        args.steps
+            .saturating_mul(args.batch)
+            .saturating_mul(args.seq_len)
+    });
     let tokens_path = format!("{}/tokens.bin", args.out);
     let ntok = export_tokens(&args.data, &tokens_path, max_tokens)?;
 
