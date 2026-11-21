@@ -353,5 +353,5 @@ int main(int argc,char** argv){
         fflush(stdout);
     }
     fflush(stdout);
-    _exit(0);
+    std::_Exit(0);
 }
