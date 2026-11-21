@@ -344,7 +344,7 @@ int main(int argc,char** argv){
         for(int k=0;k<NK;k++){ char nm[32]; snprintf(nm,32,"heads.%d",k); dims(nm,VOCAB,D,false); }
         fprintf(mf,"]}\n"); fflush(mf); fclose(mf);
         FILE* bf=fopen(binp.c_str(),"wb");
-        auto wr=[&](const float* p,int n){ fwrite(p,sizeof(float),n,bf); };
+        auto wr=[&](const float* p,int n){ std::vector<float> hb(n); cudaMemcpy(hb.data(),p,sizeof(float)*n,cudaMemcpyDeviceToHost); fwrite(hb.data(),sizeof(float),n,bf); };
         wr(emb,VOCAB*D);
         for(int k=0;k<NK;k++) wr(cb[k],CB*D);
         for(int b=0;b<NBLK;b++){ wr(g1[b],D); wr(Wqkv[b],D*3*D); wr(Wo[b],D*D); wr(g2[b],D); wr(Wg[b],D*4*D); wr(Wu[b],D*4*D); wr(Wd[b],4*D*D); }
