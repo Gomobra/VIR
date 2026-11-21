@@ -69,7 +69,8 @@ mp='/tmp/out/manifest.json'; bp='/tmp/out/model.bin'
 P('manifest exists:', os.path.exists(mp), 'model.bin exists:', os.path.exists(bp))
 if os.path.exists(mp):
     raw=open(mp).read()
-    P('manifest raw:', raw[:500])
+    P('manifest raw:', raw[:400])
+    P('manifest len:', len(raw), 'end:', repr(raw[-100:]))
 if os.path.exists(mp) and os.path.exists(bp):
     m=json.load(open(mp)); P('format:', m.get('format'), 'n_tensors:', len(m['tensors']))
     exp=sum(int(math.prod(t['shape'])) for t in m['tensors'])

@@ -328,6 +328,7 @@ int main(int argc,char** argv){
     { // inline checkpoint
         std::string dir=g_out; std::string manifest=dir+"/manifest.json"; std::string binp=dir+"/model.bin";
         FILE* mf=fopen(manifest.c_str(),"w");
+        setvbuf(mf,NULL,_IONBF,0);
         fprintf(mf,"{\"format\":\"vir-cuda-1\",\"config\":{\"vocab\":%d,\"d_model\":%d,\"codebook\":%d,\"n_blocks\":%d,\"levels\":5},\"tensors\":[",VOCAB,D,CB,NBLK);
         auto dims=[&](const char* name,int rows,int cols,bool last){ fprintf(mf,"%s{\"name\":\"%s\",\"shape\":[%d,%d]}",last?"":",",name,rows,cols); };
         dims("embed",VOCAB,D,true);
