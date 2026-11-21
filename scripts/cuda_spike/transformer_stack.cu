@@ -179,7 +179,7 @@ int main(){
             // MLP backward
             silu_mul<<<bHI,th,0,st>>>(GT[b],UP[b],HA,N*HI);          // recompute hh
             gemmNT(h,HA,dX,dWd[b],HI,D,N,alpha,beta);                 // dWd = HA^T @ dX
-            gemmTN(h,dX,Wd[b],dHH,N,HI,HI,alpha,beta);               // dhh = dX @ Wd^T
+            gemmTN(h,dX,Wd[b],dHH,N,HI,D,alpha,beta);               // dhh = dX @ Wd^T
             swiglu_bwd<<<bHI,th,0,st>>>(GT[b],UP[b],dHH,dGT,dUP,N*HI);
             gemmNT(h,Xn2[b],dGT,dWg[b],D,HI,N,alpha,beta);           // dWg
             gemmNT(h,Xn2[b],dUP,dWu[b],D,HI,N,alpha,beta);           // dWu
