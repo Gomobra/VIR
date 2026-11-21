@@ -69,18 +69,18 @@ int main(){
     auto step = [&](){
         // Row-major C=A@B^T: cublasSgemm(OP_T,OP_T, n,m,k, A,k, B,k, C,m?) ; ldc=row stride
         // Z1[N,H] = X[N,D] @ W1^T[H,D]
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, H, D, &alpha, X, D, dW1, D, &beta, Z1, H));
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, H, N, D, &alpha, dW1, H, X, D, &beta, Z1, H));
         gelu_fwd<<<bH,th,0,s>>>(Z1, A1, N*H);
         // Y[N,D] = A1[N,H] @ W2^T[D,H]
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, D, H, &alpha, A1, H, dW2, H, &beta, Y, D));
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_N, D, N, H, &alpha, dW2, D, A1, H, &beta, Y, D));
         mse_grad<<<bD,th,0,s>>>(Y, T, dY, N*D);
-        // dA1[N,H] = dY[N,D] @ W2^T
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_T, N, H, D, &alpha, dY, D, dW2, D, &beta, dA1, H));
+        // dA1[N,H] = dY[N,D] @ W2^T[D,H]  (C=A@B^T, B=W2[H,D])
+        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, H, N, D, &alpha, dW2, D, dY, D, &beta, dA1, H));
         gelu_bwd<<<bH,th,0,s>>>(Z1, dA1, dZ1, N*H);
-        // dW2[H,D] = A1^T @ dY
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, H, D, N, &alpha, A1, H, dY, D, &beta, gW2, D));
-        // dW1[D,H] = X^T @ dZ1
-        CK(cublasSgemm(h, CUBLAS_OP_T, CUBLAS_OP_N, D, H, N, &alpha, X, D, dZ1, H, &beta, gW1, D));
+        // dW2[H,D] = A1^T[N,H] @ dY[N,D]  (C=A^T@B, A=A1)
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, D, H, N, &alpha, dY, D, A1, H, &beta, gW2, D));
+        // dW1[D,H] = X^T[N,D] @ dZ1[N,H]  (C=A^T@B, A=X)
+        CK(cublasSgemm(h, CUBLAS_OP_N, CUBLAS_OP_T, H, D, N, &alpha, dZ1, H, X, D, &beta, gW1, H));
         sgd<<<bH,th,0,s>>>(dW1, gW1, lr, D*H);
         sgd<<<bH,th,0,s>>>(dW2, gW2, lr, H*D);
     };

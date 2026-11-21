@@ -44,20 +44,33 @@ code("""# --- PyTorch MLP (sama) ---
 import torch, torch.nn as nn, time
 torch.backends.cuda.matmul.allow_tf32 = True
 DEV='cuda'; B,L,D,H=64,32,64,256; N=B*L; STEPS=200; WARMUP=20
-torch.manual_seed(0)
-model=nn.Sequential(nn.Linear(D,H), nn.GELU(), nn.Linear(H,D)).to(DEV)
-opt=torch.optim.SGD(model.parameters(), lr=1e-3)
+
+def make():
+    torch.manual_seed(0)
+    return nn.Sequential(nn.Linear(D,H), nn.GELU(), nn.Linear(H,D)).to(DEV)
+
 X=torch.randn(N,D,device=DEV); T=torch.randn(N,D,device=DEV)
-def one():
-    opt.zero_grad(set_to_none=True)
-    y=model(X); loss=0.5*((y-T)**2).mean()
-    loss.backward(); opt.step()
-for _ in range(WARMUP): one()
-torch.cuda.synchronize(); t0=time.time()
-for _ in range(STEPS): one()
-torch.cuda.synchronize(); dt=time.time()-t0
-P('=== PyTorch ===')
-P(f'{STEPS} steps, {dt*1000:.2f} ms, {dt*1000/STEPS*1000:.1f} us/step, {STEPS*N/dt:.1f} tok/s')""")
+
+def run(tag, compile_mode):
+    model=make()
+    if compile_mode: model=torch.compile(model, mode=compile_mode)
+    opt=torch.optim.SGD(model.parameters(), lr=1e-3)
+    def one():
+        opt.zero_grad(set_to_none=True)
+        y=model(X); loss=0.5*((y-T)**2).mean()
+        loss.backward(); opt.step()
+    for _ in range(WARMUP): one()
+    torch.cuda.synchronize(); t0=time.time()
+    for _ in range(STEPS): one()
+    torch.cuda.synchronize(); dt=time.time()-t0
+    P(f'=== PyTorch {tag} ===')
+    P(f'{STEPS} steps, {dt*1000:.2f} ms, {dt*1000/STEPS*1000:.1f} us/step, {STEPS*N/dt:.1f} tok/s')
+    return STEPS*N/dt
+
+pe=run('eager', None)
+pc=run('compile-ro', 'reduce-overhead')
+P(f'py_eager_tok_s {pe:.1f}')
+P(f'py_compile_ro_tok_s {pc:.1f}')""")
 
 code("""open('/kaggle/working/result.json','w').write(json.dumps({'log':'see log.txt'}))
 P('DONE'); LOG.close()""")
