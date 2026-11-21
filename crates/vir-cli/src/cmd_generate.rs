@@ -18,6 +18,10 @@ pub(crate) struct Args {
     /// Jumlah sampel (batch)
     #[arg(long, default_value_t = 1)]
     pub batch: usize,
+    /// Jumlah generasi warmup (tidak dihitung) sebelum pengukuran — memicu
+    /// kompilasi kernel langkah-1 agar tok_s = steady-state (ADR-010).
+    #[arg(long, default_value_t = 1)]
+    pub warmup: usize,
     /// Cetak status sebagai JSON
     #[arg(long)]
     pub json: bool,
@@ -58,6 +62,14 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
 
     // 3. Generasi NCM (satu lintasan paralel untuk seluruh blok).
     let sampler = vir_model::Sampler::new(args.temperature, 0, 42);
+    // Warmup: jalankan `warmup` kali (memicu kompilasi kernel langkah-1) sebelum
+    // mengukur, agar tok_s mencerminkan steady-state (ADR-010).
+    for _ in 0..args.warmup {
+        model
+            .generator
+            .generate(None, &sampler)
+            .map_err(|e| CliError::other(format!("generate (warmup): {e}")))?;
+    }
     let t0 = std::time::Instant::now();
     let out = model
         .generator

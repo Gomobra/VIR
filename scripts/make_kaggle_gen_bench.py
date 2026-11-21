@@ -2,9 +2,12 @@
 """Notebook Kaggle: inferensi — vir generate (NCM paralel) vs PyTorch AR.
 
 Build `vir` sekali, latih model mini (vir train --native), lalu:
-  1) `vir generate --ckpt <run>` (NCM: 1 lintasan paralel utk L token)
-  2) PyTorch AR transformer (dekoder-only, KV-cache) generate L token
-Ukur tok/s (warmup). Tujuan: keunggulan non-AR (di atas PyTorch) di inferensi.
+  1) `vir generate --ckpt <run>` (NCM: 5 lintasan paralel utk 62 token)
+  2) PyTorch AR transformer (dekoder-only) generate L token:
+       - no-cache (baseline lama)
+       - KV-cache (inferensi realistis PyTorch)
+Ukur tok/s steady-state (warmup) pada batch 1 & 32.
+Tujuan: keunggulan non-AR (di atas PyTorch) di inferensi.
 
 Dipakai: python3 scripts/make_kaggle_gen_bench.py > scripts/gen/vir_kaggle_gen.ipynb
 lalu:    kaggle kernels push -p scripts/gen/
@@ -25,8 +28,9 @@ def code(src):
 
 md("""# VIR Vbeta — inferensi: vir generate (NCM paralel) vs PyTorch AR
 
-Build `vir` sekali, latih model mini, lalu `vir generate` (NCM: seluruh L token
-dalam 1 lintasan paralel) vs PyTorch AR (KV-cache, L lintasan). Ukur tok/s.""")
+Build `vir` sekali, latih model mini, lalu `vir generate` (NCM: seluruh blok
+dalam 5 lintasan paralel) vs PyTorch AR (no-cache & KV-cache). Ukur tok/s
+steady-state (warmup) pada batch 1 & 32. Tujuan: keunggulan non-AR di inferensi.""")
 
 code("""!curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 import os, subprocess
@@ -61,9 +65,9 @@ P('train rc', r.returncode, r.stdout.strip()[-150:])
 assert r.returncode == 0, 'train gagal'""")
 
 code("""# --- 1) vir generate (NCM paralel) ---
-def run_vir_gen():
+def run_vir_gen(batch):
     t=time.time()
-    r=subprocess.run([VIR,'generate','--ckpt','/kaggle/working/run','--batch','1','--json'],
+    r=subprocess.run([VIR,'generate','--ckpt','/kaggle/working/run','--batch',str(batch),'--warmup','2','--json'],
                      capture_output=True, text=True, timeout=300)
     dt=round(time.time()-t,3)
     try:
@@ -73,9 +77,12 @@ def run_vir_gen():
     except Exception as e:
         return {'rc':r.returncode,'dt_s':dt,'tok_s':0.0,'err':r.stderr[-300:],'parse':str(e)}
 
-res = {'vir_gen': run_vir_gen()}; P('VIR_GEN', json.dumps(res['vir_gen']))""")
+res = {}
+for B in (1, 32):
+    res[f'vir_gen_b{B}'] = run_vir_gen(B)
+    P(f'VIR_GEN b{B}', json.dumps(res[f'vir_gen_b{B}']))""")
 
-code("""# --- 2) PyTorch AR (KV-cache) ---
+code("""# --- 2) PyTorch AR (no-cache & KV-cache) ---
 import torch, torch.nn as nn, torch.nn.functional as F
 torch.backends.cuda.matmul.allow_tf32 = True
 DEV='cuda'; D=64; HH=4; V=512; LAYERS=6; SEQLEN=32
@@ -111,25 +118,55 @@ class AR(nn.Module):
         return s.head(s.ln(x))
 
 @torch.no_grad()
-def gen_ar(model, L):
-    idx=torch.zeros(1,1,dtype=torch.long,device=DEV)
+def gen_ar(model, L, B):
+    idx=torch.zeros(B,1,dtype=torch.long,device=DEV)
     for _ in range(L-1):
         logits=model(idx)[:, -1, :]
         idx=torch.cat([idx, logits.argmax(-1,keepdim=True)], 1)
     return idx
 
-def bench_ar():
-    torch.manual_seed(0); m=AR().to(DEV).eval()
-    for _ in range(2): gen_ar(m, SEQLEN)   # warmup
-    torch.cuda.synchronize(); t0=time.time()
-    for _ in range(10): gen_ar(m, SEQLEN)
-    torch.cuda.synchronize(); dt=round(time.time()-t0,3)
-    return {'dt_s':dt,'tok_s':round(10*SEQLEN/dt,1) if dt>0 else 0.0}
+@torch.no_grad()
+def gen_ar_kv(model, L, B):
+    idx=torch.zeros(B,1,dtype=torch.long,device=DEV)
+    caches=[None]*len(model.blocks)
+    for step in range(L-1):
+        pos=torch.arange(step,step+1,device=idx.device)
+        x=model.tok(idx[:,-1:])+model.pos(pos)[None]
+        for i,blk in enumerate(model.blocks):
+            b,t,_=x.shape
+            xn=blk.ln1(x)
+            q=blk.wq(xn).view(b,t,HH,-1).transpose(1,2)
+            k=blk.wk(xn).view(b,t,HH,-1).transpose(1,2)
+            v=blk.wv(xn).view(b,t,HH,-1).transpose(1,2)
+            if caches[i] is not None:
+                ck,cv=caches[i]; k=torch.cat([ck,k],2); v=torch.cat([cv,v],2)
+            o=F.scaled_dot_product_attention(q,k,v)
+            o=o.transpose(1,2).reshape(b,t,D)
+            x=x+blk.wo(o); xn2=blk.ln2(x)
+            x=x+blk.wd(F.silu(blk.wg(xn2))*blk.wu(xn2))
+            caches[i]=(k,v)
+        logits=model.head(model.ln(x))[:,-1,:]
+        idx=torch.cat([idx,logits.argmax(-1,keepdim=True)],1)
+    return idx
 
-res['pt_ar'] = bench_ar(); P('PT_AR', json.dumps(res['pt_ar']))
+def bench(fn, B):
+    torch.manual_seed(0); m=AR().to(DEV).eval()
+    for _ in range(2): fn(m, SEQLEN, B)   # warmup
+    torch.cuda.synchronize(); t0=time.time()
+    for _ in range(10): fn(m, SEQLEN, B)
+    torch.cuda.synchronize(); dt=round(time.time()-t0,3)
+    return {'dt_s':dt,'tok_s':round(10*B*SEQLEN/dt,1) if dt>0 else 0.0}
+
+for B in (1, 32):
+    res[f'pt_ar_b{B}'] = bench(gen_ar, B);    P(f'PT_AR b{B} (no-cache)', json.dumps(res[f'pt_ar_b{B}']))
+    res[f'pt_ar_kv_b{B}'] = bench(gen_ar_kv, B); P(f'PT_AR b{B} (KV)', json.dumps(res[f'pt_ar_kv_b{B}']))
+
 open('/kaggle/working/result.json','w').write(json.dumps(res, indent=2))
-v=res['vir_gen']['tok_s']; p=res['pt_ar']['tok_s']
-if v>0 and p>0: P('ratio vir/pt_ar', round(v/p,3), 'x')
+for B in (1, 32):
+    v=res[f'vir_gen_b{B}']['tok_s']
+    for key in (f'pt_ar_b{B}', f'pt_ar_kv_b{B}'):
+        p=res[key]['tok_s']
+        if v>0 and p>0: P(f'ratio vir/{key}', round(v/p,3), 'x')
 P('DONE'); LOG.close()""")
 
 nb = {"cells": CELLS,
