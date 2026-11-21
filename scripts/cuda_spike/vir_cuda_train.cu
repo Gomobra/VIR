@@ -210,7 +210,7 @@ int main(int argc,char** argv){
         else if(a=="--lr") lr=atof(argv[++i]);
     }
     if(!tokens_path){ printf("usage: --tokens <file> [--out dir] [--vocab V] [--d-model D] ...\n"); return 1; }
-    int hd=D/HH, HI=4*D, N=B*T, BH=B*HH, K=5, LEV[5]={2,4,8,16,32};
+    int hd=D/HH, HI=4*D, N=B*T, BH=B*HH, NK=5, LEV[5]={2,4,8,16,32};
     const long sQ=(long)T*hd, sS=(long)T*T;
     cublasHandle_t h; CK(cublasCreate(&h)); cublasSetPointerMode(h,CUBLAS_POINTER_MODE_HOST);
     const float alpha=1.0f,beta=0.0f,scale=1.0f/sqrtf((float)hd);
@@ -226,7 +226,7 @@ int main(int argc,char** argv){
     // weights
     float *emb,*demb; ALLOC1(emb,VOCAB*D); ALLOC1(demb,VOCAB*D);
     { auto v=rnd(VOCAB*D,0.1f); CHECK(cudaMemcpy(emb,v.data(),sizeof(float)*VOCAB*D,cudaMemcpyHostToDevice)); }
-    float *cb[5]; for(int k=0;k<K;k++){ ALLOC1(cb[k],CB*D); auto v=rnd(CB*D,0.05f); CHECK(cudaMemcpy(cb[k],v.data(),sizeof(float)*CB*D,cudaMemcpyHostToDevice)); }
+    float *cb[5]; for(int k=0;k<NK;k++){ ALLOC1(cb[k],CB*D); auto v=rnd(CB*D,0.05f); CHECK(cudaMemcpy(cb[k],v.data(),sizeof(float)*CB*D,cudaMemcpyHostToDevice)); }
     float *Wqkv[NBLK],*dWqkv[NBLK],*Wo[NBLK],*dWo[NBLK],*g1[NBLK],*dg1[NBLK],*Wg[NBLK],*dWg[NBLK],*Wu[NBLK],*dWu[NBLK],*Wd[NBLK],*dWd[NBLK],*g2[NBLK],*dg2[NBLK];
     float *bufWqkv[NBLK],*bufWo[NBLK],*bufWg[NBLK],*bufWu[NBLK],*bufWd[NBLK];
     for(int b=0;b<NBLK;b++){
@@ -243,7 +243,7 @@ int main(int argc,char** argv){
         CHECK(cudaMemset(bufWqkv[b],0,sizeof(float)*D*3*D)); CHECK(cudaMemset(bufWo[b],0,sizeof(float)*D*D));
         CHECK(cudaMemset(bufWg[b],0,sizeof(float)*D*HI)); CHECK(cudaMemset(bufWu[b],0,sizeof(float)*D*HI)); CHECK(cudaMemset(bufWd[b],0,sizeof(float)*HI*D));
     }
-    float *head[5],*dhead[5]; for(int k=0;k<K;k++){ ALLOC1(head[k],VOCAB*D); ALLOC1(dhead[k],VOCAB*D); auto v=rnd(VOCAB*D,0.05f); CHECK(cudaMemcpy(head[k],v.data(),sizeof(float)*VOCAB*D,cudaMemcpyHostToDevice)); }
+    float *head[5],*dhead[5]; for(int k=0;k<NK;k++){ ALLOC1(head[k],VOCAB*D); ALLOC1(dhead[k],VOCAB*D); auto v=rnd(VOCAB*D,0.05f); CHECK(cudaMemcpy(head[k],v.data(),sizeof(float)*VOCAB*D,cudaMemcpyHostToDevice)); }
     // activations
     float *X,*QKV,*SC,*AT,*ATO,*HA,*MO,*ZX;
     ALLOC1(X,N*D); ALLOC1(QKV,N*3*D); ALLOC1(SC,BH*T*T); ALLOC1(AT,BH*T*hd); ALLOC1(ATO,N*D); ALLOC1(HA,N*HI); ALLOC1(MO,N*D); ALLOC1(ZX,N*D);
@@ -255,7 +255,7 @@ int main(int argc,char** argv){
     ALLOC1(dQ,BH*T*hd);ALLOC1(dK,BH*T*hd);ALLOC1(dV,BH*T*hd);ALLOC1(dSC,BH*T*T);ALLOC1(dPR,BH*T*T);ALLOC1(dAT,BH*T*hd);ALLOC1(dATN,N*D);
     ALLOC1(dGT,N*HI);ALLOC1(dUP,N*HI);ALLOC1(dHH,N*HI);
     float *hk[5],*logits[5],*dlog[5]; int *tgt[5]; float *dhk,*loss_dev;
-    for(int k=0;k<K;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk; ALLOC1(hk[k],rows*D);ALLOC1(logits[k],rows*VOCAB);ALLOC1(dlog[k],rows*VOCAB);
+    for(int k=0;k<NK;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk; ALLOC1(hk[k],rows*D);ALLOC1(logits[k],rows*VOCAB);ALLOC1(dlog[k],rows*VOCAB);
         CHECK(cudaMalloc(&tgt[k],sizeof(int)*rows)); }
     ALLOC1(dhk,N*D); ALLOC1(loss_dev,1);
     float *Xw,*Aw,*AXw,*A2w,*A2Xw,*norm_dev;
@@ -280,7 +280,7 @@ int main(int argc,char** argv){
         CHECK(cudaMemsetAsync(demb,0,sizeof(float)*VOCAB*D,st));
         for(int b=0;b<NBLK;b++){ zero_<<<64,64,0,st>>>(dg1[b],D); zero_<<<64,64,0,st>>>(dg2[b],D); }
         embed_gather<<<bHD,th,0,st>>>(emb,dtok,X,N,D);
-        for(int k=0;k<K;k++) vq_encode<<<N,CB,0,st>>>(X,cb[k],X,N,D,CB);
+        for(int k=0;k<NK;k++) vq_encode<<<N,CB,0,st>>>(X,cb[k],X,N,D,CB);
         for(int b=0;b<NBLK;b++){
             CHECK(cudaMemcpyAsync(XB[b],X,sizeof(float)*N*D,cudaMemcpyDeviceToDevice,st));
             rmsnorm_fwd<<<N,64,0,st>>>(X,g1[b],Xn1[b],Ri1[b],N,D);
@@ -302,13 +302,13 @@ int main(int argc,char** argv){
         }
         CHECK(cudaMemsetAsync(loss_dev,0,sizeof(float),st));
         zero_<<<bHD,th,0,st>>>(dX,N*D);
-        for(int k=0;k<K;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk;
+        for(int k=0;k<NK;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk;
             gather_rows<<<bHD,th,0,st>>>(X,hk[k],B,T,lk,D);
             gemmTN(h,hk[k],head[k],logits[k],rows,VOCAB,D,alpha,beta);
             gather_tgt<<<bHD,th,0,st>>>(dtok,tgt[k],B,T,lk,offset);
             ce_fwd_bwd<<<rows,VOCAB,0,st>>>(logits[k],tgt[k],dlog[k],loss_dev,rows,VOCAB);
         }
-        for(int k=0;k<K;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk;
+        for(int k=0;k<NK;k++){ int lk=LEV[k]<T?LEV[k]:T; int rows=B*lk;
             gemmTN(h,dlog[k],hk[k],dhead[k],VOCAB,D,rows,alpha,beta);
             gemmNN(h,dlog[k],head[k],dhk,rows,D,VOCAB,alpha,beta);
             scatter_rows<<<bHD,th,0,st>>>(dX,dhk,B,T,lk,D);
@@ -345,7 +345,7 @@ int main(int argc,char** argv){
             muon(Wg[b],dWg[b],bufWg[b],D,HI); muon(Wu[b],dWu[b],bufWu[b],D,HI); muon(Wd[b],dWd[b],bufWd[b],HI,D);
             sgd<<<64,64,0,st>>>(g1[b],dg1[b],lr,D); sgd<<<64,64,0,st>>>(g2[b],dg2[b],lr,D); }
         sgd<<<bHD,th,0,st>>>(emb,demb,lr,VOCAB*D);
-        for(int k=0;k<K;k++) sgd<<<bHD,th,0,st>>>(head[k],dhead[k],lr,VOCAB*D);
+        for(int k=0;k<NK;k++) sgd<<<bHD,th,0,st>>>(head[k],dhead[k],lr,VOCAB*D);
     };
     for(int i=0;i<20;i++) step(); CHECK(cudaStreamSynchronize(st));
     auto t0=std::chrono::high_resolution_clock::now();
