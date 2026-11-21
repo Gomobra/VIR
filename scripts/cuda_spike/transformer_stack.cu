@@ -135,8 +135,8 @@ int main(){
         ALLOC1(GT[b],N*HI); ALLOC1(UP[b],N*HI);
     }
     // temps (forward)
-    float *X,*QKV,*SC,*AT,*ATO,*HA,*MO,*Tg;
-    ALLOC1(X,N*D); ALLOC1(QKV,N*3*D); ALLOC1(SC,BH*T*T); ALLOC1(AT,BH*T*hd);
+    float *Xin,*X,*QKV,*SC,*AT,*ATO,*HA,*MO,*Tg;
+    ALLOC1(Xin,N*D); ALLOC1(X,N*D); ALLOC1(QKV,N*3*D); ALLOC1(SC,BH*T*T); ALLOC1(AT,BH*T*hd);
     ALLOC1(ATO,N*D); ALLOC1(HA,N*HI); ALLOC1(MO,N*D); ALLOC1(Tg,N*D);
     // temps (backward, reused across blocks)
     float *dX,*dXA,*dTmp,*dXn1,*dXn2,*dQKV,*dQ,*dK,*dV,*dSC,*dPR,*dAT,*dATN,*dGT,*dUP,*dHH;
@@ -145,12 +145,13 @@ int main(){
     ALLOC1(dSC,BH*T*T); ALLOC1(dPR,BH*T*T); ALLOC1(dAT,BH*T*hd); ALLOC1(dATN,N*D);
     ALLOC1(dGT,N*HI); ALLOC1(dUP,N*HI); ALLOC1(dHH,N*HI);
     #undef ALLOC1
-    { auto v=rnd(N*D,1.0f); CHECK(cudaMemcpy(X,v.data(),sizeof(float)*N*D,cudaMemcpyHostToDevice)); }
+    { auto v=rnd(N*D,1.0f); CHECK(cudaMemcpy(Xin,v.data(),sizeof(float)*N*D,cudaMemcpyHostToDevice)); }
     { auto v=rnd(N*D,1.0f); CHECK(cudaMemcpy(Tg,v.data(),sizeof(float)*N*D,cudaMemcpyHostToDevice)); }
     cudaStream_t st; CHECK(cudaStreamCreate(&st)); cublasSetStream(h,st);
     int th=256; int bHD=(N*D+th-1)/th, bHI=(N*HI+th-1)/th;
 
     auto step = [&](){
+        CHECK(cudaMemcpyAsync(X,Xin,sizeof(float)*N*D,cudaMemcpyDeviceToDevice,st));  // reset input (fixed)
         for(int b=0;b<NBLK;b++){ zero_<<<64,64,0,st>>>(dg1[b],D); zero_<<<64,64,0,st>>>(dg2[b],D); }
         // ===== FORWARD =====
         for(int b=0;b<NBLK;b++){
