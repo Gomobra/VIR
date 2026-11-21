@@ -8,6 +8,7 @@ mod cmd_make_shard;
 mod cmd_mem;
 mod cmd_rlm;
 mod cmd_train;
+mod cmd_cuda;
 mod error;
 mod smoke;
 
@@ -43,6 +44,8 @@ enum Commands {
     Train(cmd_train::Args),
     /// Generasi dari checkpoint
     Generate(cmd_generate::Args),
+    /// Latihan via engine C++/CUDA (`vir-cuda-train`)
+    CudaTrain(cmd_cuda::Args),
     /// Bikin shard token sintetis (vir-data)
     MakeShard(cmd_make_shard::Args),
     /// Info build
@@ -59,6 +62,7 @@ fn main() -> Result<(), CliError> {
         Commands::Eval(args) => cmd_eval::run(&args),
         Commands::Train(args) => cmd_train::run(&args),
         Commands::Generate(args) => cmd_generate::run(&args),
+        Commands::CudaTrain(args) => cmd_cuda::run(&args),
         Commands::MakeShard(args) => cmd_make_shard::run(&args),
         Commands::Version => {
             println!("{}", build_info());
