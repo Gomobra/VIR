@@ -54,6 +54,8 @@ tok.tofile('/tmp/tokens.bin')
 P('tokens:', n)
 
 os.makedirs('/tmp/out', exist_ok=True)
+for f in ['/tmp/out/manifest.json','/tmp/out/model.bin']:
+    if os.path.exists(f): os.remove(f)
 r = subprocess.run(['/tmp/vct','--tokens','/tmp/tokens.bin','--out','/tmp/out',
                     '--vocab','512','--d-model','64','--n-heads','4','--n-blocks','6',
                     '--seq-len','32','--batch','64','--steps','100','--lr','1e-4'],

@@ -324,6 +324,7 @@ int main(int argc,char** argv){
     float hl=0; CHECK(cudaMemcpy(&hl,loss_dev,sizeof(float),cudaMemcpyDeviceToHost));
     printf("vir-cuda-train: %d steps, %.1f us/step, %.0f tok/s | loss=%.3f vocab=%d D=%d blocks=%d\n",
         STEPS, ms*1000.0/STEPS, (double)STEPS*N/(ms/1000.0), hl, VOCAB, D, NBLK);
+    fflush(stdout);
     { // inline checkpoint
         std::string dir=g_out; std::string manifest=dir+"/manifest.json"; std::string binp=dir+"/model.bin";
         FILE* mf=fopen(manifest.c_str(),"w");
@@ -349,6 +350,8 @@ int main(int argc,char** argv){
         for(int k=0;k<NK;k++) wr(head[k],VOCAB*D);
         fclose(bf);
         printf("checkpoint: %s + %s\n",manifest.c_str(),binp.c_str());
+        fflush(stdout);
     }
-    return 0;
+    fflush(stdout);
+    exit(0);
 }
