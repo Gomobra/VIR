@@ -67,13 +67,13 @@ pub(crate) fn run(args: &Args) -> Result<(), CliError> {
     for _ in 0..args.warmup {
         model
             .generator
-            .generate(None, &sampler)
+            .generate_batch(args.batch, &sampler)
             .map_err(|e| CliError::other(format!("generate (warmup): {e}")))?;
     }
     let t0 = std::time::Instant::now();
     let out = model
         .generator
-        .generate(None, &sampler)
+        .generate_batch(args.batch, &sampler)
         .map_err(|e| CliError::other(format!("generate: {e}")))?;
     let dt = t0.elapsed().as_secs_f64();
     // `positions` = token per sampel (Σℓ_k); total = batch × positions.

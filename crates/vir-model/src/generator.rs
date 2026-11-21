@@ -489,6 +489,18 @@ impl Generator {
         })
     }
 
+    /// Generasi NCM untuk `batch` sampel (tanpa prefix), blok awal nol.
+    ///
+    /// Memungkinkan inferensi ber-batch; `generate(None, ..)` = `generate_batch(1, ..)`.
+    pub fn generate_batch(
+        &self,
+        batch: usize,
+        sampler: &Sampler,
+    ) -> Result<GenerateOutput, VirError> {
+        let init = Tensor::<3>::zeros([batch, self.total_len(), self.dim], &self.device());
+        self.run_levels(init, self.scales.clone(), batch, 0, sampler)
+    }
+
     /// Satu blok: `ẑ^(K)` pada konteks `prefix + L` (F2.3 langkah 3).
     pub fn generate_block(
         &self,
