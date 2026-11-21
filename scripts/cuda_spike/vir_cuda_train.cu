@@ -164,7 +164,7 @@ __global__ void gather_tgt(const int* tok, int* out, int B, int T, int l, int of
 
 static std::string g_out=".";
 static void write_checkpoint(const char* out, int VOCAB,int D,int CB,int NBLK,int K,
-    const float* emb,const float* cb[5],float* Wqkv[],float* Wo[],float* Wg[],float* Wu[],float* Wd[],float* g1[],float* g2[],float* head[5]){
+    float* emb, float** cb, float** Wqkv, float** Wo, float** Wg, float** Wu, float** Wd, float** g1, float** g2, float** head){
     std::string dir=out;
     std::string manifest=dir+"/manifest.json";
     std::string binp=dir+"/model.bin";
