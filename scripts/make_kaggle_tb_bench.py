@@ -59,12 +59,13 @@ class Blk(nn.Module):
         s.ln2=RMSNorm(D)
         s.wg=nn.Linear(D,HI,bias=False); s.wu=nn.Linear(D,HI,bias=False); s.wd=nn.Linear(HI,D,bias=False)
     def forward(s,x):
+        N=x.size(0); x=x.view(B,T,D)
         b,t,_=x.shape
         xn=s.ln1(x); qkv=s.wqkv(xn); q,k,v=qkv.chunk(3,dim=-1)
         q=q.view(b,t,HH,-1).transpose(1,2); k=k.view(b,t,HH,-1).transpose(1,2); v=v.view(b,t,HH,-1).transpose(1,2)
         o=F.scaled_dot_product_attention(q,k,v,is_causal=True).transpose(1,2).reshape(b,t,D)
         x=x+s.wo(o); xn2=s.ln2(x)
-        return x+s.wd(F.silu(s.wg(xn2))*s.wu(xn2))
+        return (x+s.wd(F.silu(s.wg(xn2))*s.wu(xn2))).view(N,D)
 
 def bench(compile_mode):
     torch.manual_seed(0); m=Blk().to(DEV)
