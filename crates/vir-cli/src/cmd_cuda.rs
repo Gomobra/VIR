@@ -73,7 +73,7 @@ fn vocab_from_shard(path: &str) -> Result<usize, CliError> {
 
 /// Ekspor token shard ke berkas datar uint32 (little-endian).
 fn export_tokens(data: &str, path: &str, max_tokens: usize) -> Result<usize, CliError> {
-    let mut reader = vir_data::ShardReader::open(path)
+    let mut reader = vir_data::ShardReader::open(data)
         .map_err(|e| CliError::other(format!("baca shard: {e}")))?;
     let mut out =
         std::fs::File::create(path).map_err(|e| CliError::other(format!("buat {path}: {e}")))?;
