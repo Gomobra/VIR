@@ -163,38 +163,6 @@ __global__ void gather_tgt(const int* tok, int* out, int B, int T, int l, int of
 }
 
 static std::string g_out=".";
-static void write_checkpoint(const char* out, int VOCAB,int D,int CB,int NBLK,int K,
-    float* emb, float** cb, float** Wqkv, float** Wo, float** Wg, float** Wu, float** Wd, float** g1, float** g2, float** head){
-    std::string dir=out;
-    std::string manifest=dir+"/manifest.json";
-    std::string binp=dir+"/model.bin";
-    FILE* mf=fopen(manifest.c_str(),"w");
-    fprintf(mf,"{\"format\":\"vir-cuda-1\",\"config\":{\"vocab\":%d,\"d_model\":%d,\"codebook\":%d,\"n_blocks\":%d,\"levels\":5},\"tensors\":[",VOCAB,D,CB,NBLK);
-    auto dims=[&](const char* name,int rows,int cols,bool last){
-        fprintf(mf,"%s{\"name\":\"%s\",\"shape\":[%d,%d]}",last?"":",",name,rows,cols); };
-    dims("embed",VOCAB,D,false);
-    for(int k=0;k<K;k++){ char nm[32]; snprintf(nm,32,"codebooks.%d",k); dims(nm,CB,D,false); }
-    for(int b=0;b<NBLK;b++){ char nm[64];
-        snprintf(nm,64,"blocks.%d.ln1",b); dims(nm,1,D,false);
-        snprintf(nm,64,"blocks.%d.wqkv",b); dims(nm,D,3*D,false);
-        snprintf(nm,64,"blocks.%d.wo",b); dims(nm,D,D,false);
-        snprintf(nm,64,"blocks.%d.ln2",b); dims(nm,1,D,false);
-        snprintf(nm,64,"blocks.%d.wg",b); dims(nm,D,4*D,false);
-        snprintf(nm,64,"blocks.%d.wu",b); dims(nm,D,4*D,false);
-        snprintf(nm,64,"blocks.%d.wd",b); dims(nm,4*D,D,false);
-    }
-    for(int k=0;k<K;k++){ char nm[32]; snprintf(nm,32,"heads.%d",k); dims(nm,VOCAB,D,k==K-1); }
-    fprintf(mf,"]}\n"); fclose(mf);
-    FILE* bf=fopen(binp.c_str(),"wb");
-    auto wr=[&](const float* p,int n){ fwrite(p,sizeof(float),n,bf); };
-    wr(emb,VOCAB*D);
-    for(int k=0;k<K;k++) wr(cb[k],CB*D);
-    for(int b=0;b<NBLK;b++){ wr(g1[b],D); wr(Wqkv[b],D*3*D); wr(Wo[b],D*D); wr(g2[b],D); wr(Wg[b],D*4*D); wr(Wu[b],D*4*D); wr(Wd[b],4*D*D); }
-    for(int k=0;k<K;k++) wr(head[k],VOCAB*D);
-    fclose(bf);
-    printf("checkpoint: %s + %s\n",manifest.c_str(),binp.c_str());
-}
-
 int main(int argc,char** argv){
     int D=64,HH=4,T=32,B=64,NBLK=6,VOCAB=512,CB=256,STEPS=500; float lr=1e-4f;
     const char* tokens_path=nullptr;
@@ -357,6 +325,31 @@ int main(int argc,char** argv){
     float hl=0; CHECK(cudaMemcpy(&hl,loss_dev,sizeof(float),cudaMemcpyDeviceToHost));
     printf("vir-cuda-train: %d steps, %.1f us/step, %.0f tok/s | loss=%.3f vocab=%d D=%d blocks=%d\n",
         STEPS, ms*1000.0/STEPS, (double)STEPS*N/(ms/1000.0), hl, VOCAB, D, NBLK);
-    write_checkpoint(g_out.c_str(),VOCAB,D,CB,NBLK,NK,emb,cb,Wqkv,Wo,Wg,Wu,Wd,g1,g2,head);
+    { // inline checkpoint
+        std::string dir=g_out; std::string manifest=dir+"/manifest.json"; std::string binp=dir+"/model.bin";
+        FILE* mf=fopen(manifest.c_str(),"w");
+        fprintf(mf,"{\"format\":\"vir-cuda-1\",\"config\":{\"vocab\":%d,\"d_model\":%d,\"codebook\":%d,\"n_blocks\":%d,\"levels\":5},\"tensors\":[",VOCAB,D,CB,NBLK);
+        auto dims=[&](const char* name,int rows,int cols,bool last){ fprintf(mf,"%s{\"name\":\"%s\",\"shape\":[%d,%d]}",last?"":",",name,rows,cols); };
+        dims("embed",VOCAB,D,false);
+        for(int k=0;k<NK;k++){ char nm[32]; snprintf(nm,32,"codebooks.%d",k); dims(nm,CB,D,false); }
+        for(int b=0;b<NBLK;b++){ char nm[64];
+            snprintf(nm,64,"blocks.%d.ln1",b); dims(nm,1,D,false);
+            snprintf(nm,64,"blocks.%d.wqkv",b); dims(nm,D,3*D,false);
+            snprintf(nm,64,"blocks.%d.wo",b); dims(nm,D,D,false);
+            snprintf(nm,64,"blocks.%d.ln2",b); dims(nm,1,D,false);
+            snprintf(nm,64,"blocks.%d.wg",b); dims(nm,D,4*D,false);
+            snprintf(nm,64,"blocks.%d.wu",b); dims(nm,D,4*D,false);
+            snprintf(nm,64,"blocks.%d.wd",b); dims(nm,4*D,D,false); }
+        for(int k=0;k<NK;k++){ char nm[32]; snprintf(nm,32,"heads.%d",k); dims(nm,VOCAB,D,k==NK-1); }
+        fprintf(mf,"]}\n"); fclose(mf);
+        FILE* bf=fopen(binp.c_str(),"wb");
+        auto wr=[&](const float* p,int n){ fwrite(p,sizeof(float),n,bf); };
+        wr(emb,VOCAB*D);
+        for(int k=0;k<NK;k++) wr(cb[k],CB*D);
+        for(int b=0;b<NBLK;b++){ wr(g1[b],D); wr(Wqkv[b],D*3*D); wr(Wo[b],D*D); wr(g2[b],D); wr(Wg[b],D*4*D); wr(Wu[b],D*4*D); wr(Wd[b],4*D*D); }
+        for(int k=0;k<NK;k++) wr(head[k],VOCAB*D);
+        fclose(bf);
+        printf("checkpoint: %s + %s\n",manifest.c_str(),binp.c_str());
+    }
     return 0;
 }
