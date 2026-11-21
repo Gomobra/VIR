@@ -150,7 +150,7 @@ __global__ void ce_fwd_bwd(const float* logits, const int* tgt, float* dlog, flo
 int main(){
     const int B=64,T=32,D=64,HH=4,hd=D/HH,HI=256,N=B*T,BH=B*HH;
     const int STEPS=500,WARMUP=20;
-    const int K=5, V=512, CB=256; const int LEV[5]={2,4,8,16,32};
+    const int NK=5, VOCAB=512, CB=256; const int LEV[5]={2,4,8,16,32};
     const long sQ=(long)T*hd, sS=(long)T*T;
     cublasHandle_t h; CK(cublasCreate(&h)); cublasSetPointerMode(h,CUBLAS_POINTER_MODE_HOST);
     const float alpha=1.0f,beta=0.0f,lr=1e-4f,scale=1.0f/sqrtf((float)hd);
@@ -200,18 +200,18 @@ int main(){
     ALLOC1(dGT,N*HI); ALLOC1(dUP,N*HI); ALLOC1(dHH,N*HI);
     // VIR: codebooks (fixed) + 5 heads + targets + per-level gather/logits buffers
     float *cb[5],*head[5],*dhead[5];
-    for(int k=0;k<K;k++){
-        ALLOC1(cb[k],CB*D); ALLOC1(head[k],V*D); ALLOC1(dhead[k],V*D);
+    for(int k=0;k<NK;k++){
+        ALLOC1(cb[k],CB*D); ALLOC1(head[k],VOCAB*D); ALLOC1(dhead[k],VOCAB*D);
         std::vector<float> tmp=rnd(CB*D,0.05f); CHECK(cudaMemcpy(cb[k],tmp.data(),sizeof(float)*CB*D,cudaMemcpyHostToDevice));
-        tmp=rnd(V*D,0.05f); CHECK(cudaMemcpy(head[k],tmp.data(),sizeof(float)*V*D,cudaMemcpyHostToDevice));
+        tmp=rnd(VOCAB*D,0.05f); CHECK(cudaMemcpy(head[k],tmp.data(),sizeof(float)*VOCAB*D,cudaMemcpyHostToDevice));
     }
     int *tgt[5]; float *hk[5],*logits[5],*dlog[5];
-    for(int k=0;k<K;k++){
+    for(int k=0;k<NK;k++){
         int lk=LEV[k]; int rows=B*lk;
         CHECK(cudaMalloc(&tgt[k],sizeof(int)*rows));
-        std::vector<int> th(rows); for(auto&x:th) x=rand()%V;
+        std::vector<int> th(rows); for(auto&x:th) x=rand()%VOCAB;
         CHECK(cudaMemcpy(tgt[k],th.data(),sizeof(int)*rows,cudaMemcpyHostToDevice));
-        ALLOC1(hk[k],rows*D); ALLOC1(logits[k],rows*V); ALLOC1(dlog[k],rows*V);
+        ALLOC1(hk[k],rows*D); ALLOC1(logits[k],rows*VOCAB); ALLOC1(dlog[k],rows*VOCAB);
     }
     float *dhk,*loss_dev; ALLOC1(dhk,N*D); ALLOC1(loss_dev,1);
     float *bufWqkv[NBLK],*bufWo[NBLK],*bufWg[NBLK],*bufWu[NBLK],*bufWd[NBLK];
@@ -254,7 +254,7 @@ int main(){
         CHECK(cudaMemcpyAsync(X,Xin,sizeof(float)*N*D,cudaMemcpyDeviceToDevice,st));  // reset input (fixed)
         for(int b=0;b<NBLK;b++){ zero_<<<64,64,0,st>>>(dg1[b],D); zero_<<<64,64,0,st>>>(dg2[b],D); }
         // VQ encode (multiscale residual, 5 codebooks fixed) -> X = z - sum cb[k][argmin]
-        for(int k=0;k<K;k++) vq_encode<<<N,CB,0,st>>>(X,cb[k],X,N,D,CB);
+        for(int k=0;k<NK;k++) vq_encode<<<N,CB,0,st>>>(X,cb[k],X,N,D,CB);
         // ===== FORWARD (6-block) =====
         for(int b=0;b<NBLK;b++){
             CHECK(cudaMemcpyAsync(XB[b],X,sizeof(float)*N*D,cudaMemcpyDeviceToDevice,st));
@@ -278,17 +278,17 @@ int main(){
         // ===== 5-LEVEL MULTISCALE HEADS + CE =====
         CHECK(cudaMemsetAsync(loss_dev,0,sizeof(float),st));
         zero_<<<bHD,th,0,st>>>(dX,N*D);                          // dX = 0 (accumulate dhidden)
-        for(int k=0;k<K;k++){
+        for(int k=0;k<NK;k++){
             int lk=LEV[k]; int rows=B*lk;
             gather_rows<<<bHD,th,0,st>>>(X,hk[k],B,T,lk,D);       // hk = hidden[:, :lk]
-            gemmTN(h,hk[k],head[k],logits[k],rows,V,D,alpha,beta);// logits = hk @ head^T
-            ce_fwd_bwd<<<rows,V,0,st>>>(logits[k],tgt[k],dlog[k],loss_dev,rows,V);
+            gemmTN(h,hk[k],head[k],logits[k],rows,VOCAB,D,alpha,beta);// logits = hk @ head^T
+            ce_fwd_bwd<<<rows,VOCAB,0,st>>>(logits[k],tgt[k],dlog[k],loss_dev,rows,VOCAB);
         }
         // ===== BACKWARD (head) =====
-        for(int k=0;k<K;k++){
+        for(int k=0;k<NK;k++){
             int lk=LEV[k]; int rows=B*lk;
-            gemmTN(h,dlog[k],hk[k],dhead[k],V,D,rows,alpha,beta); // dhead = dlog^T @ hk
-            gemmNN(h,dlog[k],head[k],dhk,rows,D,V,alpha,beta);     // dhk = dlog @ head
+            gemmTN(h,dlog[k],hk[k],dhead[k],VOCAB,D,rows,alpha,beta); // dhead = dlog^T @ hk
+            gemmNN(h,dlog[k],head[k],dhk,rows,D,VOCAB,alpha,beta);     // dhk = dlog @ head
             scatter_rows<<<bHD,th,0,st>>>(dX,dhk,B,T,lk,D);        // dX[:, :lk] += dhk
         }
         // ===== BACKWARD (6-block) =====
@@ -332,7 +332,7 @@ int main(){
             sgd<<<64,64,0,st>>>(g1[b],dg1[b],lr,D);
             sgd<<<64,64,0,st>>>(g2[b],dg2[b],lr,D);
         }
-        for(int k=0;k<K;k++) sgd<<<bHD,th,0,st>>>(head[k],dhead[k],lr,V*D);
+        for(int k=0;k<NK;k++) sgd<<<bHD,th,0,st>>>(head[k],dhead[k],lr,VOCAB*D);
     };
     // diagnostic: 1 step, cek besar gradien (untuk cari bug divergensi)
     step(); CHECK(cudaStreamSynchronize(st));
