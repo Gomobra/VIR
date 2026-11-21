@@ -32,20 +32,20 @@ print(subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdou
 import base64
 _cu = open('scripts/cuda_spike/vir_cuda_train.cu','rb').read()
 _b64 = base64.b64encode(_cu).decode()
-code("import base64\nCU = base64.b64decode('%s').decode()\nopen('/tmp/vir_cuda_train.cu','w').write(CU)\nlines=CU.split(chr(10))\nprint('wrote', len(CU), 'chars; line167=', repr(lines[166]) if len(lines)>166 else 'N/A')" % _b64)
-
-code("""import subprocess, time, os, json, numpy as np
+code("""import base64, subprocess, time, os, json, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
 def P(*a):
     s = ' '.join(str(x) for x in a); print(s); LOG.write(s + '\\n'); LOG.flush()
-# read back to verify
-with open('/tmp/vir_cuda_train.cu') as f: txt=f.read()
-P('readback line167:', repr(txt.split(chr(10))[166]))
-P('readback has 6=6:', '6=6' in txt, 'has NBLK=6:', 'NBLK=6' in txt)
-# compile from stdin (bypass file)
-b = subprocess.run(['nvcc','-O3','-x','cu','-','-o','/tmp/vct','-lcublas'], input=txt.encode(), capture_output=True, text=True)
-P('nvcc rc', b.returncode, b.stderr[-2000:])
-assert b.returncode == 0, 'compile gagal'""")
+CU = base64.b64decode('%s')
+with open('/tmp/vir_cuda_train.cu','wb') as f:
+    f.write(CU); f.flush(); os.fsync(f.fileno())
+# verify
+with open('/tmp/vir_cuda_train.cu','rb') as f: raw=f.read()
+P('wrote bytes', len(raw), 'line167:', repr(raw.split(b'\\n')[166]))
+# compile
+b = subprocess.run(['nvcc','-O3','-o','/tmp/vct','/tmp/vir_cuda_train.cu','-lcublas'], capture_output=True)
+P('nvcc rc', b.returncode, b.stderr.decode()[-2000:])
+assert b.returncode == 0, 'compile gagal'""" % _b64)
 
 code("""# generate token sintetik (uint32, vocab 512)
 n = 200000
