@@ -38,8 +38,12 @@ code("""import subprocess, time, os, json, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
 def P(*a):
     s = ' '.join(str(x) for x in a); print(s); LOG.write(s + '\\n'); LOG.flush()
-src = '/tmp/vir_cuda_train.cu'
-b = subprocess.run(['nvcc','-O3','-o','/tmp/vct',src,'-lcublas'], capture_output=True, text=True)
+# read back to verify
+with open('/tmp/vir_cuda_train.cu') as f: txt=f.read()
+P('readback line167:', repr(txt.split(chr(10))[166]))
+P('readback has 6=6:', '6=6' in txt, 'has NBLK=6:', 'NBLK=6' in txt)
+# compile from stdin (bypass file)
+b = subprocess.run(['nvcc','-O3','-x','cu','-','-o','/tmp/vct','-lcublas'], input=txt.encode(), capture_output=True, text=True)
 P('nvcc rc', b.returncode, b.stderr[-2000:])
 assert b.returncode == 0, 'compile gagal'""")
 
