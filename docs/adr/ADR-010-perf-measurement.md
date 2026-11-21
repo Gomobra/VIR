@@ -238,7 +238,8 @@ dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 | Axis | Hasil | vs PyTorch | 2–5×? |
 |---|---|---|---|
 | **Inferensi NCM (vir generate)** | 1 093–38 111 tok/s | **2.8–3.95×** | ✅ |
-| **Training C++/CUDA 6-Block (recurrent depth)** | 3.11× PyTorch eager | **3.11×** (1.08× compile-ro) | ✅ (6 blok, bukan full VIR) |
+| **Training C++/CUDA 6-Block + Muon** | ~3–4.6× PyTorch eager | **3.85–4.56×** (2.8–3.5× compile-ro) | ✅ (6 blok + Muon, bukan full VIR) |
+| **Training C++/CUDA 6-Block (recurrent depth)** | 3.11× PyTorch eager | **3.11×** (1.08× compile-ro) | ✅ (6 blok) |
 | **Training C++/CUDA 1-Block (blok VIR)** | 2.96× PyTorch eager | **2.96×** (1.76× compile-ro) | ✅ (blok) |
 | Training C++/CUDA murni (MLP PoC) | 2.85× PyTorch eager | 2.85× | ✅ (bukan VIR) |
 | Training vir (Burn/CubeCL) | 0.95–1.14× PyTorch VIR | ~1× | ❌ |
@@ -346,3 +347,26 @@ HH4, HI256, warmup 20, 500 langkah.
 
 **Status:** 6-blok (recurrent depth VIR) = **3.11× PyTorch eager** ✅. **Full VIR**
 (multiscale 5-head + VQ + Muon) = lanjutan (multi-hari).
+
+## C++/CUDA 6-BLOCK + MUON (Newton-Schulz) — ~3–4.6× PyTorch (optimizer VIR)
+
+Notebook `vir-kaggle-mb` + `scripts/cuda_spike/transformer_muon.cu`: 6 blok transformer +
+**Muon optimizer** (Newton-Schulz 5-iter per bobot 2D, momentum 0.95; SGD utk 1D g1/g2).
+Forward+backward+update manual. T4, N=2048, warmup 20, 500 langkah.
+
+| Engine | µs/step | tok/s | vs PyTorch eager |
+|---|---|---|---|
+| PyTorch 6-block+Muon eager | 41 392 | 49 479 | 1.00× |
+| PyTorch 6-block+Muon compile (reduce-overhead) | 31 920 | 64 158 | 0.77× |
+| **C++/CUDA 6-block+Muon** | **9 074** | **225 694** | **4.56×** ✅ |
+
+- **Stabil**: `finite=1`, `mse=0.1608`, `X0=0.25`. **~3–4.6× PyTorch eager, ~2.8–3.5×
+  compile-ro** (C++ konsisten ~225–231k; PyTorch bervariasi krn 600 matmul NS kecil via
+  dispatch Python).
+- **Muon memperkuat keunggulan C++**: 600 matmul Newton-Schulz kecil (5-iter × 4 matmul ×
+  30 bobot 2D) — murah di C++ (luncuran langsung), mahal di PyTorch (dispatch per op).
+- **Lever momentum+NS**: `buf=mom·buf+g`, `X=buf/‖buf‖`, 5 iter `A=XX^T; X=3.4445X−4.775AX+
+  2.0315A²X`, `W−=lr·X`.
+
+**Status:** 6-blok + Muon = **~3–4.6× PyTorch eager** ✅. **Full VIR** (multiscale 5-head +
+VQ encode) = lanjutan.

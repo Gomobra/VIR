@@ -103,6 +103,13 @@ di riwayat commit; lihat `gh run list`.
 
 ## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
 
+- **C++/CUDA 6-BLOCK + MUON (vir-kaggle-mb) — ~3–4.6× PyTorch (optimizer VIR):**
+  `scripts/cuda_spike/transformer_muon.cu` (6 blok + Muon Newton-Schulz 5-iter per bobot
+  2D, momentum 0.95) vs PyTorch 6-block+Muon. **HASIL (T4, N=2048, 500 langkah):** C++/CUDA
+  **9 074 µs/step (225 694 tok/s)** vs PyTorch eager **41 392 µs (49 479)** = **4.56× DI ATAS**
+  (compile-ro 31 920 µs = 3.52×); run lain C++ 230 805 vs eager 59 891 = 3.85×, compile-ro
+  82 417 = 2.80×. Stabil (`finite=1`, `mse=0.1608`). **Muon (600 NS matmul kecil) murah di
+  C++, mahal di dispatch Python** → C++ makin unggul. **Full VIR (multiscale + VQ) = lanjutan.**
 - **C++/CUDA 6-BLOCK STACK (vir-kaggle-st) — 3.11× PyTorch eager (recurrent depth VIR):**
   `scripts/cuda_spike/transformer_stack.cu` (6 blok: RMSNorm + causal attention + SwiGLU,
   forward+backward+SGD) vs PyTorch 6-block. **HASIL (T4, N=2048, 500 langkah):** C++/CUDA
