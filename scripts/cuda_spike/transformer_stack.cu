@@ -216,7 +216,12 @@ int main(){
             sgd<<<64,64,0,st>>>(g2[b],dg2[b],lr,D);
         }
     };
-    for(int i=0;i<WARMUP;i++){ step(); } CHECK(cudaStreamSynchronize(st));
+    // diagnostic: 1 step, cek besar gradien (untuk cari bug divergensi)
+    step(); CHECK(cudaStreamSynchronize(st));
+    auto maxabs=[&](const float* p,int n){ std::vector<float> v(n); CHECK(cudaMemcpy(v.data(),p,sizeof(float)*n,cudaMemcpyDeviceToHost)); float m=0; for(float x:v) m=fmaxf(m,fabsf(x)); return m; };
+    printf("DIAG 1-step: maxX=%.4f maxdWqkv5=%.4f maxdX=%.4f maxdWo5=%.4f maxdWd5=%.4f\n",
+           maxabs(X,N*D), maxabs(dWqkv[NBLK-1],D*3*D), maxabs(dX,N*D), maxabs(dWo[NBLK-1],D*D), maxabs(dWd[NBLK-1],HI*D));
+    for(int i=1;i<WARMUP;i++){ step(); } CHECK(cudaStreamSynchronize(st));
     auto t0=std::chrono::high_resolution_clock::now();
     for(int i=0;i<STEPS;i++){ step(); }
     CHECK(cudaStreamSynchronize(st));
