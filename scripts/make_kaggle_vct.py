@@ -64,14 +64,15 @@ P('=== run ==='); P(r.stdout); P(r.stderr[-500:])
 P('rc', r.returncode)""")
 
 code("""# verifikasi checkpoint
-import os
+import os, json, math
 mp='/tmp/out/manifest.json'; bp='/tmp/out/model.bin'
 P('manifest exists:', os.path.exists(mp), 'model.bin exists:', os.path.exists(bp))
-if os.path.exists(mp):
+if os.path.exists(mp) and os.path.exists(bp):
     m=json.load(open(mp)); P('format:', m.get('format'), 'n_tensors:', len(m['tensors']))
+    exp=sum(int(math.prod(t['shape'])) for t in m['tensors'])
+    act=os.path.getsize(bp)//4
+    P('expected floats:', exp, 'actual floats:', act, 'match:', exp==act)
     P('first:', m['tensors'][0]); P('last:', m['tensors'][-1])
-if os.path.exists(bp):
-    P('model.bin size:', os.path.getsize(bp), 'bytes')
 open('/kaggle/working/result.json','w').write(json.dumps({'rc':r.returncode,'out':r.stdout[-500:]}))
 P('DONE'); LOG.close()""")
 
