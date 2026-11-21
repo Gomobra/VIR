@@ -160,7 +160,7 @@ int main(){
         // ===== LOSS GRAD =====
         mse_grad<<<bHD,th,0,s>>>(Xo,Tg,dXo,N*D);
         // ===== BACKWARD MLP =====
-        gemmNT(h,HH,dXo,dWd,HI,D,N,alpha,beta);             // dWd = hh^T @ dXo
+        gemmNT(h,HA,dXo,dWd,HI,D,N,alpha,beta);             // dWd = hh^T @ dXo
         gemmTN(h,dXo,Wd,dHH,N,HI,HI,alpha,beta);            // dhh = dXo @ Wd^T
         swiglu_bwd<<<bHI,th,0,s>>>(GT,UP,dHH,dGT,dUP,N*HI);
         gemmNT(h,Xn2,dGT,dWg,D,HI,N,alpha,beta);            // dWg = Xn2^T @ dGT
