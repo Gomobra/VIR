@@ -23,15 +23,16 @@ Compile, generate token sintetik, latih, verifikasi checkpoint (manifest.json + 
 
 code("""!nvidia-smi --query-gpu=name,memory.total --format=csv""")
 
-code("""import subprocess, time, os, json, struct, numpy as np
+code("""import subprocess, time, os, json, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
 def P(*a):
     s = ' '.join(str(x) for x in a); print(s); LOG.write(s + '\\n'); LOG.flush()
-print(subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.split('\\n')[-2])
-print('notebook embedded .cu (no clone)')""")
+print(subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.split('\\n')[-2])""")
 
-code("""%%writefile /tmp/vir_cuda_train.cu
-""" + open('scripts/cuda_spike/vir_cuda_train.cu').read())
+import base64
+_cu = open('scripts/cuda_spike/vir_cuda_train.cu','rb').read()
+_b64 = base64.b64encode(_cu).decode()
+code("import base64\nCU = base64.b64decode('%s').decode()\nopen('/tmp/vir_cuda_train.cu','w').write(CU)\nprint('wrote', len(CU), 'chars')" % _b64)
 
 code("""import subprocess, time, os, json, numpy as np
 LOG = open('/kaggle/working/log.txt', 'w')
