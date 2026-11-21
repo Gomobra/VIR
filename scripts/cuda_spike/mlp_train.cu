@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <vector>
 #include <chrono>
+#include <cmath>
 
 #define CHECK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){printf("CUDA err %s @%d\n",cudaGetErrorString(e),__LINE__);exit(1);} } while(0)
 #define CK(x) do { cublasStatus_t s=(x); if(s!=CUBLAS_STATUS_SUCCESS){printf("cuBLAS err %d @%d\n",(int)s,__LINE__);exit(1);} } while(0)
@@ -32,7 +33,7 @@ __global__ void sgd(float* w, const float* gw, float lr, int n){
 
 int main(){
     const int B=64, L=32, D=64, H=256, N=B*L;
-    const int STEPS=200, WARMUP=20;
+    const int STEPS=500, WARMUP=20;
     cublasHandle_t h; CK(cublasCreate(&h));
     cublasSetPointerMode(h, CUBLAS_POINTER_MODE_HOST);
     const float alpha=1.0f, beta=0.0f, lr=1e-3f;
@@ -91,6 +92,14 @@ int main(){
     auto t1=std::chrono::high_resolution_clock::now();
     double ms=std::chrono::duration<double,std::milli>(t1-t0).count();
     double tok=(double)STEPS*N;
-    printf("C++/CUDA: %d steps, %.2f ms, %.1f us/step, %.1f tok/s\n", STEPS, ms, ms*1000.0/STEPS, tok/(ms/1000.0));
+    // sanity: cek bobot & aktivasi finite (bukan NaN/Inf -> throughput palsu)
+    float hW1s[4], hA1s[4], hW2s[4];
+    CHECK(cudaMemcpy(hW1s, dW1, sizeof(float)*4, cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(hA1s, A1, sizeof(float)*4, cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(hW2s, dW2, sizeof(float)*4, cudaMemcpyDeviceToHost));
+    int finite = 1;
+    for(int i=0;i<4;i++){ if(!std::isfinite(hW1s[i])||!std::isfinite(hA1s[i])||!std::isfinite(hW2s[i])) finite=0; }
+    printf("C++/CUDA: %d steps, %.2f ms, %.1f us/step, %.1f tok/s | finite=%d W1[0]=%.4f A1[0]=%.4f W2[0]=%.4f\n",
+           STEPS, ms, ms*1000.0/STEPS, tok/(ms/1000.0), finite, hW1s[0], hA1s[0], hW2s[0]);
     return 0;
 }
