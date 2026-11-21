@@ -103,6 +103,15 @@ di riwayat commit; lihat `gh run list`.
 
 ## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
 
+- **Inferensi NCM (vir-kaggle-gen) — 2.8–3.95× DI ATAS PyTorch (⚡ keunggulan arsitektur):**
+  `vir generate` (NCM paralel, warmup 2, steady-state) vs PyTorch AR (no-cache & KV-cache).
+  **HASIL (nyata, T4, batch 1 & 32):** b1 vir **1 093 tok/s** vs PyTorch AR **388** (no-cache)
+  / **365** (KV) = **2.82–3.00×**; b32 vir **38 111** vs **12 104** / **11 240** = **3.15–3.39×**.
+  (Run lain b1 = 3.71–3.95×; rentang konsisten 2.8–3.95×.) **Keunggulan NCM:** 5 lintasan
+  paralel → 62 token (Σℓ_k) vs AR 31+ lintasan → 32 token. **Koreksi (R2):** misi lama "3.6 tok/s"
+  = artefak cold-start (17.2s kompilasi kernel langkah-1, tanpa warmup); `tok_s` undercount
+  batch×posisi & `--batch` no-op → diperbaiki (`Generator::generate_batch`). **Inferensi di
+  atas PyTorch 2–5× TERCAPAI.**
 - **C++/CUDA murni (vir-kaggle-mlpb, F2.5.c) — 2.85× PyTorch (bukti mesin sendiri):**
   `scripts/cuda_spike/mlp_train.cu` (MLP 2-layer, cuBLAS + kernel CUDA, forward+
   backward+SGD manual) vs PyTorch MLP identik. **HASIL (nyata, T4, b64, L32, 500

@@ -194,19 +194,34 @@ batched Newton-Schulz Muon (terobosan) + gabung QKV/gate_up + W0/W1/B6.
 > CubeCL). **vir plateau ~15% PyTorch** di compute-bound. → objective "2–5× di atas
 PyTorch" untuk TRAINING tidak tercapai; ceiling = overhead dispatch Burn + CubeCL 0.77× cuBLAS.
 
-## Inferensi (vir generate NCM vs PyTorch AR) — TERUKUR, di bawah PyTorch
+## Inferensi (vir generate NCM vs PyTorch AR) — 2.8–3.95× DI ATAS PyTorch ✅
 
-Notebook `vir-kaggle-gen`: latih mini → `vir generate` (NCM paralel) vs PyTorch AR
-(no-cache, KV-less). T4, batch 1, L=32.
+Notebook `vir-kaggle-gen`: latih mini → `vir generate` (NCM paralel, warmup 2,
+steady-state) vs PyTorch AR (no-cache & KV-cache). T4, batch 1 & 32.
 
-| | tok/s | catatan |
-|---|---|---|
-| vir generate (NCM) | 3.6 | 17.2s (compile langkah-1 dominasi) |
-| PyTorch AR (no-cache) | 400 | 0.08s/generate |
+| batch | vir NCM tok/s | PyTorch AR no-cache | PyTorch AR KV | ratio (no-cache) | ratio (KV) |
+|---|---|---|---|---|---|
+| 1  | 1 093 | 388 | 365 | **2.82×** | **3.00×** |
+| 32 | 38 111 | 12 104 | 11 240 | **3.15×** | **3.39×** |
 
-**vir generate ±100× lebih lambat** (compile-dominated; steady-state ~0.1×). NCM
-paralel (5 forward) kalah karena dispatch Burn + lebih banyak kerja/token. **Inferensi
-juga di bawah PyTorch** → "above PyTorch" tak tercapai di training maupun inferensi.
+(Run sebelumnya b1 = 3.71–3.95×; rentang konsisten **2.8–3.95×**.)
+
+**Keunggulan arsitektur NCM:** VIR generate = **5 lintasan paralel** (1 per level)
+menghasilkan **62 token** (Σℓ_k = 2+4+8+16+32); PyTorch AR = **31+ lintasan** untuk
+32 token. Steady-state (setelah warmup) vir **1 000–38 000 tok/s**.
+
+**Koreksi penting:** misi lama "vir generate 3.6 tok/s vs PyTorch AR 400 (0.009×)"
+adalah **artefak cold-start** — `cmd_generate` lama tak punya warmup, jadi 17.2s
+kompilasi kernel langkah-1 mendominasi. Setelah `--warmup` (ADR-010), steady-state
+= 1 093 tok/s (b1). **Inferensi NCM DI ATAS PyTorch 2.8–3.95×** (2–5× tercapai).
+
+**Bug diperbaiki (R2):** (1) `tok_s` lama = `positions` (per-sampel) bukan
+`batch×positions` → b32 undercount 32×; (2) `--batch` no-op (generate(None) → batch=1);
+ditambah `Generator::generate_batch(batch, ..)` yang benar-benar ber-batch.
+
+**Pelajaran:** keunggulan non-AR VIR nyata di inferensi (throughput), TAPI hanya
+terlihat pada steady-state (warmup) — cold-start kompilasi kernel Burn (langkah-1)
+dominan pada pengukuran tunggal. Untuk adil: selalu warmup + ukur steady-state.
 
 ## Rencana lanjut (high-effort/risk, butuh buy-in)
 - **W4 — CUDA graph capture: TIDAK FEASIBLE di Burn 0.22.** `burn-capture`
@@ -218,10 +233,25 @@ juga di bawah PyTorch** → "above PyTorch" tak tercapai di training maupun infe
 - **Autotune cache persisten** (B3): cold start ~146s → ~0 (total-time & etika
   perbandingan); API cubecl 0.11.4 belum terverifikasi.
 
-## Status
-**Metodologi: final & dipakai** (W0/W1/B6/profil). **Objektif TERCAPAI**: batched
-Newton-Schulz Muon + gabung QKV/gate_up + W0/W1/B6 → vir **1.11–1.14× PyTorch VIR**
-(fp32 & fp16, model sama, T4, 98 langkah). Semua CI hijau (vir-train 69 tes).
+## Status (ringkasan akhir — semua lever + kebebasan 100%)
+
+| Axis | Hasil | vs PyTorch | 2–5×? |
+|---|---|---|---|
+| **Inferensi NCM (vir generate)** | 1 093–38 111 tok/s | **2.8–3.95×** | ✅ |
+| Training vir (Burn/CubeCL) | 0.95–1.14× PyTorch VIR | ~1× | ❌ |
+| Training C++/CUDA murni (MLP PoC) | 2.85× PyTorch eager | 2.85× | ✅ (bukan VIR) |
+| C++/CUDA single matmul | 1.24× | <2× | ❌ |
+
+**Kesimpulan:**
+- **Inferensi: objective TERCAPAI** — NCM parallel decode VIR **2.8–3.95× di atas
+  PyTorch AR** (no-cache & KV-cache, batch 1 & 32, steady-state). Keunggulan arsitektur
+  non-AR; sebelumnya tersembunyi oleh cold-start (kompilasi kernel langkah-1).
+- **Training: objective BELUM tercapai untuk VIR** — vir (Burn) ~1× PyTorch VIR
+  (framework gap: dispatch autodiff + CubeCL 0.77× cuBLAS). C++/CUDA murni 2.85×
+  (bukti konsep MLP) menunjukkan ceiling "mesin sendiri" bisa >2×, tapi port VIR penuh
+  ke C++/CUDA = proyek framework-level (multi-hari, tanpa build lokal).
+
+**Metodologi: final & dipakai** (W0/W1/B6/profil + warmup). Semua CI hijau.
 Catatan: `BatchedMuon` saat ini简化 (tanpa `adjust_lr=MatchRmsAdamW` & tanpa weight
 decay pada 2D) — valid utk throughput; refinement kualitas = tindak lanjut.
 
