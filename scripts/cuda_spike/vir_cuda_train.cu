@@ -330,7 +330,7 @@ int main(int argc,char** argv){
         FILE* mf=fopen(manifest.c_str(),"w");
         fprintf(mf,"{\"format\":\"vir-cuda-1\",\"config\":{\"vocab\":%d,\"d_model\":%d,\"codebook\":%d,\"n_blocks\":%d,\"levels\":5},\"tensors\":[",VOCAB,D,CB,NBLK);
         auto dims=[&](const char* name,int rows,int cols,bool last){ fprintf(mf,"%s{\"name\":\"%s\",\"shape\":[%d,%d]}",last?"":",",name,rows,cols); };
-        dims("embed",VOCAB,D,false);
+        dims("embed",VOCAB,D,true);
         for(int k=0;k<NK;k++){ char nm[32]; snprintf(nm,32,"codebooks.%d",k); dims(nm,CB,D,false); }
         for(int b=0;b<NBLK;b++){ char nm[64];
             snprintf(nm,64,"blocks.%d.ln1",b); dims(nm,1,D,false);
