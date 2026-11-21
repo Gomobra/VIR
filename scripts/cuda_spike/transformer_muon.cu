@@ -286,7 +286,7 @@ int main(){
     CHECK(cudaMemcpy(hX.data(),X,sizeof(float)*N*D,cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(hTg.data(),Tg,sizeof(float)*N*D,cudaMemcpyDeviceToHost));
     double mse=0.0; for(int i=0;i<N*D;i++){ double d=hX[i]-hTg[i]; mse+=d*d; } mse/=(double)(N*D);
-    printf("MUON6 (6-block + Muon): %d steps, %.2f ms, %.1f us/step, %.1f tok/s | finite=%d mse=%.4f X0=%.4f Wlast0=%.4f\n",
-           NBLK,STEPS,ms,ms*1000.0/STEPS,tok/(ms/1000.0),finite,mse,sX[0],sW[0]);
+    printf("MUON6 (6-block + Muon): %d steps, %.2f ms, %.1f us/step, %.1f tok/s | finite=%d mse=%.4f X0=%.4f\n",
+           STEPS,ms,ms*1000.0/STEPS,tok/(ms/1000.0),finite,mse,sX[0]);
     return 0;
 }
