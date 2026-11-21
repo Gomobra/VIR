@@ -103,6 +103,12 @@ di riwayat commit; lihat `gh run list`.
 
 ## Bukti Kaggle (GPU, via Kaggle CLI — log.txt + result.json)
 
+- **Integrasi CLI (vir-kaggle-vct) — `vir cuda-train` + `vir-cuda-train` (mesin C++/CUDA):**
+  subcommand Rust `vir cuda-train` (ekspor token shard → invoke binari C++) + binari
+  `scripts/cuda_spike/vir_cuda_train.cu` (VQ + 6-block + 5-head + Muon). **HASIL (T4, 100
+  langkah):** **137 290 tok/s** (14 917 µs/step), `finite=1`, `rc 0`; **checkpoint valid**
+  (manifest 53 tensor + model.bin 672 512 float, `match: True`). **Mesin C++/CUDA kini
+  terintegrasi ke CLI `vir`.** ADR-011.
 - **C++/CUDA FULL VIR (vir-kaggle-vb) — 3.44× PyTorch eager (VQ+6blk+5head+Muon):**
   `scripts/cuda_spike/transformer_vir.cu` (VQ encode 5-codebook residual + 6-block + 5-level
   multiscale heads ℓ_k[2,4,8,16,32] + CE + Muon) vs PyTorch VIR. **HASIL (T4, N=2048, 500
