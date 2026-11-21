@@ -77,16 +77,17 @@ class Stack(nn.Module):
 def bench(compile_mode):
     torch.manual_seed(0); m=Stack().to(DEV)
     if compile_mode: m=torch.compile(m, mode=compile_mode)
-    opt=torch.optim.SGD(m.parameters(), lr=1e-3)
+    opt=torch.optim.SGD(m.parameters(), lr=1e-4)
     X=torch.randn(N,D,device=DEV); Tg=torch.randn(N,D,device=DEV)
     def one():
         opt.zero_grad(set_to_none=True)
-        y=m(X); loss=0.5*((y-Tg)**2).mean(); loss.backward(); opt.step()
-    for _ in range(WARMUP): one()
+        y=m(X); loss=0.5*((y-Tg)**2).mean(); loss.backward(); opt.step(); return loss.item()
+    l0=None
+    for _ in range(WARMUP): l0=one()
     torch.cuda.synchronize(); t0=time.time()
-    for _ in range(STEPS): one()
+    for _ in range(STEPS): lf=one()
     torch.cuda.synchronize(); dt=time.time()-t0
-    return {'dt_s':round(dt,3),'tok_s':round(STEPS*N/dt,1)}
+    return {'dt_s':round(dt,3),'tok_s':round(STEPS*N/dt,1),'loss0':round(l0,3),'lossf':round(lf,3)}
 
 pe=bench(None); P('=== PyTorch 6-block eager ==='); P(json.dumps(pe))
 pc=bench('reduce-overhead'); P('=== PyTorch 6-block compile-ro ==='); P(json.dumps(pc))

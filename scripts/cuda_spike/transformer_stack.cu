@@ -99,7 +99,7 @@ int main(){
     const int STEPS=500,WARMUP=20;
     const long sQ=(long)T*hd, sS=(long)T*T;
     cublasHandle_t h; CK(cublasCreate(&h)); cublasSetPointerMode(h,CUBLAS_POINTER_MODE_HOST);
-    const float alpha=1.0f,beta=0.0f,lr=1e-3f,scale=1.0f/sqrtf((float)hd);
+    const float alpha=1.0f,beta=0.0f,lr=1e-4f,scale=1.0f/sqrtf((float)hd);
     srand(0);
     auto rnd=[&](int n,float s){ std::vector<float> v(n); for(auto&x:v)x=((rand()%1000)/1000.0f-0.5f)*s; return v; };
     // weights per block
