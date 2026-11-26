@@ -419,7 +419,7 @@ test "runPipeline end-to-end" {
         "This is a long enough document that passes the quality filter rules.", // dup
         "completely unrelated text that shares ngram with eval set here",
     };
-    const evals = [_][]const u8{ "shares ngram with eval set here" };
+    const evals = [_][]const u8{"shares ngram with eval set here"};
     const cfg = PipelineConfig{ .eval_docs = &evals };
     const kept = try runPipeline(allocator, &docs, cfg);
     defer allocator.free(kept);
