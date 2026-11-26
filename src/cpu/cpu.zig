@@ -230,3 +230,95 @@ test "matmulSIMDF32 matches naif" {
     matmulSIMDF32(&C2, &A, &B, 2, 2, 3);
     for (C1, C2) |a, b| try std.testing.expect(@abs(a - b) < 1e-5);
 }
+
+// Causal scaled dot-product attention (single head): out = softmax(Q K^T / sqrt(d)) V, kausal.
+pub fn attentionNaiveF32(out: []f32, q: []const f32, k: []const f32, v: []const f32, seq: usize, d: usize) void {
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(d)));
+    var i: usize = 0;
+    while (i < seq) : (i += 1) {
+        // scores[i, j] for j<=i
+        var maxs: f32 = -1e9;
+        var j: usize = 0;
+        // compute max
+        while (j <= i) : (j += 1) {
+            var acc: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) acc += q[i * d + t] * k[j * d + t];
+            acc *= scale;
+            if (acc > maxs) maxs = acc;
+        }
+        // softmax + weighted sum
+        var sum: f32 = 0;
+        // store scores in temp? reuse out row
+        var jj: usize = 0;
+        while (jj <= i) : (jj += 1) {
+            var acc: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) acc += q[i * d + t] * k[jj * d + t];
+            acc *= scale;
+            const e = @exp(acc - maxs);
+            out[i * d + jj] = e; // store unnormalized weight temporarily in out? no, out is d-dim
+            sum += e;
+        }
+        // compute output
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            var acc: f32 = 0;
+            var jj2: usize = 0;
+            while (jj2 <= i) : (jj2 += 1) {
+                var sc: f32 = 0;
+                var t2: usize = 0;
+                while (t2 < d) : (t2 += 1) sc += q[i * d + t2] * k[jj2 * d + t2];
+                sc *= scale;
+                const w = @exp(sc - maxs) / sum;
+                acc += w * v[jj2 * d + t];
+            }
+            out[i * d + t] = acc;
+        }
+    }
+}
+
+test "attentionNaiveF32 finite" {
+    const seq = 2;
+    const d = 2;
+    var q = [_]f32{ 1, 0, 0, 1 };
+    var k = [_]f32{ 1, 0, 0, 1 };
+    var v = [_]f32{ 1, 2, 3, 4 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    attentionNaiveF32(&out, &q, &k, &v, seq, d);
+    for (out) |x| try std.testing.expect(std.math.isFinite(x));
+}
+
+// Fused cross-entropy (per row): given logits [rows, vocab] and targets [rows],
+// returns sum of -log softmax(target). Computes in f32.
+pub fn crossEntropyF32(logits: []const f32, targets: []const u32, rows: usize, vocab: usize) f64 {
+    std.debug.assert(logits.len == rows * vocab);
+    std.debug.assert(targets.len == rows);
+    var total: f64 = 0;
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const base = r * vocab;
+        // max
+        var mx: f32 = logits[base];
+        var j: usize = 1;
+        while (j < vocab) : (j += 1) if (logits[base + j] > mx) {
+            mx = logits[base + j];
+        };
+        // logsumexp
+        var sum: f32 = 0;
+        j = 0;
+        while (j < vocab) : (j += 1) sum += @exp(logits[base + j] - mx);
+        const lse = mx + @log(sum);
+        const tgt = targets[r];
+        total += @as(f64, lse - logits[base + tgt]);
+    }
+    return total;
+}
+
+test "crossEntropyF32" {
+    // logits: row0 = [0,0], target 0 -> -log(0.5)=0.693
+    var logits = [_]f32{ 0, 0 };
+    var targets = [_]u32{ 0 };
+    const ce = crossEntropyF32(&logits, &targets, 1, 2);
+    try std.testing.expect(@abs(ce - 0.6931) < 1e-3);
+}
