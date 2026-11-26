@@ -7,6 +7,7 @@ pub const version = "0.1.0";
 pub const tensor = @import("tensor/tensor.zig");
 pub const cpu = @import("cpu/cpu.zig");
 pub const autograd = @import("autograd/autograd.zig");
+pub const optim = @import("optim/optim.zig");
 
 test "smoke" {
     const std = @import("std");
