@@ -80,7 +80,9 @@ pub fn softmaxRowF32(out: []f32, x: []const f32, rows: usize, cols: usize) void 
         const base = r * cols;
         var mx: f32 = x[base];
         var j: usize = 1;
-        while (j < cols) : (j += 1) if (x[base + j] > mx) { mx = x[base + j]; };
+        while (j < cols) : (j += 1) if (x[base + j] > mx) {
+            mx = x[base + j];
+        };
         var sum: f32 = 0;
         j = 0;
         while (j < cols) : (j += 1) {
