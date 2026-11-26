@@ -298,3 +298,76 @@ test "sampler resume deterministic" {
     const p3 = samplerPosition(42, 101, 0, 0);
     try std.testing.expect(p1 != p3);
 }
+
+// --- Decontamination (PRD 3.6): remove docs sharing n-gram with eval set ---
+
+pub fn ngramSet(allocator: std.mem.Allocator, text: []const u8, n: usize) !std.AutoHashMap(u64, void) {
+    var set = std.AutoHashMap(u64, void).init(allocator);
+    if (text.len < n) {
+        try set.put(hash64(text), {});
+        return set;
+    }
+    var i: usize = 0;
+    while (i + n <= text.len) : (i += 1) {
+        try set.put(hash64(text[i .. i + n]), {});
+    }
+    return set;
+}
+
+pub fn decontaminate(allocator: std.mem.Allocator, docs: []const []const u8, eval_docs: []const []const u8, n: usize) ![]usize {
+    // build eval n-gram set
+    var eval_set = std.AutoHashMap(u64, void).init(allocator);
+    defer eval_set.deinit();
+    for (eval_docs) |d| {
+        var s = try ngramSet(allocator, d, n);
+        defer s.deinit();
+        var it = s.keyIterator();
+        while (it.next()) |k| try eval_set.put(k.*, {});
+    }
+    // keep docs with no overlap
+    var kept = std.ArrayList(usize).init(allocator);
+    defer kept.deinit();
+    for (docs, 0..) |doc, idx| {
+        var s = try ngramSet(allocator, doc, n);
+        defer s.deinit();
+        var overlap = false;
+        var it = s.keyIterator();
+        while (it.next()) |k| {
+            if (eval_set.contains(k.*)) {
+                overlap = true;
+                break;
+            }
+        }
+        if (!overlap) try kept.append(idx);
+    }
+    return kept.toOwnedSlice();
+}
+
+test "decontaminate removes overlapping doc" {
+    const allocator = std.testing.allocator;
+    const docs = [_][]const u8{ "hello world foo bar baz", "completely unrelated text here" };
+    const evals = [_][]const u8{ "hello world foo bar baz extra" };
+    const kept = try decontaminate(allocator, &docs, &evals, 5);
+    defer allocator.free(kept);
+    // first doc shares 5-grams with eval -> removed; second kept
+    try std.testing.expectEqual(@as(usize, 1), kept.len);
+    try std.testing.expectEqual(@as(usize, 1), kept[0]);
+}
+
+// --- Data mix (PRD 3.6) ---
+pub const MixWeights = struct {
+    web: f32 = 0.65,
+    code: f32 = 0.20,
+    math: f32 = 0.10,
+    other: f32 = 0.05,
+};
+
+pub fn mixWeightsValid(w: MixWeights) bool {
+    const sum = w.web + w.code + w.math + w.other;
+    return @abs(sum - 1.0) < 1e-5;
+}
+
+test "MixWeights valid" {
+    const w = MixWeights{};
+    try std.testing.expect(mixWeightsValid(w));
+}
