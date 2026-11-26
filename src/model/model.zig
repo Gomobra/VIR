@@ -232,7 +232,10 @@ pub const Model = struct {
             block_in[i] = self.allocator.alloc(f32, seq * d) catch return;
             block_out[i] = self.allocator.alloc(f32, seq * d) catch return;
         }
-        defer for (0..n) |i| { self.allocator.free(block_in[i]); self.allocator.free(block_out[i]); };
+        defer for (0..n) |i| {
+            self.allocator.free(block_in[i]);
+            self.allocator.free(block_out[i]);
+        };
 
         // run blocks
         var cur = hidden0;
@@ -308,57 +311,58 @@ pub const Model = struct {
         }
     }
 
-fn cpuEmbeddingGather(out: []f32, table: []const f32, ids: []const u32, vocab: usize, dim: usize) void {
-    const cpu = @import("../cpu/cpu.zig");
-    cpu.embeddingGatherF32(out, table, ids, vocab, dim);
-}
+    fn cpuEmbeddingGather(out: []f32, table: []const f32, ids: []const u32, vocab: usize, dim: usize) void {
+        const cpu = @import("../cpu/cpu.zig");
+        cpu.embeddingGatherF32(out, table, ids, vocab, dim);
+    }
 
-test "Model forward finite" {
-    const allocator = std.testing.allocator;
-    const cfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
-    var m = try Model.init(allocator, cfg);
-    defer m.deinit();
-    const tokens = [_]u32{ 1, 2, 3, 4 };
-    var logits = [_]f32{0} * *(4 * 8);
-    m.forward(&logits, &tokens);
-    for (logits) |v| try std.testing.expect(std.math.isFinite(v));
-    try std.testing.expectEqual(@as(usize, 4), m.nBlocks());
-}
+    test "Model forward finite" {
+        const allocator = std.testing.allocator;
+        const cfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+        var m = try Model.init(allocator, cfg);
+        defer m.deinit();
+        const tokens = [_]u32{ 1, 2, 3, 4 };
+        var logits = [_]f32{0} * *(4 * 8);
+        m.forward(&logits, &tokens);
+        for (logits) |v| try std.testing.expect(std.math.isFinite(v));
+        try std.testing.expectEqual(@as(usize, 4), m.nBlocks());
+    }
 
-test "Block backward gradcheck" {
-    const allocator = std.testing.allocator;
-    var blk = try Model.Block.init(allocator, 4);
-    defer blk.deinit();
-    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    blk.forward(&out, &x, 2, 4);
-    // dOut = ones
-    var dOut = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
-    var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    const dW_attn = try allocator.alloc(f32, 4 * 4);
-    defer allocator.free(dW_attn);
-    @memset(dW_attn, 0);
-    const dW_mlp = try allocator.alloc(f32, 8 * 4);
-    defer allocator.free(dW_mlp);
-    @memset(dW_mlp, 0);
-    blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
-    // finite diff for x[0]
-    const eps: f32 = 1e-3;
-    var xp = x;
-    xp[0] += eps;
-    var xm = x;
-    xm[0] -= eps;
-    var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    blk.forward(&op, &xp, 2, 4);
-    blk.forward(&om, &xm, 2, 4);
-    var sp: f32 = 0;
-    var sm: f32 = 0;
-    for (op) |v| sp += v;
-    for (om) |v| sm += v;
-    const fd = (sp - sm) / (2 * eps);
-    try std.testing.expect(@abs(fd - dX[0]) < 1e-1);
-}
+    test "Block backward gradcheck" {
+        const allocator = std.testing.allocator;
+        var blk = try Model.Block.init(allocator, 4);
+        defer blk.deinit();
+        var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+        var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        blk.forward(&out, &x, 2, 4);
+        // dOut = ones
+        var dOut = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
+        var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        const dW_attn = try allocator.alloc(f32, 4 * 4);
+        defer allocator.free(dW_attn);
+        @memset(dW_attn, 0);
+        const dW_mlp = try allocator.alloc(f32, 8 * 4);
+        defer allocator.free(dW_mlp);
+        @memset(dW_mlp, 0);
+        blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
+        // finite diff for x[0]
+        const eps: f32 = 1e-3;
+        var xp = x;
+        xp[0] += eps;
+        var xm = x;
+        xm[0] -= eps;
+        var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        blk.forward(&op, &xp, 2, 4);
+        blk.forward(&om, &xm, 2, 4);
+        var sp: f32 = 0;
+        var sm: f32 = 0;
+        for (op) |v| sp += v;
+        for (om) |v| sm += v;
+        const fd = (sp - sm) / (2 * eps);
+        try std.testing.expect(@abs(fd - dX[0]) < 1e-1);
+    }
+};
 
 test "Model backward finite" {
     const allocator = std.testing.allocator;
@@ -392,7 +396,10 @@ test "Model backward finite" {
         @memset(dBlocks_attn[i], 0);
         @memset(dBlocks_mlp[i], 0);
     }
-    defer for (0..n) |i| { allocator.free(dBlocks_attn[i]); allocator.free(dBlocks_mlp[i]); };
+    defer for (0..n) |i| {
+        allocator.free(dBlocks_attn[i]);
+        allocator.free(dBlocks_mlp[i]);
+    };
     m.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, &tokens, dLogits);
     // finite check dEmbed[0]
     for (dEmbed) |x| try std.testing.expect(std.math.isFinite(x));
