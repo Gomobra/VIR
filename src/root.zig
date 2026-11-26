@@ -9,6 +9,7 @@ pub const cpu = @import("cpu/cpu.zig");
 pub const autograd = @import("autograd/autograd.zig");
 pub const optim = @import("optim/optim.zig");
 pub const nn = @import("nn/nn.zig");
+pub const tokenizer = @import("tokenizer/tokenizer.zig");
 
 test "smoke" {
     const std = @import("std");
