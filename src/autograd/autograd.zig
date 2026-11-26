@@ -586,8 +586,10 @@ test "gradcheck attention" {
     backwardAttention(&dQ, &dK, &dV, &Q, &K, &V, &dOut, seq, d);
 
     // finite diff for Q[0]
-    var Qp = Q; Qp[0] += eps;
-    var Qm = Q; Qm[0] -= eps;
+    var Qp = Q;
+    Qp[0] += eps;
+    var Qm = Q;
+    Qm[0] -= eps;
     var Op = [_]f32{ 0, 0, 0, 0 };
     var Om = [_]f32{ 0, 0, 0, 0 };
     cpu.attentionNaiveF32(&Op, &Qp, &K, &V, seq, d);
