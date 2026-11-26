@@ -216,7 +216,7 @@ pub fn writeShard(allocator: std.mem.Allocator, path: []const u8, dtype: DType, 
     var ver: [4]u8 = undefined;
     std.mem.writeInt(u32, &ver, 1, .little);
     try file.writeAll(&ver);
-    try file.writeAll(&[_]u8{@intFromEnum(dtype)});
+    try file.writeAll(&[_]u8{@backingInt(dtype)});
     var ntok: [8]u8 = undefined;
     std.mem.writeInt(u64, &ntok, tokens.len, .little);
     try file.writeAll(&ntok);
