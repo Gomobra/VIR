@@ -93,12 +93,12 @@ pub const Engram = struct {
         const dd = @min(self.d, mem);
         var t: usize = 0;
         while (t < seq) : (t += 1) {
-            var e = self.allocator.alloc(f32, mem) catch return;
+            const e = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(e);
             self.retrieve(e, token_ids, t);
-            var kvec = self.allocator.alloc(f32, mem) catch return;
+            const kvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(kvec);
-            var vvec = self.allocator.alloc(f32, mem) catch return;
+            const vvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(vvec);
             var i: usize = 0;
             while (i < mem) : (i += 1) {
@@ -114,9 +114,9 @@ pub const Engram = struct {
                 while (j < mem) : (j += 1) acc += self.wv[i * mem + j] * e[j];
                 vvec[i] = acc;
             }
-            var hrms = self.allocator.alloc(f32, self.d) catch return;
+            const hrms = self.allocator.alloc(f32, self.d) catch return;
             defer self.allocator.free(hrms);
-            var krms = self.allocator.alloc(f32, mem) catch return;
+            const krms = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(krms);
             const hslice = h[t * self.d .. (t + 1) * self.d];
             cpu.rmsnormF32(hrms, hslice, 1e-6);
@@ -146,12 +146,12 @@ pub const Engram = struct {
         while (t < seq) : (t += 1) {
             const hslice = h[t * d .. (t + 1) * d];
             const dout = dOut[t * d .. (t + 1) * d];
-            var e = self.allocator.alloc(f32, mem) catch return;
+            const e = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(e);
             self.retrieve(e, token_ids, t);
-            var kvec = self.allocator.alloc(f32, mem) catch return;
+            const kvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(kvec);
-            var vvec = self.allocator.alloc(f32, mem) catch return;
+            const vvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(vvec);
             var i: usize = 0;
             while (i < mem) : (i += 1) {
@@ -167,9 +167,9 @@ pub const Engram = struct {
                 while (j < mem) : (j += 1) acc += self.wv[i * mem + j] * e[j];
                 vvec[i] = acc;
             }
-            var hrms = self.allocator.alloc(f32, d) catch return;
+            const hrms = self.allocator.alloc(f32, d) catch return;
             defer self.allocator.free(hrms);
-            var krms = self.allocator.alloc(f32, mem) catch return;
+            const krms = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(krms);
             cpu.rmsnormF32(hrms, hslice, 1e-6);
             cpu.rmsnormF32(krms, kvec, 1e-6);
