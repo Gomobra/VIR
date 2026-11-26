@@ -107,3 +107,33 @@ test "RunConfig defaults" {
     try std.testing.expectEqualStrings("run-0", cfg.run_id);
     try std.testing.expect(cfg.model.seq_len > 0);
 }
+
+// Parse a simple key=value config (one per line). Returns number of keys parsed.
+pub fn parseKeyValue(allocator: std.mem.Allocator, text: []const u8, out: *std.StringHashMap([]const u8)) !usize {
+    _ = allocator;
+    var count: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+        if (trimmed[0] == '#') continue;
+        const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+        const key = std.mem.trim(u8, trimmed[0..eq], " \t");
+        const val = std.mem.trim(u8, trimmed[eq + 1 ..], " \t");
+        if (key.len == 0) continue;
+        try out.put(key, val);
+        count += 1;
+    }
+    return count;
+}
+
+test "parseKeyValue" {
+    const allocator = std.testing.allocator;
+    var map = std.StringHashMap([]const u8).init(allocator);
+    defer map.deinit();
+    const text = "lr=0.01\nbatch=4\n# comment\n\nhidden=128";
+    const n = try parseKeyValue(allocator, text, &map);
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expectEqualStrings("0.01", map.get("lr").?);
+    try std.testing.expectEqualStrings("128", map.get("hidden").?);
+}
