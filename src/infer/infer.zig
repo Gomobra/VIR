@@ -52,7 +52,9 @@ pub fn topK(logits: []f32, k: usize) void {
         sorted[maxidx] = tmp;
     }
     const thresh = sorted[k - 1];
-    for (logits) |*v| if (v.* < thresh) v.* = -std.math.inf(f32);
+    for (logits) |*v| {
+        if (v.* < thresh) v.* = -std.math.inf(f32);
+    }
 }
 
 // Top-p (nucleus): keep smallest set with cumulative prob >= p.
@@ -98,7 +100,9 @@ pub fn topP(logits: []f32, p: f32) void {
     @memset(mask, false);
     var r: usize = 0;
     while (r < cutoff) : (r += 1) mask[idx[r]] = true;
-    for (logits, 0..) |*v, ii| if (!mask[ii]) v.* = -std.math.inf(f32);
+    for (logits, 0..) |*v, ii| {
+        if (!mask[ii]) v.* = -std.math.inf(f32);
+    }
 }
 
 // Repetition penalty: divide logits of tokens that appeared by penalty.
