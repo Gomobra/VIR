@@ -372,6 +372,46 @@ test "MixWeights valid" {
     try std.testing.expect(mixWeightsValid(w));
 }
 
+// --- Mixed sampler (PRD 3.6): pick shard by weight ---
+pub const MixedSampler = struct {
+    weights: []const f32,
+    // cumulative
+    cum: []f32,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, weights: []const f32) !MixedSampler {
+        const cum = try allocator.alloc(f32, weights.len);
+        var running: f32 = 0;
+        for (weights, 0..) |w, i| {
+            running += w;
+            cum[i] = running;
+        }
+        return .{ .weights = weights, .cum = cum, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *MixedSampler) void {
+        self.allocator.free(self.cum);
+    }
+
+    // Given u in [0,1), return shard index.
+    pub fn pick(self: *const MixedSampler, u: f32) usize {
+        for (self.cum, 0..) |c, i| {
+            if (u < c) return i;
+        }
+        return self.cum.len - 1;
+    }
+};
+
+test "MixedSampler pick" {
+    const allocator = std.testing.allocator;
+    const w = [_]f32{ 0.5, 0.3, 0.2 };
+    var ms = try MixedSampler.init(allocator, &w);
+    defer ms.deinit();
+    try std.testing.expectEqual(@as(usize, 0), ms.pick(0.25));
+    try std.testing.expectEqual(@as(usize, 1), ms.pick(0.6));
+    try std.testing.expectEqual(@as(usize, 2), ms.pick(0.95));
+}
+
 // --- FIM (fill-in-the-middle, PRD 3.6) ---
 pub const FIMMode = enum { psm, spm };
 
