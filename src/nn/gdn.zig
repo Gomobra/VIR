@@ -27,7 +27,7 @@ pub const GDN = struct {
             }
             // S = a*S - a*b*u k^T + b*v k^T
             // update in place using old S (need copy)
-            var Sold = std.heap.page_allocator.alloc(f32, self.d * self.d) catch return;
+            const Sold = std.heap.page_allocator.alloc(f32, self.d * self.d) catch return;
             defer std.heap.page_allocator.free(Sold);
             @memcpy(Sold, S);
             i = 0;
@@ -138,19 +138,19 @@ pub const GDN = struct {
             var r: usize = 0;
             while (r < d) : (r += 1) {
                 var term1: f32 = 0;
-                var i2: usize = 0;
-                while (i2 < d) : (i2 += 1) {
+                var iidx: usize = 0;
+                while (iidx < d) : (iidx += 1) {
                     var j2: usize = 0;
                     while (j2 < d) : (j2 += 1) {
-                        term1 += dS[i2 * d + j2] * Sprev[i2 * d + r] * K[t * d + j2];
+                        term1 += dS[iidx * d + j2] * Sprev[iidx * d + r] * K[t * d + j2];
                     }
                 }
                 var term2: f32 = 0;
                 i2 = 0;
-                while (i2 < d) : (i2 += 1) term2 += dS[i2 * d + r] * u[i2];
+                while (iidx < d) : (iidx += 1) term2 += dS[iidx * d + r] * u[iidx];
                 var term3: f32 = 0;
                 i2 = 0;
-                while (i2 < d) : (i2 += 1) term3 += dS[i2 * d + r] * V[t * d + i2];
+                while (iidx < d) : (iidx += 1) term3 += dS[iidx * d + r] * V[t * d + iidx];
                 dK[t * d + r] += -a * b * (term1 + term2) + b * term3;
             }
             // dalpha = sum dS * A, A = Sprev - b*u k^T
