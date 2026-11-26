@@ -62,7 +62,7 @@ pub const BitLinear = struct {
             const scale_x = if (amax > 0) 127.0 / amax else 0;
             const inv_scale_x = if (scale_x > 0) amax / 127.0 else 0;
             // quantize x to int8
-            var xq = self.allocator.alloc(i8, self.in_dim) catch return;
+            const xq = self.allocator.alloc(i8, self.in_dim) catch return;
             defer self.allocator.free(xq);
             for (xrow, xq) |v, *q| {
                 const qv = @round(v * scale_x);
