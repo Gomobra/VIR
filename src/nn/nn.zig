@@ -61,7 +61,21 @@ pub const RoPE = struct {
         const autograd = @import("../autograd/autograd.zig");
         autograd.ropeForward(out, x, pos, d, self.base);
     }
+    pub fn backward(self: *const RoPE, dX: []f32, dOut: []const f32, pos: usize, d: usize) void {
+        const autograd = @import("../autograd/autograd.zig");
+        autograd.ropeBackward(dX, dOut, pos, d, self.base);
+    }
 };
+
+test "RoPE forward/backward roundtrip (nn)" {
+    const rope = RoPE{};
+    var x = [_]f32{ 1, 0, 0, 1 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    rope.forward(&out, &x, 3, 4);
+    var dx = [_]f32{ 0, 0, 0, 0 };
+    rope.backward(&dx, &out, 3, 4);
+    for (dx, x) |a, b| try std.testing.expectApproxEqAbs(b, a, 1e-4);
+}
 
 test "Linear forward shape" {
     const allocator = std.testing.allocator;

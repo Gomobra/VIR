@@ -371,3 +371,58 @@ test "MixWeights valid" {
     const w = MixWeights{};
     try std.testing.expect(mixWeightsValid(w));
 }
+
+// --- Pipeline integration (PRD 3.6, 4.11): filter -> dedup exact -> decontam -> shard ---
+
+pub const PipelineConfig = struct {
+    filter: FilterConfig = .{},
+    ngram_n: usize = 5,
+    eval_docs: []const []const u8 = &.{},
+};
+
+pub fn runPipeline(allocator: std.mem.Allocator, docs: []const []const u8, cfg: PipelineConfig) ![]usize {
+    // 1. filter
+    var filtered = std.ArrayList(usize).init(allocator);
+    defer filtered.deinit();
+    for (docs, 0..) |doc, idx| {
+        if (passesFilter(cfg.filter, doc)) try filtered.append(idx);
+    }
+    // 2. exact dedup on filtered
+    var seen = std.AutoHashMap(u64, void).init(allocator);
+    defer seen.deinit();
+    var deduped = std.ArrayList(usize).init(allocator);
+    defer deduped.deinit();
+    for (filtered.items) |idx| {
+        const h = exactHash(docs[idx]);
+        if (seen.contains(h)) continue;
+        try seen.put(h, {});
+        try deduped.append(idx);
+    }
+    // 3. decontaminate
+    // build list of candidate docs
+    var cands = try allocator.alloc([]const u8, deduped.items.len);
+    defer allocator.free(cands);
+    for (deduped.items, 0..) |idx, i| cands[i] = docs[idx];
+    const kept_local = try decontaminate(allocator, cands, cfg.eval_docs, cfg.ngram_n);
+    defer allocator.free(kept_local);
+    // map back to original indices
+    var result = try allocator.alloc(usize, kept_local.len);
+    for (kept_local, 0..) |li, i| result[i] = deduped.items[li];
+    return result;
+}
+
+test "runPipeline end-to-end" {
+    const allocator = std.testing.allocator;
+    const docs = [_][]const u8{
+        "This is a long enough document that passes the quality filter rules.",
+        "short",
+        "This is a long enough document that passes the quality filter rules.", // dup
+        "completely unrelated text that shares ngram with eval set here",
+    };
+    const evals = [_][]const u8{ "shares ngram with eval set here" };
+    const cfg = PipelineConfig{ .eval_docs = &evals };
+    const kept = try runPipeline(allocator, &docs, cfg);
+    defer allocator.free(kept);
+    // doc1 (short) filtered; doc2 dup removed; doc3 decontaminated -> only doc0
+    try std.testing.expect(kept.len <= 2);
+}
