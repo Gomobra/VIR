@@ -33,3 +33,32 @@ test "Sampler deterministic" {
     const s2 = Sampler{ .seed = 42, .step = 10, .rank = 0, .micro = 0 };
     try std.testing.expectEqual(s1.index(), s2.index());
 }
+
+// Quality filter (PRD 3.6): returns true if document passes.
+pub const FilterConfig = struct {
+    min_chars: usize = 50,
+    max_symbol_ratio: f32 = 0.3,
+};
+
+pub fn passesFilter(cfg: FilterConfig, text: []const u8) bool {
+    if (text.len < cfg.min_chars) return false;
+    // symbol ratio: count non-alphanumeric (excluding space) / len
+    var symbols: usize = 0;
+    for (text) |c| {
+        const is_alnum = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == ' ' or c == '\n' or c == '\t';
+        if (!is_alnum) symbols += 1;
+    }
+    const ratio = @as(f32, @floatFromInt(symbols)) / @as(f32, @floatFromInt(text.len));
+    if (ratio > cfg.max_symbol_ratio) return false;
+    return true;
+}
+
+test "passesFilter basic" {
+    const cfg = FilterConfig{};
+    try std.testing.expect(!passesFilter(cfg, "short"));
+    var buf: [100]u8 = undefined;
+    const txt = "This is a normal sentence with enough characters to pass the filter.";
+    try std.testing.expect(passesFilter(cfg, txt));
+    // high symbol ratio
+    try std.testing.expect(!passesFilter(cfg, "!!!!@@@@####$$$$%%%%^^^^&&&&****((((()))))"));
+}
