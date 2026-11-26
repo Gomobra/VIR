@@ -196,7 +196,6 @@ pub const Engram = struct {
             // dH from alpha gating: dH += dalpha * scale * krms (padded to d)
             ii = 0;
             while (ii < d) : (ii += 1) {
-                const kr = if (ii < mem) krms[ii] else 0;
                 // rmsnorm backward for h: dH += (dhrms - h*rmsnorm factor)/rms
                 // dhrms[ii] = dalpha * scale * kr
                 // Use autograd.backwardRMSNorm-style: accumulate
