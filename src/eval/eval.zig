@@ -135,7 +135,9 @@ pub fn bleu(hyp: []const []const u8, ref: []const []const u8) f32 {
     if (hyp.len == 0) return 0;
     // unigram precision
     var match: usize = 0;
-    for (hyp) |h| for (ref) |r| if (std.mem.eql(u8, h, r)) { match += 1; };
+    for (hyp) |h| for (ref) |r| if (std.mem.eql(u8, h, r)) {
+        match += 1;
+    };
     const prec = @as(f32, @floatFromInt(match)) / @as(f32, @floatFromInt(hyp.len));
     // brevity penalty
     const bp = if (hyp.len < ref.len) @exp(1.0 - @as(f32, @floatFromInt(ref.len)) / @as(f32, @floatFromInt(hyp.len))) else 1.0;
@@ -151,7 +153,7 @@ test "bleu identical" {
 
 test "bleu empty hyp" {
     const a = [_][]const u8{};
-    const b = [_][]const u8{ "a" };
+    const b = [_][]const u8{"a"};
     try std.testing.expectEqual(@as(f32, 0.0), bleu(&a, &b));
 }
 
