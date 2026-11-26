@@ -17,6 +17,8 @@ pub const eval = @import("eval/eval.zig");
 pub const infer = @import("infer/infer.zig");
 pub const modality = @import("modality/modality.zig");
 pub const checkpoint = @import("checkpoint/checkpoint.zig");
+pub const gpu = @import("gpu/gpu.zig");
+pub const kernels = @import("kernels/kernels.zig");
 
 test "smoke" {
     const std = @import("std");
