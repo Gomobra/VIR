@@ -238,10 +238,10 @@ test "Block backward gradcheck" {
     // dOut = ones
     var dOut = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
     var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    var dW_attn = try allocator.alloc(f32, 4 * 4);
+    const dW_attn = try allocator.alloc(f32, 4 * 4);
     defer allocator.free(dW_attn);
     @memset(dW_attn, 0);
-    var dW_mlp = try allocator.alloc(f32, 8 * 4);
+    const dW_mlp = try allocator.alloc(f32, 8 * 4);
     defer allocator.free(dW_mlp);
     @memset(dW_mlp, 0);
     blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
