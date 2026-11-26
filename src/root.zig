@@ -10,6 +10,7 @@ pub const autograd = @import("autograd/autograd.zig");
 pub const optim = @import("optim/optim.zig");
 pub const nn = @import("nn/nn.zig");
 pub const tokenizer = @import("tokenizer/tokenizer.zig");
+pub const model = @import("model/model.zig");
 
 test "smoke" {
     const std = @import("std");
