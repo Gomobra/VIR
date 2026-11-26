@@ -11,3 +11,79 @@ test "bitsPerByte" {
     try std.testing.expectApproxEqAbs(@as(f64, 1.0), bitsPerByte(8.0, 8), 1e-9);
     try std.testing.expectEqual(@as(f64, 0.0), bitsPerByte(0.0, 0));
 }
+
+// Multiple-choice accuracy: predictions vs labels.
+pub fn mcAccuracy(predictions: []const usize, labels: []const usize) f32 {
+    if (predictions.len == 0 or predictions.len != labels.len) return 0;
+    var correct: usize = 0;
+    for (predictions, labels) |p, l| if (p == l) { correct += 1; };
+    return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(predictions.len));
+}
+
+// Needle-in-a-haystack generator: build a haystack of `haystack_len` filler tokens,
+// insert needle at needle_pos. Returns allocated string.
+pub fn needleHaystack(allocator: std.mem.Allocator, haystack_len: usize, needle: []const u8, needle_pos: usize) ![]u8 {
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+    const pos = @min(needle_pos, haystack_len);
+    // filler before needle
+    var i: usize = 0;
+    while (i < pos) : (i += 1) try out.appendSlice("filler ");
+    try out.appendSlice(needle);
+    try out.appendSlice(" ");
+    i = pos + needle.len;
+    while (i < haystack_len) : (i += 1) try out.appendSlice("filler ");
+    return out.toOwnedSlice();
+}
+
+// ROUGE-L (simplified LCS-based) score between hypothesis and reference.
+pub fn rougeL(hyp: []const u8, ref: []const u8) f32 {
+    // LCS length over bytes (simplified)
+    if (hyp.len == 0 or ref.len == 0) return 0;
+    // dynamic programming LCS
+    const allocator = std.heap.page_allocator;
+    const dp = allocator.alloc(usize, (hyp.len + 1) * (ref.len + 1)) catch return 0;
+    defer allocator.free(dp);
+    var i: usize = 0;
+    while (i <= hyp.len) : (i += 1) dp[i * (ref.len + 1) + 0] = 0;
+    var j: usize = 0;
+    while (j <= ref.len) : (j += 1) dp[0 * (ref.len + 1) + j] = 0;
+    i = 1;
+    while (i <= hyp.len) : (i += 1) {
+        j = 1;
+        while (j <= ref.len) : (j += 1) {
+            if (hyp[i - 1] == ref[j - 1]) {
+                dp[i * (ref.len + 1) + j] = dp[(i - 1) * (ref.len + 1) + (j - 1)] + 1;
+            } else {
+                const a = dp[(i - 1) * (ref.len + 1) + j];
+                const b = dp[i * (ref.len + 1) + (j - 1)];
+                dp[i * (ref.len + 1) + j] = if (a > b) a else b;
+            }
+        }
+    }
+    const lcs = dp[hyp.len * (ref.len + 1) + ref.len];
+    const prec = @as(f32, @floatFromInt(lcs)) / @as(f32, @floatFromInt(hyp.len));
+    const rec = @as(f32, @floatFromInt(lcs)) / @as(f32, @floatFromInt(ref.len));
+    if (prec + rec == 0) return 0;
+    return 2 * prec * rec / (prec + rec);
+}
+
+test "mcAccuracy" {
+    const preds = [_]usize{ 0, 1, 2, 0 };
+    const labels = [_]usize{ 0, 1, 1, 0 };
+    const acc = mcAccuracy(&preds, &labels);
+    try std.testing.expect(@abs(acc - 0.75) < 1e-6);
+}
+
+test "needleHaystack contains needle" {
+    const allocator = std.testing.allocator;
+    const out = try needleHaystack(allocator, 10, "NEEDLE", 3);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "NEEDLE") != null);
+}
+
+test "rougeL identical" {
+    const s = "hello world";
+    const r = rougeL(s, s);
+    try std.testing.expect(@abs(r - 1.0) < 1e-5);
+}
