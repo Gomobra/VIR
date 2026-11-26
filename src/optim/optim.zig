@@ -169,3 +169,32 @@ test "muPLr" {
     const lr = muPLr(0.02, 512, 256);
     try std.testing.expect(lr < 0.02);
 }
+
+// Gradient clipping by global norm (PRD 3.8).
+pub fn clipGradNorm(grads: []f32, max_norm: f32) f32 {
+    var ss: f32 = 0;
+    for (grads) |g| ss += g * g;
+    const norm = @sqrt(ss);
+    if (norm > max_norm and norm > 0) {
+        const scale = max_norm / norm;
+        for (grads) |*g| g.* *= scale;
+    }
+    return norm;
+}
+
+test "clipGradNorm clips" {
+    var g = [_]f32{ 3, 4 };
+    const n = clipGradNorm(&g, 5.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), n, 1e-5);
+    // norm after clip should be 5
+    var ss: f32 = 0;
+    for (g) |v| ss += v * v;
+    try std.testing.expect(@abs(@sqrt(ss) - 5.0) < 1e-5);
+}
+
+test "clipGradNorm no clip" {
+    var g = [_]f32{ 1, 2 };
+    const n = clipGradNorm(&g, 5.0);
+    try std.testing.expect(n < 5.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g[0], 1e-6);
+}
