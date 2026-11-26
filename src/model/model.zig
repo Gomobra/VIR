@@ -270,7 +270,10 @@ pub const Model = struct {
             @memset(dBlocks_attn[i], 0);
             @memset(dBlocks_mlp[i], 0);
         }
-        defer for (0..n) |i| { allocator.free(dBlocks_attn[i]); allocator.free(dBlocks_mlp[i]); };
+        defer for (0..n) |i| {
+            allocator.free(dBlocks_attn[i]);
+            allocator.free(dBlocks_mlp[i]);
+        };
 
         self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, tokens, dLogits);
 
