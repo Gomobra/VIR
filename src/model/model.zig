@@ -3,6 +3,9 @@
 const std = @import("std");
 const nn = @import("../nn/nn.zig");
 const config = @import("../config/config.zig");
+const optim = @import("../optim/optim.zig");
+const autograd = @import("../autograd/autograd.zig");
+const cpu_mod = @import("../cpu/cpu.zig");
 
 pub const Model = struct {
     cfg: config.ModelConfig,
@@ -10,6 +13,11 @@ pub const Model = struct {
     blocks: []Block,
     final_norm: nn.RMSNorm,
     head: nn.Linear, // d -> vocab (separate; could tie)
+    // optimizers
+    opt_embed: optim.AdamW,
+    opt_blocks_attn: []optim.AdamW,
+    opt_blocks_mlp: []optim.AdamW,
+    opt_head: optim.AdamW,
     allocator: std.mem.Allocator,
 
     const Block = struct {
@@ -154,12 +162,25 @@ pub const Model = struct {
         const blocks = try allocator.alloc(Block, n_blocks);
         for (blocks) |*bl| bl.* = try Block.init(allocator, d);
         const head = try nn.Linear.init(allocator, d, v);
+        // optimizers
+        var opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
+        const opt_blocks_attn = try allocator.alloc(optim.AdamW, n_blocks);
+        const opt_blocks_mlp = try allocator.alloc(optim.AdamW, n_blocks);
+        for (0..n_blocks) |i| {
+            opt_blocks_attn[i] = try optim.AdamW.init(allocator, d * d, 0.01);
+            opt_blocks_mlp[i] = try optim.AdamW.init(allocator, (d * 2) * d, 0.01);
+        }
+        var opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
         return .{
             .cfg = cfg,
             .embed = embed,
             .blocks = blocks,
             .final_norm = .{},
             .head = head,
+            .opt_embed = opt_embed,
+            .opt_blocks_attn = opt_blocks_attn,
+            .opt_blocks_mlp = opt_blocks_mlp,
+            .opt_head = opt_head,
             .allocator = allocator,
         };
     }
@@ -169,6 +190,12 @@ pub const Model = struct {
         for (self.blocks) |*bl| bl.deinit();
         self.allocator.free(self.blocks);
         self.head.deinit();
+        self.opt_embed.deinit();
+        for (self.opt_blocks_attn) |*o| o.deinit();
+        self.allocator.free(self.opt_blocks_attn);
+        for (self.opt_blocks_mlp) |*o| o.deinit();
+        self.allocator.free(self.opt_blocks_mlp);
+        self.opt_head.deinit();
     }
 
     // forward: token ids [seq] -> logits [seq, vocab]
@@ -204,6 +231,58 @@ pub const Model = struct {
 
         // head: logits = normed @ W^T  (d -> vocab)
         self.head.forward(logits, normed, seq);
+    }
+
+    // Training step: forward + CE loss + backward + AdamW update. Returns loss.
+    pub fn trainStep(self: *Model, tokens: []const u32, targets: []const u32) !f32 {
+        const allocator = self.allocator;
+        const d = self.cfg.d_model;
+        const v = self.cfg.vocab_size;
+        const seq = tokens.len;
+        const n = self.blocks.len;
+
+        // forward
+        var logits = try allocator.alloc(f32, seq * v);
+        defer allocator.free(logits);
+        self.forward(logits, tokens);
+
+        const loss = @as(f32, @floatCast(cpu_mod.crossEntropyF32(logits, targets, seq, v)));
+
+        // backward
+        var dLogits = try allocator.alloc(f32, seq * v);
+        defer allocator.free(dLogits);
+        @memset(dLogits, 0);
+        autograd.backwardCrossEntropy(dLogits, logits, targets, seq, v);
+
+        var dEmbed = try allocator.alloc(f32, v * d);
+        defer allocator.free(dEmbed);
+        @memset(dEmbed, 0);
+        var dHead = try allocator.alloc(f32, v * d);
+        defer allocator.free(dHead);
+        @memset(dHead, 0);
+        const dBlocks_attn = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_attn);
+        const dBlocks_mlp = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_mlp);
+        for (0..n) |i| {
+            dBlocks_attn[i] = try allocator.alloc(f32, d * d);
+            dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
+            @memset(dBlocks_attn[i], 0);
+            @memset(dBlocks_mlp[i], 0);
+        }
+        defer for (0..n) |i| { allocator.free(dBlocks_attn[i]); allocator.free(dBlocks_mlp[i]); };
+
+        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, tokens, dLogits);
+
+        // update params
+        self.opt_embed.step(self.embed, dEmbed);
+        for (0..n) |i| {
+            self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i]);
+            self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i]);
+        }
+        self.opt_head.step(self.head.w, dHead);
+
+        return loss;
     }
 
     pub fn nBlocks(self: *const Model) usize {
@@ -403,4 +482,15 @@ test "Model backward finite" {
     m.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, &tokens, dLogits);
     // finite check dEmbed[0]
     for (dEmbed) |x| try std.testing.expect(std.math.isFinite(x));
+}
+
+test "Model trainStep finite" {
+    const allocator = std.testing.allocator;
+    const cfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+    const loss = try m.trainStep(&tokens, &targets);
+    try std.testing.expect(std.math.isFinite(loss));
 }
