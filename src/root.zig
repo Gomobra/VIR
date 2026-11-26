@@ -11,6 +11,10 @@ pub const optim = @import("optim/optim.zig");
 pub const nn = @import("nn/nn.zig");
 pub const tokenizer = @import("tokenizer/tokenizer.zig");
 pub const model = @import("model/model.zig");
+pub const data = @import("data/data.zig");
+pub const train = @import("train/train.zig");
+pub const eval = @import("eval/eval.zig");
+pub const infer = @import("infer/infer.zig");
 
 test "smoke" {
     const std = @import("std");
