@@ -209,3 +209,125 @@ test "backwardRMSNorm" {
     // sum of dX*x should relate; just check finite
     for (dX) |v| try std.testing.expect(std.math.isFinite(v));
 }
+
+// Backward cross-entropy: dLogits = softmax(logits) - one_hot(target).
+pub fn backwardCrossEntropy(dLogits: []f32, logits: []const f32, targets: []const u32, rows: usize, vocab: usize) void {
+    std.debug.assert(dLogits.len == logits.len and logits.len == rows * vocab);
+    std.debug.assert(targets.len == rows);
+    // softmax per row
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const base = r * vocab;
+        var mx: f32 = logits[base];
+        var j: usize = 1;
+        while (j < vocab) : (j += 1) if (logits[base + j] > mx) {
+            mx = logits[base + j];
+        };
+        var sum: f32 = 0;
+        j = 0;
+        while (j < vocab) : (j += 1) {
+            dLogits[base + j] = @exp(logits[base + j] - mx);
+            sum += dLogits[base + j];
+        }
+        j = 0;
+        while (j < vocab) : (j += 1) {
+            dLogits[base + j] /= sum;
+            if (j == targets[r]) dLogits[base + j] -= 1.0;
+        }
+    }
+}
+
+// Backward embedding: scatter-add dOut into dTable at ids.
+pub fn backwardEmbedding(dTable: []f32, dOut: []const f32, ids: []const u32, vocab: usize, dim: usize) void {
+    std.debug.assert(dTable.len == vocab * dim);
+    std.debug.assert(dOut.len == ids.len * dim);
+    for (ids, 0..) |id, i| {
+        std.debug.assert(id < vocab);
+        var d: usize = 0;
+        while (d < dim) : (d += 1) {
+            dTable[id * dim + d] += dOut[i * dim + d];
+        }
+    }
+}
+
+// RoPE forward: rotate pairs (x[2i], x[2i+1]) by angle = pos * theta_i.
+// theta_i = 1 / (base^(2i/d)).
+pub fn ropeForward(out: []f32, x: []const f32, pos: usize, d: usize, base: f32) void {
+    std.debug.assert(out.len == x.len and x.len % 2 == 0);
+    const half = x.len / 2;
+    var i: usize = 0;
+    while (i < half) : (i += 1) {
+        const freq = 1.0 / std.math.pow(f32, base, @as(f32, @floatFromInt(2 * i)) / @as(f32, @floatFromInt(d)));
+        const angle = @as(f32, @floatFromInt(pos)) * freq;
+        const cos = @cos(angle);
+        const sin = @sin(angle);
+        const a = x[2 * i];
+        const b = x[2 * i + 1];
+        out[2 * i] = a * cos - b * sin;
+        out[2 * i + 1] = a * sin + b * cos;
+    }
+}
+
+// RoPE backward (inverse rotation).
+pub fn ropeBackward(dX: []f32, dOut: []const f32, pos: usize, d: usize, base: f32) void {
+    std.debug.assert(dX.len == dOut.len and dX.len % 2 == 0);
+    const half = dX.len / 2;
+    var i: usize = 0;
+    while (i < half) : (i += 1) {
+        const freq = 1.0 / std.math.pow(f32, base, @as(f32, @floatFromInt(2 * i)) / @as(f32, @floatFromInt(d)));
+        const angle = @as(f32, @floatFromInt(pos)) * freq;
+        const cos = @cos(angle);
+        const sin = @sin(angle);
+        const a = dOut[2 * i];
+        const b = dOut[2 * i + 1];
+        // inverse: rotate by -angle
+        dX[2 * i] += a * cos + b * sin;
+        dX[2 * i + 1] += -a * sin + b * cos;
+    }
+}
+
+// Gradient check harness: finite difference for scalar function f at x, compare to analytic g.
+pub fn gradCheckScalar(f: *const fn (x: f64) f64, analytic: f64, x: f64, eps: f64, tol: f64) bool {
+    const fd = (f(x + eps) - f(x - eps)) / (2.0 * eps);
+    const denom = if (@abs(analytic) > 1e-12) @abs(analytic) else 1.0;
+    const rel = @abs(fd - analytic) / denom;
+    return rel < tol;
+}
+
+test "backwardCrossEntropy" {
+    // logits [0,0], target 0 -> softmax [0.5,0.5], dLogit = [0.5-1, 0.5] = [-0.5, 0.5]
+    var logits = [_]f32{ 0, 0 };
+    var targets = [_]u32{ 0 };
+    var dL = [_]f32{ 0, 0 };
+    backwardCrossEntropy(&dL, &logits, &targets, 1, 2);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.5), dL[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), dL[1], 1e-5);
+}
+
+test "backwardEmbedding" {
+    var table = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 2, 3, 4 };
+    var ids = [_]u32{ 1, 0 };
+    backwardEmbedding(&table, &dOut, &ids, 2, 2);
+    // id0 gets dOut[2..4] = [3,4]; id1 gets dOut[0..2]=[1,2]
+    try std.testing.expectEqualSlices(f32, &[_]f32{ 3, 4, 1, 2 }, &table);
+}
+
+test "ropeForward/Backward roundtrip" {
+    var x = [_]f32{ 1, 0, 0, 1 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    ropeForward(&out, &x, 3, 4, 10000.0);
+    var dx = [_]f32{ 0, 0, 0, 0 };
+    ropeBackward(&dx, &out, 3, 4, 10000.0);
+    for (dx, x) |a, b| try std.testing.expectApproxEqAbs(b, a, 1e-4);
+}
+
+test "gradCheckScalar" {
+    const f = struct {
+        fn sq(x: f64) f64 {
+            return x * x;
+        }
+    }.sq;
+    // derivative of x^2 at x=2 is 4
+    try std.testing.expect(gradCheckScalar(f, 4.0, 2.0, 1e-5, 1e-6));
+}
