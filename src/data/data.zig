@@ -372,6 +372,54 @@ test "MixWeights valid" {
     try std.testing.expect(mixWeightsValid(w));
 }
 
+// --- FIM (fill-in-the-middle, PRD 3.6) ---
+pub const FIMMode = enum { psm, spm };
+
+// Split text into prefix/middle/suffix by character offsets and format.
+pub fn fimFormat(allocator: std.mem.Allocator, text: []const u8, prefix_len: usize, middle_len: usize, mode: FIMMode) ![]u8 {
+    const plen = @min(prefix_len, text.len);
+    const mlen = @min(middle_len, if (text.len > plen) text.len - plen else 0);
+    const prefix = text[0..plen];
+    const middle = text[plen .. plen + mlen];
+    const suffix = text[plen + mlen ..];
+
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+    if (mode == .psm) {
+        try out.appendSlice("<fim_prefix>");
+        try out.appendSlice(prefix);
+        try out.appendSlice("<fim_suffix>");
+        try out.appendSlice(suffix);
+        try out.appendSlice("<fim_middle>");
+        try out.appendSlice(middle);
+    } else {
+        try out.appendSlice("<fim_suffix>");
+        try out.appendSlice(suffix);
+        try out.appendSlice("<fim_prefix>");
+        try out.appendSlice(prefix);
+        try out.appendSlice("<fim_middle>");
+        try out.appendSlice(middle);
+    }
+    return out.toOwnedSlice();
+}
+
+test "fimFormat psm" {
+    const allocator = std.testing.allocator;
+    const out = try fimFormat(allocator, "hello world test", 5, 6, .psm);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<fim_prefix>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<fim_suffix>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<fim_middle>") != null);
+}
+
+test "fimFormat spm" {
+    const allocator = std.testing.allocator;
+    const out = try fimFormat(allocator, "hello world test", 5, 6, .spm);
+    defer allocator.free(out);
+    // spm starts with suffix
+    try std.testing.expect(std.mem.startsWith(u8, out, "<fim_suffix>"));
+}
+
 // --- Pipeline integration (PRD 3.6, 4.11): filter -> dedup exact -> decontam -> shard ---
 
 pub const PipelineConfig = struct {
