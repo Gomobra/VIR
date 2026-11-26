@@ -16,6 +16,7 @@ pub const train = @import("train/train.zig");
 pub const eval = @import("eval/eval.zig");
 pub const infer = @import("infer/infer.zig");
 pub const modality = @import("modality/modality.zig");
+pub const checkpoint = @import("checkpoint/checkpoint.zig");
 
 test "smoke" {
     const std = @import("std");
