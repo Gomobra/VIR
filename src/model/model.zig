@@ -370,7 +370,7 @@ test "Model backward finite" {
     var m = try Model.init(allocator, cfg);
     defer m.deinit();
     const tokens = [_]u32{ 1, 2, 3 };
-    var logits = try allocator.alloc(f32, tokens.len * 8);
+    const logits = try allocator.alloc(f32, tokens.len * 8);
     defer allocator.free(logits);
     m.forward(logits, &tokens);
     // dLogits = ones
