@@ -47,16 +47,16 @@ pub const BitLinear = struct {
         defer self.allocator.free(wt);
         self.ternarize(wt);
         // dW[d_out? ]: dW[j*in+i] += sum_b x[b,i] * dOut[b,j] (STE, ignore quant)
-        var j: usize = 0;
-        while (j < self.out_dim) : (j += 1) {
+        var jj: usize = 0;
+        while (jj < self.out_dim) : (jj += 1) {
             var i: usize = 0;
             while (i < self.in_dim) : (i += 1) {
                 var acc: f32 = 0;
                 var b: usize = 0;
                 while (b < batch) : (b += 1) {
-                    acc += x[b * self.in_dim + i] * dOut[b * self.out_dim + j];
+                    acc += x[b * self.in_dim + i] * dOut[b * self.out_dim + jj];
                 }
-                dW[j * self.in_dim + i] += acc;
+                dW[jj * self.in_dim + i] += acc;
             }
         }
         // dX[b,i] = sum_j W_ternary[j,i] * dOut[b,j]
@@ -65,9 +65,9 @@ pub const BitLinear = struct {
             var i: usize = 0;
             while (i < self.in_dim) : (i += 1) {
                 var acc: f32 = 0;
-                var j: usize = 0;
-                while (j < self.out_dim) : (j += 1) {
-                    acc += @as(f32, @floatFromInt(wt[j * self.in_dim + i])) * dOut[b * self.out_dim + j];
+                var jj2: usize = 0;
+                while (jj2 < self.out_dim) : (jj2 += 1) {
+                    acc += @as(f32, @floatFromInt(wt[jj2 * self.in_dim + i])) * dOut[b * self.out_dim + jj2];
                 }
                 dX[b * self.in_dim + i] += acc;
             }
@@ -146,7 +146,7 @@ test "BitLinear backward finite" {
     var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
     var out = [_]f32{ 0, 0, 0, 0, 0, 0 };
     bl.forward(&out, &x, 2);
-    var dW = try allocator.alloc(f32, bl.w.len);
+    const dW = try allocator.alloc(f32, bl.w.len);
     defer allocator.free(dW);
     @memset(dW, 0);
     var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
