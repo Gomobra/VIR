@@ -31,3 +31,98 @@ test "temperatureScale" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), l[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 2.0), l[1], 1e-6);
 }
+
+// Top-k: keep only top k logits, set rest to -inf.
+pub fn topK(logits: []f32, k: usize) void {
+    if (k >= logits.len) return;
+    // find k-th largest threshold
+    var sorted = std.heap.page_allocator.alloc(f32, logits.len) catch return;
+    defer std.heap.page_allocator.free(sorted);
+    @memcpy(sorted, logits);
+    // simple selection sort for threshold
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        var maxidx = i;
+        var j = i + 1;
+        while (j < sorted.len) : (j += 1) if (sorted[j] > sorted[maxidx]) { maxidx = j; };
+        const tmp = sorted[i]; sorted[i] = sorted[maxidx]; sorted[maxidx] = tmp;
+    }
+    const thresh = sorted[k - 1];
+    for (logits) |*v| if (v.* < thresh) v.* = -std.math.inf(f32);
+}
+
+// Top-p (nucleus): keep smallest set with cumulative prob >= p.
+pub fn topP(logits: []f32, p: f32) void {
+    // softmax
+    var mx: f32 = logits[0];
+    for (logits) |v| if (v > mx) { mx = v; };
+    var sum: f32 = 0;
+    for (logits) |v| sum += @exp(v - mx);
+    // sort indices by prob desc
+    var idx = std.heap.page_allocator.alloc(usize, logits.len) catch return;
+    defer std.heap.page_allocator.free(idx);
+    for (idx, 0..) |*x, i| x.* = i;
+    // insertion sort by prob desc
+    var i: usize = 1;
+    while (i < idx.len) : (i += 1) {
+        const key = idx[i];
+        var j = i;
+        while (j > 0) {
+            const pj = @exp(logits[idx[j - 1]] - mx) / sum;
+            const pk = @exp(logits[key] - mx) / sum;
+            if (pj >= pk) break;
+            idx[j] = idx[j - 1];
+            j -= 1;
+        }
+        idx[j] = key;
+    }
+    // cumulative
+    var cum: f32 = 0;
+    var cutoff: usize = logits.len;
+    for (idx, 0..) |id, rank| {
+        cum += @exp(logits[id] - mx) / sum;
+        if (cum >= p) { cutoff = rank + 1; break; }
+    }
+    // mask out beyond cutoff
+    var mask = std.heap.page_allocator.alloc(bool, logits.len) catch return;
+    defer std.heap.page_allocator.free(mask);
+    @memset(mask, false);
+    var r: usize = 0;
+    while (r < cutoff) : (r += 1) mask[idx[r]] = true;
+    for (logits, 0..) |*v, ii| if (!mask[ii]) v.* = -std.math.inf(f32);
+}
+
+// Repetition penalty: divide logits of tokens that appeared by penalty.
+pub fn repetitionPenalty(logits: []f32, appeared: []const u32, penalty: f32) void {
+    for (appeared) |tok| {
+        if (tok < logits.len) {
+            if (logits[tok] > 0) logits[tok] /= penalty else logits[tok] *= penalty;
+        }
+    }
+}
+
+test "topK keeps top" {
+    var l = [_]f32{ 1, 5, 2, 4, 3 };
+    topK(&l, 2);
+    // top 2 are 5 and 4; rest -inf
+    try std.testing.expect(l[1] == 5);
+    try std.testing.expect(l[3] == 4);
+    try std.testing.expect(std.math.isInf(l[0]));
+}
+
+test "topP finite" {
+    var l = [_]f32{ 1, 2, 3, 4 };
+    topP(&l, 0.9);
+    // at least one finite
+    var finite: usize = 0;
+    for (l) |v| if (std.math.isFinite(v)) { finite += 1; };
+    try std.testing.expect(finite >= 1);
+}
+
+test "repetitionPenalty" {
+    var l = [_]f32{ 2.0, 3.0 };
+    const appeared = [_]u32{ 0 };
+    repetitionPenalty(&l, &appeared, 2.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), l[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), l[1], 1e-6);
+}
