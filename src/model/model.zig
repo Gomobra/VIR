@@ -51,6 +51,96 @@ pub const Model = struct {
                 }
             }
         }
+
+        pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, x: []const f32, dOut: []const f32, batch: usize, d: usize) void {
+            std.debug.assert(dX.len == batch * d and dOut.len == batch * d);
+            std.debug.assert(dW_attn.len == d * d);
+            std.debug.assert(dW_mlp.len == (d * 2) * d);
+            const autograd = @import("../autograd/autograd.zig");
+            const cpu = @import("../cpu/cpu.zig");
+            // recompute intermediates
+            const norm1 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(norm1);
+            self.norm1.forward(norm1, x);
+            const attn_out = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(attn_out);
+            self.attn.forward(attn_out, norm1, batch);
+            // residual1 = x + attn_out
+            const r1 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(r1);
+            for (r1, x, attn_out) |*o, xv, av| o.* = xv + av;
+            const norm2 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(norm2);
+            self.norm2.forward(norm2, r1);
+            const mlp_out = self.allocator.alloc(f32, batch * (d * 2)) catch return;
+            defer self.allocator.free(mlp_out);
+            self.mlp.forward(mlp_out, norm2, batch);
+
+            // dOut -> dR1 (residual) + dMlp
+            // dMlpOutput (first d) = dOut; rest 0
+            const dMlp = self.allocator.alloc(f32, batch * (d * 2)) catch return;
+            defer self.allocator.free(dMlp);
+            @memset(dMlp, 0);
+            for (0..batch) |b| for (0..d) |i| dMlp[b * (d * 2) + i] = dOut[b * d + i];
+            // dNorm2 = dMlp @ W_mlp^T (first d rows) -> [batch, d]
+            // dW_mlp += norm2^T @ dMlp (full 2d x d)
+            const dNorm2 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(dNorm2);
+            @memset(dNorm2, 0);
+            for (0..batch) |b| {
+                for (0..d) |i| {
+                    var acc: f32 = 0;
+                    for (0..(d * 2)) |j| acc += dMlp[b * (d * 2) + j] * self.mlp.w[j * d + i];
+                    dNorm2[b * d + i] = acc;
+                }
+                // dW_mlp
+                for (0..(d * 2)) |j| for (0..d) |i| {
+                    dW_mlp[j * d + i] += norm2[b * d + i] * dMlp[b * (d * 2) + j];
+                };
+            }
+            // backward through norm2: dR1_mlp = backwardRMSNorm(r1, dNorm2)
+            const dR1_mlp = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(dR1_mlp);
+            @memset(dR1_mlp, 0);
+            for (0..batch) |b| {
+                const slice_x = r1[b * d .. (b + 1) * d];
+                const slice_do = dNorm2[b * d .. (b + 1) * d];
+                const slice_dx = dR1_mlp[b * d .. (b + 1) * d];
+                autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+            }
+            // dR1 = dOut (residual) + dR1_mlp
+            const dR1 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(dR1);
+            for (dR1, dOut, dR1_mlp) |*o, a, bb| o.* = a + bb;
+            // dAttnOut = dR1 (from attn residual) 
+            // dNorm1 = dR1 @ W_attn^T
+            const dNorm1 = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(dNorm1);
+            @memset(dNorm1, 0);
+            for (0..batch) |b| {
+                for (0..d) |i| {
+                    var acc: f32 = 0;
+                    for (0..d) |j| acc += dR1[b * d + j] * self.attn.w[j * d + i];
+                    dNorm1[b * d + i] = acc;
+                }
+                for (0..d) |j| for (0..d) |i| {
+                    dW_attn[j * d + i] += norm1[b * d + i] * dR1[b * d + j];
+                };
+            }
+            // backward through norm1: dX_attn = backwardRMSNorm(x, dNorm1)
+            const dX_attn = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(dX_attn);
+            @memset(dX_attn, 0);
+            for (0..batch) |b| {
+                const slice_x = x[b * d .. (b + 1) * d];
+                const slice_do = dNorm1[b * d .. (b + 1) * d];
+                const slice_dx = dX_attn[b * d .. (b + 1) * d];
+                autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+            }
+            // dX = dR1 (residual from first) + dX_attn
+            for (dX, dR1, dX_attn) |*o, a, bb| o.* = a + bb;
+            _ = cpu;
+        }
     };
 
     pub fn init(allocator: std.mem.Allocator, cfg: config.ModelConfig) !Model {
@@ -134,4 +224,36 @@ test "Model forward finite" {
     m.forward(&logits, &tokens);
     for (logits) |v| try std.testing.expect(std.math.isFinite(v));
     try std.testing.expectEqual(@as(usize, 4), m.nBlocks());
+}
+
+test "Block backward gradcheck" {
+    const allocator = std.testing.allocator;
+    var blk = try Block.init(allocator, 4);
+    defer blk.deinit();
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    blk.forward(&out, &x, 2, 4);
+    // dOut = ones
+    var dOut = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var dW_attn = try allocator.alloc(f32, 4 * 4);
+    defer allocator.free(dW_attn);
+    @memset(dW_attn, 0);
+    var dW_mlp = try allocator.alloc(f32, 8 * 4);
+    defer allocator.free(dW_mlp);
+    @memset(dW_mlp, 0);
+    blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
+    // finite diff for x[0]
+    const eps: f32 = 1e-3;
+    var xp = x; xp[0] += eps;
+    var xm = x; xm[0] -= eps;
+    var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    blk.forward(&op, &xp, 2, 4);
+    blk.forward(&om, &xm, 2, 4);
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (op) |v| sp += v;
+    for (om) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dX[0]) < 1e-1);
 }
