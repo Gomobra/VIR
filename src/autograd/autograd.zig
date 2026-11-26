@@ -95,9 +95,9 @@ pub fn backwardMatmul(dA: []f32, dB: []f32, A: []const f32, B: []const f32, dC: 
         var j: usize = 0;
         while (j < n) : (j += 1) {
             var acc: f32 = 0;
-            var i2: usize = 0;
-            while (i2 < m) : (i2 += 1) {
-                acc += A[i2 * k + t2] * dC[i2 * n + j];
+            var iidx: usize = 0;
+            while (iidx < m) : (iidx += 1) {
+                acc += A[iidx * k + t2] * dC[iidx * n + j];
             }
             dB[t2 * n + j] += acc;
         }
