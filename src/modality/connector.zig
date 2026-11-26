@@ -1,0 +1,48 @@
+// Connector: project modality features into LM embedding space (PRD 6.3).
+
+const std = @import("std");
+
+pub const Connector = struct {
+    in_dim: usize,
+    out_dim: usize,
+    w: []f32, // out_dim x in_dim
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, in_dim: usize, out_dim: usize) !Connector {
+        const n = in_dim * out_dim;
+        const w = try allocator.alloc(f32, n);
+        for (w, 0..) |*x, i| x.* = 0.01 * @as(f32, @floatFromInt(i % 7)) - 0.03;
+        return .{ .in_dim = in_dim, .out_dim = out_dim, .w = w, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *Connector) void {
+        self.allocator.free(self.w);
+    }
+
+    // out[batch, out_dim] = in[batch, in_dim] @ W^T
+    pub fn forward(self: *const Connector, out: []f32, in: []const f32, batch: usize) void {
+        std.debug.assert(in.len == batch * self.in_dim);
+        std.debug.assert(out.len == batch * self.out_dim);
+        var b: usize = 0;
+        while (b < batch) : (b += 1) {
+            const inrow = in[b * self.in_dim .. (b + 1) * self.in_dim];
+            var j: usize = 0;
+            while (j < self.out_dim) : (j += 1) {
+                var acc: f32 = 0;
+                var i: usize = 0;
+                while (i < self.in_dim) : (i += 1) acc += inrow[i] * self.w[j * self.in_dim + i];
+                out[b * self.out_dim + j] = acc;
+            }
+        }
+    }
+};
+
+test "Connector forward shape" {
+    const allocator = std.testing.allocator;
+    var c = try Connector.init(allocator, 4, 3);
+    defer c.deinit();
+    var in = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var out = [_]f32{ 0, 0, 0, 0, 0, 0 };
+    c.forward(&out, &in, 2);
+    for (out) |v| try std.testing.expect(std.math.isFinite(v));
+}
