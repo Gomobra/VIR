@@ -275,16 +275,3 @@ test "KVCache append/get" {
 }
 
 // KV cache for attention (PRD 3.12).
-
-test "KVCache append/get" {
-    const allocator = std.testing.allocator;
-    var cache = try KVCache.init(allocator, 1, 1, 2, 4);
-    defer cache.deinit();
-    const k = [_]f32{ 1, 2 };
-    const v = [_]f32{ 3, 4 };
-    cache.append(0, &k, &v);
-    const gk = cache.getK(0, 0);
-    try std.testing.expectEqualSlices(f32, &k, gk);
-    cache.advance();
-    try std.testing.expectEqual(@as(usize, 1), cache.seq_len);
-}
