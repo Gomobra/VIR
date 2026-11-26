@@ -191,3 +191,111 @@ test "minHash different docs lower similarity" {
     const sim = jaccardEstimate(sigA, sigB);
     try std.testing.expect(sim < 0.5);
 }
+
+// --- ZTOK shard (PRD 3.6) ---
+
+pub const DType = enum(u8) { u16 = 0, u32 = 1 };
+
+pub const ZtokHeader = struct {
+    magic: u32,
+    version: u32,
+    dtype: u8,
+    n_tokens: u64,
+    vocab_size: u32,
+    // sha256 tokenizer (32 bytes)
+    tok_hash: [32]u8,
+};
+
+pub fn writeShard(allocator: std.mem.Allocator, path: []const u8, dtype: DType, tokens: []const u32, vocab_size: u32, tok_hash: [32]u8) !void {
+    const file = try std.fs.cwd().createFile(path, .{});
+    defer file.close();
+    // header
+    var magic_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &magic_bytes, 0x5A544F4B, .little); // "ZTOK"
+    try file.writeAll(&magic_bytes);
+    var ver: [4]u8 = undefined;
+    std.mem.writeInt(u32, &ver, 1, .little);
+    try file.writeAll(&ver);
+    try file.writeAll(&[_]u8{@intFromEnum(dtype)});
+    var ntok: [8]u8 = undefined;
+    std.mem.writeInt(u64, &ntok, tokens.len, .little);
+    try file.writeAll(&ntok);
+    var vs: [4]u8 = undefined;
+    std.mem.writeInt(u32, &vs, vocab_size, .little);
+    try file.writeAll(&vs);
+    try file.writeAll(&tok_hash);
+    // tokens
+    for (tokens) |t| {
+        if (dtype == .u16) {
+            var b: [2]u8 = undefined;
+            std.mem.writeInt(u16, &b, @intCast(t), .little);
+            try file.writeAll(&b);
+        } else {
+            var b: [4]u8 = undefined;
+            std.mem.writeInt(u32, &b, t, .little);
+            try file.writeAll(&b);
+        }
+    }
+    _ = allocator;
+}
+
+pub fn readShardHeader(allocator: std.mem.Allocator, path: []const u8) !ZtokHeader {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    var magic_bytes: [4]u8 = undefined;
+    _ = try file.readAll(&magic_bytes);
+    const magic = std.mem.readInt(u32, &magic_bytes, .little);
+    var ver: [4]u8 = undefined;
+    _ = try file.readAll(&ver);
+    const version = std.mem.readInt(u32, &ver, .little);
+    var dtype_byte: [1]u8 = undefined;
+    _ = try file.readAll(&dtype_byte);
+    var ntok: [8]u8 = undefined;
+    _ = try file.readAll(&ntok);
+    const n_tokens = std.mem.readInt(u64, &ntok, .little);
+    var vs: [4]u8 = undefined;
+    _ = try file.readAll(&vs);
+    const vocab_size = std.mem.readInt(u32, &vs, .little);
+    var tok_hash: [32]u8 = undefined;
+    _ = try file.readAll(&tok_hash);
+    return ZtokHeader{
+        .magic = magic,
+        .version = version,
+        .dtype = dtype_byte[0],
+        .n_tokens = n_tokens,
+        .vocab_size = vocab_size,
+        .tok_hash = tok_hash,
+    };
+    _ = allocator;
+}
+
+test "ZTOK roundtrip" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/scratchpad/test.ztok";
+    std.fs.cwd().makePath("/tmp/scratchpad") catch {};
+    const tokens = [_]u32{ 1, 2, 3, 1000 };
+    var hash: [32]u8 = undefined;
+    @memset(&hash, 0xAB);
+    try writeShard(allocator, path, .u32, &tokens, 4096, hash);
+    const hdr = try readShardHeader(allocator, path);
+    try std.testing.expectEqual(@as(u32, 0x5A544F4B), hdr.magic);
+    try std.testing.expectEqual(@as(u32, 1), hdr.version);
+    try std.testing.expectEqual(@as(u64, 4), hdr.n_tokens);
+    try std.testing.expectEqual(@as(u32, 4096), hdr.vocab_size);
+    try std.testing.expectEqualSlices(u8, &hash, &hdr.tok_hash);
+}
+
+// Sampler resume: deterministic position from step.
+pub fn samplerPosition(seed: u64, step: u64, rank: u32, micro: u32) u64 {
+    const s = Sampler{ .seed = seed, .step = step, .rank = rank, .micro = micro };
+    return s.index();
+}
+
+test "sampler resume deterministic" {
+    const p1 = samplerPosition(42, 100, 0, 0);
+    const p2 = samplerPosition(42, 100, 0, 0);
+    try std.testing.expectEqual(p1, p2);
+    // different step -> different position (likely)
+    const p3 = samplerPosition(42, 101, 0, 0);
+    try std.testing.expect(p1 != p3);
+}
