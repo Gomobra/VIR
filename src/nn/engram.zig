@@ -81,7 +81,7 @@ pub const Engram = struct {
                 // n-gram = token_ids[t-ord+1 .. t+1]
                 var ng: [4]u32 = undefined;
                 var ni: usize = 0;
-                var start = t + 1 - ord;
+                const start = t + 1 - ord;
                 while (start + ni <= t) : (ni += 1) {
                     if (ni >= 4) break;
                     ng[ni] = token_ids[start + ni];
@@ -121,9 +121,9 @@ pub const Engram = struct {
                 vvec[i] = acc;
             }
             // rmsnorm h and k
-            var hrms = self.allocator.alloc(f32, self.d) catch return;
+            const hrms = self.allocator.alloc(f32, self.d) catch return;
             defer self.allocator.free(hrms);
-            var krms = self.allocator.alloc(f32, self.mem_dim) catch return;
+            const krms = self.allocator.alloc(f32, self.mem_dim) catch return;
             defer self.allocator.free(krms);
             // h slice for this timestep
             const hslice = h[t * self.d .. (t + 1) * self.d];
