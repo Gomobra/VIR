@@ -601,3 +601,67 @@ test "gradcheck attention" {
     const fd = (sp - sm) / (2 * eps);
     try std.testing.expect(@abs(fd - dQ[0]) < 1e-2);
 }
+
+// --- Gradient checks for elementwise ops ---
+
+test "gradcheck add" {
+    const eps: f32 = 1e-3;
+    var a = [_]f32{ 1, 2, 3, 4 };
+    var b = [_]f32{ 5, 6, 7, 8 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dB = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    backwardAdd(&dA, &dB, &dOut);
+    // finite diff for a[0]: loss = sum(a+b), derivative wrt a[0] = 1
+    var ap = a; ap[0] += eps;
+    var am = a; am[0] -= eps;
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (ap, b) |x, y| sp += x + y;
+    for (am, b) |x, y| sm += x + y;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dA[0]) < 1e-2);
+}
+
+test "gradcheck mul" {
+    const eps: f32 = 1e-3;
+    var a = [_]f32{ 2, 3, 4, 5 };
+    var b = [_]f32{ 6, 7, 8, 9 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dB = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    backwardMul(&dA, &dB, &a, &b, &dOut);
+    // finite diff for a[0]: loss = sum(a*b), derivative wrt a[0] = b[0] = 6
+    var ap = a; ap[0] += eps;
+    var am = a; am[0] -= eps;
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (ap, b) |x, y| sp += x * y;
+    for (am, b) |x, y| sm += x * y;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dA[0]) < 1e-2);
+}
+
+test "gradcheck scale" {
+    const eps: f32 = 1e-3;
+    const s: f32 = 3.0;
+    var a = [_]f32{ 1, 2, 3, 4 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    backwardScale(&dA, &dOut, s);
+    var ap = a; ap[0] += eps;
+    var am = a; am[0] -= eps;
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (ap) |x| sp += x * s;
+    for (am) |x| sm += x * s;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dA[0]) < 1e-2);
+}
+
+test "gradcheck relu" {
+    var a = [_]f32{ -1, 2, 0, 3 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    backwardRelu(&dA, &a, &dOut);
+    // a[0] <=0 -> grad 0; a[1]>0 -> 1
+    try std.testing.expectApproxEqAbs(@as(f32, 0), dA[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), dA[1], 1e-6);
+}
