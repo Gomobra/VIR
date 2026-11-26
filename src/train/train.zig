@@ -6,6 +6,7 @@ const nn = @import("../nn/nn.zig");
 const autograd = @import("../autograd/autograd.zig");
 const optim = @import("../optim/optim.zig");
 const checkpoint = @import("../checkpoint/checkpoint.zig");
+const infer = @import("../infer/infer.zig");
 
 pub const TrainConfig = struct {
     lr: f32 = 1e-2,
@@ -153,6 +154,38 @@ pub const TinyModel = struct {
 
         return loss;
     }
+
+    // Greedy generation: given prompt token ids, generate up to max_new tokens.
+    pub fn generate(self: *TinyModel, allocator: std.mem.Allocator, prompt: []const u32, max_new: usize) ![]u32 {
+        var seq = std.ArrayList(u32).init(allocator);
+        defer seq.deinit();
+        try seq.appendSlice(prompt);
+        const dim = self.dim;
+        const vocab = self.vocab;
+        var i: usize = 0;
+        while (i < max_new) : (i += 1) {
+            const n = seq.items.len;
+            var hidden = try allocator.alloc(f32, n * dim);
+            defer allocator.free(hidden);
+            cpu.embeddingGatherF32(hidden, self.embed, seq.items, vocab, dim);
+            var logits = try allocator.alloc(f32, n * vocab);
+            defer allocator.free(logits);
+            var b: usize = 0;
+            while (b < n) : (b += 1) {
+                var v: usize = 0;
+                while (v < vocab) : (v += 1) {
+                    var acc: f32 = 0;
+                    var d: usize = 0;
+                    while (d < dim) : (d += 1) acc += hidden[b * dim + d] * self.W[d * vocab + v];
+                    logits[b * vocab + v] = acc;
+                }
+            }
+            const last = logits[(n - 1) * vocab .. n * vocab];
+            const next = infer.argmax(last);
+            try seq.append(next);
+        }
+        return seq.toOwnedSlice();
+    }
 };
 
 test "TinyModel trainStep reduces loss" {
@@ -266,4 +299,15 @@ test "tstBag" {
     const b = tstBag(&toks, 1, 2, 10);
     try std.testing.expectEqual(@as(usize, 2), b.len);
     try std.testing.expectEqual(@as(u32, 2), b[0]);
+}
+
+test "TinyModel generate" {
+    const allocator = std.testing.allocator;
+    var model = try TinyModel.init(allocator, 4, 3, 0.1);
+    defer model.deinit();
+    const prompt = [_]u32{ 0, 1 };
+    const out = try model.generate(allocator, &prompt, 3);
+    defer allocator.free(out);
+    try std.testing.expectEqual(@as(usize, 5), out.len);
+    for (out) |t| try std.testing.expect(t < 4);
 }
