@@ -294,6 +294,120 @@ pub fn gradCheckScalar(f: *const fn (x: f64) f64, analytic: f64, x: f64, eps: f6
     return rel < tol;
 }
 
+// Backward attention (single head, causal): given Q,K,V (seq x d) and dOut (seq x d),
+// accumulate dQ, dK, dV.
+pub fn backwardAttention(dQ: []f32, dK: []f32, dV: []f32, Q: []const f32, K: []const f32, V: []const f32, dOut: []const f32, seq: usize, d: usize) void {
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(d)));
+    // Compute scores S (seq x seq) causal.
+    // dV = S^T dOut
+    // dS = dOut V^T
+    // dP = S * (dS - rowsum(dS*S))
+    // dQ = dP K * scale ; dK = dP^T Q * scale
+    // We'll compute S first.
+    // Use temporary buffers on stack? seq small. Allocate via page allocator.
+    const allocator = std.heap.page_allocator;
+    const S = allocator.alloc(f32, seq * seq) catch return;
+    defer allocator.free(S);
+    const dS = allocator.alloc(f32, seq * seq) catch return;
+    defer allocator.free(dS);
+    const dP = allocator.alloc(f32, seq * seq) catch return;
+    defer allocator.free(dP);
+    // zero
+    for (S) |*x| x.* = 0;
+    for (dS) |*x| x.* = 0;
+    for (dP) |*x| x.* = 0;
+
+    // S[i,j] = softmax over j<=i of (Q[i]·K[j])*scale
+    var i: usize = 0;
+    while (i < seq) : (i += 1) {
+        // scores
+        var maxs: f32 = -1e9;
+        var j: usize = 0;
+        while (j <= i) : (j += 1) {
+            var acc: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) acc += Q[i * d + t] * K[j * d + t];
+            acc *= scale;
+            S[i * seq + j] = acc;
+            if (acc > maxs) maxs = acc;
+        }
+        // softmax
+        var sum: f32 = 0;
+        j = 0;
+        while (j <= i) : (j += 1) {
+            const e = @exp(S[i * seq + j] - maxs);
+            S[i * seq + j] = e;
+            sum += e;
+        }
+        j = 0;
+        while (j <= i) : (j += 1) S[i * seq + j] /= sum;
+        // j>i remain 0
+    }
+
+    // dV = S^T dOut  (dV[j,t] = sum_i S[i,j] dOut[i,t])
+    var j: usize = 0;
+    while (j < seq) : (j += 1) {
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            var acc: f32 = 0;
+            var i2: usize = 0;
+            while (i2 < seq) : (i2 += 1) {
+                if (j <= i2) acc += S[i2 * seq + j] * dOut[i2 * d + t];
+            }
+            dV[j * d + t] += acc;
+        }
+    }
+
+    // dS = dOut V^T  (dS[i,j] = sum_t dOut[i,t] V[j,t])
+    i = 0;
+    while (i < seq) : (i += 1) {
+        j = 0;
+        while (j <= i) : (j += 1) {
+            var acc: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) acc += dOut[i * d + t] * V[j * d + t];
+            dS[i * seq + j] = acc;
+        }
+    }
+
+    // dP = S * (dS - rowsum(dS*S))
+    i = 0;
+    while (i < seq) : (i += 1) {
+        var rowsum: f32 = 0;
+        j = 0;
+        while (j <= i) : (j += 1) rowsum += dS[i * seq + j] * S[i * seq + j];
+        j = 0;
+        while (j <= i) : (j += 1) {
+            dP[i * seq + j] = S[i * seq + j] * (dS[i * seq + j] - rowsum);
+        }
+    }
+
+    // dQ = dP K * scale ; dK = dP^T Q * scale
+    i = 0;
+    while (i < seq) : (i += 1) {
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            var acc: f32 = 0;
+            j = 0;
+            while (j <= i) : (j += 1) acc += dP[i * seq + j] * K[j * d + t];
+            dQ[i * d + t] += acc * scale;
+        }
+    }
+    j = 0;
+    while (j < seq) : (j += 1) {
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            var acc: f32 = 0;
+            i = j;
+            while (i < seq) : (i += 1) {
+                // j <= i
+                acc += dP[i * seq + j] * Q[i * d + t];
+            }
+            dK[j * d + t] += acc * scale;
+        }
+    }
+}
+
 test "backwardCrossEntropy" {
     // logits [0,0], target 0 -> softmax [0.5,0.5], dLogit = [0.5-1, 0.5] = [-0.5, 0.5]
     var logits = [_]f32{ 0, 0 };
@@ -330,4 +444,21 @@ test "gradCheckScalar" {
     }.sq;
     // derivative of x^2 at x=2 is 4
     try std.testing.expect(gradCheckScalar(f, 4.0, 2.0, 1e-5, 1e-6));
+}
+
+test "backwardAttention smoke" {
+    const seq = 2;
+    const d = 2;
+    var Q = [_]f32{ 1, 0, 0, 1 };
+    var K = [_]f32{ 1, 0, 0, 1 };
+    var V = [_]f32{ 1, 2, 3, 4 };
+    var dOut = [_]f32{ 1, 0, 0, 1 };
+    var dQ = [_]f32{ 0, 0, 0, 0 };
+    var dK = [_]f32{ 0, 0, 0, 0 };
+    var dV = [_]f32{ 0, 0, 0, 0 };
+    backwardAttention(&dQ, &dK, &dV, &Q, &K, &V, &dOut, seq, d);
+    // finite
+    for (dQ) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dK) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dV) |v| try std.testing.expect(std.math.isFinite(v));
 }
