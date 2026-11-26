@@ -81,7 +81,9 @@ pub const Model = struct {
             const dMlp = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(dMlp);
             @memset(dMlp, 0);
-            for (0..batch) |b| for (0..d) |i| dMlp[b * (d * 2) + i] = dOut[b * d + i];
+            for (0..batch) |b| {
+                for (0..d) |i| dMlp[b * (d * 2) + i] = dOut[b * d + i];
+            }
             // dNorm2 = dMlp @ W_mlp^T (first d rows) -> [batch, d]
             // dW_mlp += norm2^T @ dMlp (full 2d x d)
             const dNorm2 = self.allocator.alloc(f32, batch * d) catch return;
@@ -228,7 +230,7 @@ test "Model forward finite" {
 
 test "Block backward gradcheck" {
     const allocator = std.testing.allocator;
-    var blk = try Block.init(allocator, 4);
+    var blk = try Model.Block.init(allocator, 4);
     defer blk.deinit();
     var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
     var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
