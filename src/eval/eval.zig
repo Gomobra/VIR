@@ -130,6 +130,31 @@ test "exactMatch" {
     try std.testing.expect(!exactMatch("abc", "def"));
 }
 
+// BLEU (simplified unigram precision with brevity penalty).
+pub fn bleu(hyp: []const []const u8, ref: []const []const u8) f32 {
+    if (hyp.len == 0) return 0;
+    // unigram precision
+    var match: usize = 0;
+    for (hyp) |h| for (ref) |r| if (std.mem.eql(u8, h, r)) { match += 1; };
+    const prec = @as(f32, @floatFromInt(match)) / @as(f32, @floatFromInt(hyp.len));
+    // brevity penalty
+    const bp = if (hyp.len < ref.len) @exp(1.0 - @as(f32, @floatFromInt(ref.len)) / @as(f32, @floatFromInt(hyp.len))) else 1.0;
+    return bp * prec;
+}
+
+test "bleu identical" {
+    const a = [_][]const u8{ "a", "b", "c" };
+    const b = [_][]const u8{ "a", "b", "c" };
+    const score = bleu(&a, &b);
+    try std.testing.expect(@abs(score - 1.0) < 1e-5);
+}
+
+test "bleu empty hyp" {
+    const a = [_][]const u8{};
+    const b = [_][]const u8{ "a" };
+    try std.testing.expectEqual(@as(f32, 0.0), bleu(&a, &b));
+}
+
 // pass@k unbiased estimator (PRD 4.1): 1 - C(n-c, k) / C(n, k).
 pub fn passAtK(n: usize, c: usize, k: usize) f64 {
     if (n == 0) return 0;
