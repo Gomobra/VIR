@@ -77,18 +77,46 @@ pub const BPETrainer = struct {
     }
 
     // Train: perform merges until vocab_size reached.
-    // Encode text to token ids using trained merges.
+    // Encode text to token ids using trained merges. Preserves spaces as byte-32 tokens.
     pub fn encode(self: *const BPETrainer, allocator: std.mem.Allocator, text: []const u8) ![]u32 {
         var out = std.ArrayList(u32).init(allocator);
         defer out.deinit();
-        // split by whitespace
-        var it = std.mem.tokenizeAny(u8, text, " \t\n");
-        while (it.next()) |word| {
-            // initial seq = bytes
+        var word_buf = std.ArrayList(u8).init(allocator);
+        defer word_buf.deinit();
+        for (text) |c| {
+            if (c == ' ' or c == '\t' or c == '\n') {
+                // flush word
+                if (word_buf.items.len > 0) {
+                    var seq = std.ArrayList(u32).init(allocator);
+                    defer seq.deinit();
+                    for (word_buf.items) |ch| try seq.append(@as(u32, ch));
+                    for (self.merges.items) |mg| {
+                        var i: usize = 0;
+                        while (i + 1 < seq.items.len) {
+                            if (seq.items[i] == mg.a and seq.items[i + 1] == mg.b) {
+                                seq.items[i] = mg.newid;
+                                var j = i + 1;
+                                while (j + 1 < seq.items.len) : (j += 1) seq.items[j] = seq.items[j + 1];
+                                seq.items.len -= 1;
+                            } else {
+                                i += 1;
+                            }
+                        }
+                    }
+                    for (seq.items) |id| try out.append(id);
+                    word_buf.clearRetainingCapacity();
+                }
+                // emit space/newline as byte token
+                try out.append(@as(u32, c));
+            } else {
+                try word_buf.append(c);
+            }
+        }
+        // flush last word
+        if (word_buf.items.len > 0) {
             var seq = std.ArrayList(u32).init(allocator);
             defer seq.deinit();
-            for (word) |c| try seq.append(@as(u32, c));
-            // apply merges in order
+            for (word_buf.items) |ch| try seq.append(@as(u32, ch));
             for (self.merges.items) |mg| {
                 var i: usize = 0;
                 while (i + 1 < seq.items.len) {
@@ -206,10 +234,10 @@ test "BPE encode/decode roundtrip" {
     try tr.addWord("ab", 5);
     try tr.addWord("abc", 3);
     try tr.train();
-    const ids = try tr.encode(allocator, "ab abc");
+    const text = "ab abc";
+    const ids = try tr.encode(allocator, text);
     defer allocator.free(ids);
     const dec = try tr.decode(allocator, ids);
     defer allocator.free(dec);
-    // decoded should contain the bytes (without spaces) concatenated
-    try std.testing.expect(dec.len > 0);
+    try std.testing.expectEqualStrings(text, dec);
 }
