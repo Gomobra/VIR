@@ -480,7 +480,7 @@ test "runPipeline end-to-end" {
 pub const ShardWriteConfig = struct {
     out_dir: []const u8,
     vocab_size: u32 = 256,
-    tok_hash: [32]u8 = [_]u8{0} ** 32,
+    tok_hash: [32]u8 = [_]u8{0} * *32,
     dtype: DType = .u32,
 };
 
