@@ -108,6 +108,26 @@ test "RunConfig defaults" {
     try std.testing.expect(cfg.model.seq_len > 0);
 }
 
+// Validate ModelConfig.
+pub fn validateModelConfig(cfg: *const ModelConfig) bool {
+    if (cfg.d_model == 0) return false;
+    if (cfg.vocab_size == 0) return false;
+    if (cfg.seq_len == 0) return false;
+    if (cfg.n_groups == 0) return false;
+    if (cfg.attn.n_heads == 0) return false;
+    if (cfg.attn.head_dim == 0) return false;
+    if (cfg.mlp.hidden == 0) return false;
+    return true;
+}
+
+test "validateModelConfig" {
+    const cfg = ModelConfig{};
+    try std.testing.expect(validateModelConfig(&cfg));
+    var bad = ModelConfig{};
+    bad.d_model = 0;
+    try std.testing.expect(!validateModelConfig(&bad));
+}
+
 // Parse a simple key=value config (one per line). Returns number of keys parsed.
 pub fn parseKeyValue(allocator: std.mem.Allocator, text: []const u8, out: *std.StringHashMap([]const u8)) !usize {
     _ = allocator;
