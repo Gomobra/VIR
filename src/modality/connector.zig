@@ -60,9 +60,9 @@ pub const Connector = struct {
             var i: usize = 0;
             while (i < self.in_dim) : (i += 1) {
                 var acc: f32 = 0;
-                var j: usize = 0;
-                while (j < self.out_dim) : (j += 1) {
-                    acc += dOut[b * self.out_dim + j] * self.w[j * self.in_dim + i];
+                var jj: usize = 0;
+                while (jj < self.out_dim) : (jj += 1) {
+                    acc += dOut[b * self.out_dim + jj] * self.w[jj * self.in_dim + i];
                 }
                 dIn[b * self.in_dim + i] += acc;
             }
@@ -77,7 +77,7 @@ test "Connector backward finite" {
     var in = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
     var out = [_]f32{ 0, 0, 0, 0, 0, 0 };
     c.forward(&out, &in, 2);
-    var dW = try allocator.alloc(f32, 4 * 3);
+    const dW = try allocator.alloc(f32, 4 * 3);
     defer allocator.free(dW);
     @memset(dW, 0);
     var dIn = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
