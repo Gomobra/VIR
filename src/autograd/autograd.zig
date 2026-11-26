@@ -475,8 +475,10 @@ test "gradcheck matmul" {
     var dC = [_]f32{ 1, 1, 1, 1 };
     backwardMatmul(&dA, &dB, &A, &B, &dC, 2, 2, 2);
     // finite diff for A[0]
-    var Ap = A; Ap[0] += eps;
-    var Am = A; Am[0] -= eps;
+    var Ap = A;
+    Ap[0] += eps;
+    var Am = A;
+    Am[0] -= eps;
     var Cp = [_]f32{ 0, 0, 0, 0 };
     var Cm = [_]f32{ 0, 0, 0, 0 };
     cpu.matmulNaifF32(&Cp, &Ap, &B, 2, 2, 2);
@@ -500,8 +502,10 @@ test "gradcheck softmax" {
     var dX = [_]f32{ 0, 0, 0, 0 };
     backwardSoftmax(&dX, &S, &dOut, 1, 4);
     // finite diff: perturb X[0], loss = sum(softmax(X))
-    var Xp = X; Xp[0] += eps;
-    var Xm = X; Xm[0] -= eps;
+    var Xp = X;
+    Xp[0] += eps;
+    var Xm = X;
+    Xm[0] -= eps;
     var Sp = [_]f32{ 0, 0, 0, 0 };
     var Sm = [_]f32{ 0, 0, 0, 0 };
     cpu.softmaxRowF32(&Sp, &Xp, 1, 4);
@@ -525,8 +529,10 @@ test "gradcheck rmsnorm" {
     var dX = [_]f32{ 0, 0, 0, 0 };
     backwardRMSNorm(&dX, &X, &dOut, 1e-6);
     // finite diff
-    var Xp = X; Xp[0] += eps;
-    var Xm = X; Xm[0] -= eps;
+    var Xp = X;
+    Xp[0] += eps;
+    var Xm = X;
+    Xm[0] -= eps;
     var Op = [_]f32{ 0, 0, 0, 0 };
     var Om = [_]f32{ 0, 0, 0, 0 };
     cpu.rmsnormF32(&Op, &Xp, 1e-6);
@@ -541,7 +547,7 @@ test "gradcheck rmsnorm" {
 
 test "gradcheck cross-entropy" {
     var logits = [_]f32{ 0, 0, 0, 0 };
-    var targets = [_]u32{ 0 };
+    var targets = [_]u32{0};
     var dL = [_]f32{ 0, 0, 0, 0 };
     backwardCrossEntropy(&dL, &logits, &targets, 1, 4);
     // at uniform logits, softmax=0.25, dLogit[0]=0.25-1=-0.75
