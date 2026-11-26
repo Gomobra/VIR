@@ -28,7 +28,7 @@ pub const Block = struct {
     // forward: x (batch, d) -> x + attn(norm(x)) + mlp(norm(x))
     pub fn forward(self: *const Block, out: []f32, x: []const f32, batch: usize, d: usize) void {
         std.debug.assert(x.len == batch * d and out.len == batch * d);
-        var tmp = self.allocator.alloc(f32, batch * d) catch return;
+        const tmp = self.allocator.alloc(f32, batch * d) catch return;
         defer self.allocator.free(tmp);
         self.norm1.forward(tmp, x);
         self.attn.forward(out, tmp, batch);
@@ -36,7 +36,7 @@ pub const Block = struct {
         for (out, x) |*o, v| o.* += v;
         self.norm2.forward(tmp, out);
         // mlp (simplified: linear only)
-        var tmp2 = self.allocator.alloc(f32, batch * (d * 2)) catch return;
+        const tmp2 = self.allocator.alloc(f32, batch * (d * 2)) catch return;
         defer self.allocator.free(tmp2);
         self.mlp.forward(tmp2, tmp, batch);
         // add first d back
