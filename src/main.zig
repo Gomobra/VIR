@@ -36,5 +36,3 @@ pub fn main() !void {
         std.debug.print("unknown command: {s}\n", .{cmd});
     }
 }
-EOF
-echo done
