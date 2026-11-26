@@ -606,8 +606,8 @@ test "gradcheck attention" {
 
 test "gradcheck add" {
     const eps: f32 = 1e-3;
-    var a = [_]f32{ 1, 2, 3, 4 };
-    var b = [_]f32{ 5, 6, 7, 8 };
+    const a = [_]f32{ 1, 2, 3, 4 };
+    const b = [_]f32{ 5, 6, 7, 8 };
     var dA = [_]f32{ 0, 0, 0, 0 };
     var dB = [_]f32{ 0, 0, 0, 0 };
     var dOut = [_]f32{ 1, 1, 1, 1 };
@@ -627,8 +627,8 @@ test "gradcheck add" {
 
 test "gradcheck mul" {
     const eps: f32 = 1e-3;
-    var a = [_]f32{ 2, 3, 4, 5 };
-    var b = [_]f32{ 6, 7, 8, 9 };
+    const a = [_]f32{ 2, 3, 4, 5 };
+    const b = [_]f32{ 6, 7, 8, 9 };
     var dA = [_]f32{ 0, 0, 0, 0 };
     var dB = [_]f32{ 0, 0, 0, 0 };
     var dOut = [_]f32{ 1, 1, 1, 1 };
@@ -649,7 +649,7 @@ test "gradcheck mul" {
 test "gradcheck scale" {
     const eps: f32 = 1e-3;
     const s: f32 = 3.0;
-    var a = [_]f32{ 1, 2, 3, 4 };
+    const a = [_]f32{ 1, 2, 3, 4 };
     var dA = [_]f32{ 0, 0, 0, 0 };
     var dOut = [_]f32{ 1, 1, 1, 1 };
     backwardScale(&dA, &dOut, s);
