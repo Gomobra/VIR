@@ -372,6 +372,52 @@ test "MixWeights valid" {
     try std.testing.expect(mixWeightsValid(w));
 }
 
+// --- Sequence packing (PRD 3.8): pack multiple docs into one sequence with doc mask ---
+pub const PackedSequence = struct {
+    tokens: []u32,
+    // doc_id per token (which document each token belongs to)
+    doc_ids: []u32,
+    n_docs: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *PackedSequence) void {
+        self.allocator.free(self.tokens);
+        self.allocator.free(self.doc_ids);
+    }
+};
+
+pub fn packSequences(allocator: std.mem.Allocator, docs: []const []const u32, max_len: usize) !PackedSequence {
+    var tokens = std.ArrayList(u32).init(allocator);
+    defer tokens.deinit();
+    var doc_ids = std.ArrayList(u32).init(allocator);
+    defer doc_ids.deinit();
+    var n_docs: usize = 0;
+    for (docs, 0..) |doc, di| {
+        if (tokens.items.len + doc.len > max_len) break;
+        for (doc) |t| {
+            try tokens.append(t);
+            try doc_ids.append(@intCast(di));
+        }
+        n_docs += 1;
+    }
+    const toks = try tokens.toOwnedSlice();
+    const dids = try doc_ids.toOwnedSlice();
+    return .{ .tokens = toks, .doc_ids = dids, .n_docs = n_docs, .allocator = allocator };
+}
+
+test "packSequences" {
+    const allocator = std.testing.allocator;
+    const d1 = [_]u32{ 1, 2 };
+    const d2 = [_]u32{ 3, 4, 5 };
+    const docs = [_][]const u32{ &d1, &d2 };
+    var ps = try packSequences(allocator, &docs, 10);
+    defer ps.deinit();
+    try std.testing.expectEqual(@as(usize, 5), ps.tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), ps.n_docs);
+    try std.testing.expectEqual(@as(u32, 0), ps.doc_ids[0]);
+    try std.testing.expectEqual(@as(u32, 1), ps.doc_ids[2]);
+}
+
 // --- Mixed sampler (PRD 3.6): pick shard by weight ---
 pub const MixedSampler = struct {
     weights: []const f32,
