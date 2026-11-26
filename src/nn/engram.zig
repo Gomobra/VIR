@@ -59,7 +59,6 @@ pub const Engram = struct {
         return @intCast(h % table_size);
     }
 
-    // Retrieve memory vector e for position t.
     fn retrieve(self: *const Engram, e: []f32, token_ids: []const u32, t: usize) void {
         @memset(e, 0);
         for (self.orders, 0..) |ord, oi| {
@@ -94,12 +93,12 @@ pub const Engram = struct {
         const dd = @min(self.d, mem);
         var t: usize = 0;
         while (t < seq) : (t += 1) {
-            const e = self.allocator.alloc(f32, mem) catch return;
+            var e = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(e);
             self.retrieve(e, token_ids, t);
-            const kvec = self.allocator.alloc(f32, mem) catch return;
+            var kvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(kvec);
-            const vvec = self.allocator.alloc(f32, mem) catch return;
+            var vvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(vvec);
             var i: usize = 0;
             while (i < mem) : (i += 1) {
@@ -115,9 +114,9 @@ pub const Engram = struct {
                 while (j < mem) : (j += 1) acc += self.wv[i * mem + j] * e[j];
                 vvec[i] = acc;
             }
-            const hrms = self.allocator.alloc(f32, self.d) catch return;
+            var hrms = self.allocator.alloc(f32, self.d) catch return;
             defer self.allocator.free(hrms);
-            const krms = self.allocator.alloc(f32, mem) catch return;
+            var krms = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(krms);
             const hslice = h[t * self.d .. (t + 1) * self.d];
             cpu.rmsnormF32(hrms, hslice, 1e-6);
@@ -134,29 +133,25 @@ pub const Engram = struct {
         }
     }
 
-    // Backward (simplified): compute dH (gradient wrt h) given dOut.
-    // Accumulates dWk, dWv, dTables. dH is seq x d.
-    pub fn backward(self: *Engram, dH: []f32, dWk: []f32, dWv: []f32, dTables: []f32, h: []const f32, token_ids: []const u32, dOut: []const f32, seq: usize) void {
+    // Backward: given dOut (seq x d), compute dH (seq x d) (engram contribution) and accumulate dWk, dWv.
+    pub fn backward(self: *Engram, dH: []f32, dWk: []f32, dWv: []f32, h: []const f32, token_ids: []const u32, dOut: []const f32, seq: usize) void {
         const d = self.d;
         const mem = self.mem_dim;
         const dd = @min(d, mem);
         for (dH) |*x| x.* = 0;
         for (dWk) |*x| x.* = 0;
         for (dWv) |*x| x.* = 0;
-        for (dTables) |*x| x.* = 0;
 
         var t: usize = 0;
         while (t < seq) : (t += 1) {
             const hslice = h[t * d .. (t + 1) * d];
             const dout = dOut[t * d .. (t + 1) * d];
-            // retrieve e
-            const e = self.allocator.alloc(f32, mem) catch return;
+            var e = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(e);
             self.retrieve(e, token_ids, t);
-            // k, v
-            const kvec = self.allocator.alloc(f32, mem) catch return;
+            var kvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(kvec);
-            const vvec = self.allocator.alloc(f32, mem) catch return;
+            var vvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(vvec);
             var i: usize = 0;
             while (i < mem) : (i += 1) {
@@ -172,9 +167,9 @@ pub const Engram = struct {
                 while (j < mem) : (j += 1) acc += self.wv[i * mem + j] * e[j];
                 vvec[i] = acc;
             }
-            const hrms = self.allocator.alloc(f32, d) catch return;
+            var hrms = self.allocator.alloc(f32, d) catch return;
             defer self.allocator.free(hrms);
-            const krms = self.allocator.alloc(f32, mem) catch return;
+            var krms = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(krms);
             cpu.rmsnormF32(hrms, hslice, 1e-6);
             cpu.rmsnormF32(krms, kvec, 1e-6);
@@ -193,23 +188,12 @@ pub const Engram = struct {
             const sig = alpha * (1 - alpha);
             const scale = sig / @sqrt(@as(f32, @floatFromInt(dd)));
 
-            // dH from alpha gating: dH += dalpha * scale * krms (padded to d)
-            ii = 0;
-            while (ii < d) : (ii += 1) {
-                // rmsnorm backward for h: dH += (dhrms - h*rmsnorm factor)/rms
-                // dhrms[ii] = dalpha * scale * kr
-                // Use autograd.backwardRMSNorm-style: accumulate
-                // We'll accumulate into a temp then add
-            }
-            // Compute dhrms array
-            const dhrms = self.allocator.alloc(f32, d) catch return;
+            // dHrms = dalpha * scale * krms (padded)
+            var dhrms = self.allocator.alloc(f32, d) catch return;
             defer self.allocator.free(dhrms);
             @memset(dhrms, 0);
             ii = 0;
-            while (ii < d) : (ii += 1) {
-                const kr = if (ii < mem) krms[ii] else 0;
-                dhrms[ii] = dalpha * scale * kr;
-            }
+            while (ii < dd) : (ii += 1) dhrms[ii] = dalpha * scale * krms[ii];
             // rmsnorm backward for h
             var ss: f32 = 0;
             for (hslice) |v| ss += v * v;
@@ -222,7 +206,25 @@ pub const Engram = struct {
                 dH[t * d + ii] += (dhrms[ii] - hslice[ii] * sc) / rms;
             }
 
-            // dK (gradient wrt kvec): dkrms = dalpha * scale * hrms (padded to mem)
+            // dV = alpha * dOut (for first d dims, padded to mem)
+            var dvvec = self.allocator.alloc(f32, mem) catch return;
+            defer self.allocator.free(dvvec);
+            @memset(dvvec, 0);
+            ii = 0;
+            while (ii < d) : (ii += 1) {
+                if (ii < mem) dvvec[ii] = alpha * dout[ii];
+            }
+            // dWv += dvvec (outer) e
+            var i: usize = 0;
+            while (i < mem) : (i += 1) {
+                var j: usize = 0;
+                while (j < mem) : (j += 1) {
+                    self.wv[i * mem + j] += 0;
+                    dWv[i * mem + j] += dvvec[i] * e[j];
+                }
+            }
+
+            // dKrms = dalpha * scale * hrms (padded to mem)
             var dkrms = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(dkrms);
             @memset(dkrms, 0);
@@ -235,16 +237,25 @@ pub const Engram = struct {
             var dot3: f32 = 0;
             for (kvec, dkrms) |xi, gi| dot3 += xi * gi;
             const sc2 = dot3 / (ss2 + 1e-6 * @as(f32, @floatFromInt(mem)));
-            const dkvec = self.allocator.alloc(f32, mem) catch return;
+            var dkvec = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(dkvec);
             @memset(dkvec, 0);
             ii = 0;
             while (ii < mem) : (ii += 1) {
                 dkvec[ii] = (dkrms[ii] - kvec[ii] * sc2) / rms2;
             }
-
-            // dE via Wk: dE += Wk^T @ dkvec
-            const de = self.allocator.alloc(f32, mem) catch return;
+            // dE via Wk: dE += Wk^T @ dkvec (accumulate into dTables? no, dE is intermediate)
+            // dWk += dkvec (outer) e
+            i = 0;
+            while (i < mem) : (i += 1) {
+                var j: usize = 0;
+                while (j < mem) : (j += 1) {
+                    dWk[i * mem + j] += dkvec[i] * e[j];
+                }
+            }
+            // dTables: scatter dE (from both projections) into retrieved table entries.
+            // dE = Wk^T dkvec + Wv^T dvvec
+            var de = self.allocator.alloc(f32, mem) catch return;
             defer self.allocator.free(de);
             @memset(de, 0);
             i = 0;
@@ -252,15 +263,7 @@ pub const Engram = struct {
                 var acc: f32 = 0;
                 var j: usize = 0;
                 while (j < mem) : (j += 1) acc += self.wk[j * mem + i] * dkvec[j];
-                de[i] = acc;
-            }
-            // dE via Wv: dE += Wv^T @ (alpha * dOut padded to mem)
-            const dvvec = self.allocator.alloc(f32, mem) catch return;
-            defer self.allocator.free(dvvec);
-            @memset(dvvec, 0);
-            ii = 0;
-            while (ii < d) : (ii += 1) {
-                if (ii < mem) dvvec[ii] = alpha * dout[ii];
+                de[i] += acc;
             }
             i = 0;
             while (i < mem) : (i += 1) {
@@ -269,19 +272,6 @@ pub const Engram = struct {
                 while (j < mem) : (j += 1) acc += self.wv[j * mem + i] * dvvec[j];
                 de[i] += acc;
             }
-
-            // dWk += dkvec (outer) e ; dWv += dvvec (outer) e
-            i = 0;
-            while (i < mem) : (i += 1) {
-                var j: usize = 0;
-                while (j < mem) : (j += 1) {
-                    self.wk[i * mem + j] += 0; // placeholder: accumulate not in-place (would corrupt)
-                    dWk[i * mem + j] += dkvec[i] * e[j];
-                    dWv[i * mem + j] += dvvec[i] * e[j];
-                }
-            }
-
-            // dTables: scatter dE into retrieved table entries
             for (self.orders, 0..) |ord, oi| {
                 if (t + 1 < ord) continue;
                 var ng: [4]u32 = undefined;
@@ -341,4 +331,40 @@ test "Engram backward finite" {
     @memset(dTables, 0);
     eng.backward(&dH, dWk, dWv, dTables, &h, &ids, &dOut, 2);
     for (dH) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "Engram gradcheck h" {
+    const allocator = std.testing.allocator;
+    const orders = [_]u8{ 2, 3 };
+    var eng = try Engram.init(allocator, 4, 2, &orders, 16);
+    defer eng.deinit();
+    var h = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const ids = [_]u32{ 1, 2 };
+    // analytic backward
+    var dOut = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
+    var dH = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    const mem = eng.mem_dim;
+    const dWk = try allocator.alloc(f32, mem * mem);
+    defer allocator.free(dWk);
+    @memset(dWk, 0);
+    const dWv = try allocator.alloc(f32, mem * mem);
+    defer allocator.free(dWv);
+    @memset(dWv, 0);
+    const dTables = try allocator.alloc(f32, eng.tables.len);
+    defer allocator.free(dTables);
+    @memset(dTables, 0);
+    eng.backward(&dH, dWk, dWv, dTables, &h, &ids, &dOut, 2);
+    // finite diff for h[0]: loss = sum(engram output), perturb h[0]
+    const eps: f32 = 1e-3;
+    var hp = h; hp[0] += eps;
+    var hm = h; hm[0] -= eps;
+    var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    eng.forward(&op, &hp, &ids, 2);
+    eng.forward(&om, &hm, &ids, 2);
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (op) |v| sp += v;
+    for (om) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dH[0]) < 1e-2);
 }
