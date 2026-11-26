@@ -146,3 +146,26 @@ test "newtonSchulz5 normalizes" {
     for (g) |v| n += v * v;
     try std.testing.expect(@abs(@sqrt(n) - 1.0) < 1e-4);
 }
+
+// muP (maximal update parameterization) helpers (PRD 1.2, D-07).
+pub fn muPInitStd(base_std: f32, d: usize, base_d: usize) f32 {
+    // init std scales as 1/sqrt(d), relative to base width
+    if (d == 0) return base_std;
+    return base_std * @sqrt(@as(f32, @floatFromInt(base_d)) / @as(f32, @floatFromInt(d)));
+}
+
+pub fn muPLr(base_lr: f32, d: usize, base_d: usize) f32 {
+    // LR for hidden weights scales as base_d / d
+    if (d == 0) return base_lr;
+    return base_lr * @as(f32, @floatFromInt(base_d)) / @as(f32, @floatFromInt(d));
+}
+
+test "muPInitStd" {
+    const s = muPInitStd(0.02, 512, 256);
+    try std.testing.expect(s < 0.02); // wider -> smaller init
+}
+
+test "muPLr" {
+    const lr = muPLr(0.02, 512, 256);
+    try std.testing.expect(lr < 0.02);
+}
