@@ -398,6 +398,7 @@ pub const LossScaler = struct {
     }
 
     pub fn hasOverflow(self: *const LossScaler, grads: []const f32) bool {
+        _ = self;
         for (grads) |g| {
             if (std.math.isNan(g) or std.math.isInf(g)) return true;
         }
