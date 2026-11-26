@@ -266,7 +266,6 @@ pub fn readShardHeader(allocator: std.mem.Allocator, path: []const u8) !ZtokHead
         .vocab_size = vocab_size,
         .tok_hash = tok_hash,
     };
-    _ = allocator;
 }
 
 test "ZTOK roundtrip" {
