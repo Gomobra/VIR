@@ -239,7 +239,7 @@ pub fn writeShard(allocator: std.mem.Allocator, path: []const u8, dtype: DType, 
     _ = allocator;
 }
 
-pub fn readShardHeader(allocator: std.mem.Allocator, path: []const u8) !ZtokHeader {
+pub fn readShardHeader(path: []const u8) !ZtokHeader {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     var magic_bytes: [4]u8 = undefined;
@@ -276,7 +276,7 @@ test "ZTOK roundtrip" {
     var hash: [32]u8 = undefined;
     @memset(&hash, 0xAB);
     try writeShard(allocator, path, .u32, &tokens, 4096, hash);
-    const hdr = try readShardHeader(allocator, path);
+    const hdr = try readShardHeader(path);
     try std.testing.expectEqual(@as(u32, 0x5A544F4B), hdr.magic);
     try std.testing.expectEqual(@as(u32, 1), hdr.version);
     try std.testing.expectEqual(@as(u64, 4), hdr.n_tokens);
