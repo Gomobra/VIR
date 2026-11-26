@@ -142,6 +142,37 @@ test "embeddingGatherF32" {
     try std.testing.expectEqualSlices(f32, &[_]f32{ 3, 4, 1, 2 }, &out);
 }
 
+// Block-diagonal attention mask for packed sequences (PRD 3.8, 3.6).
+// mask[i*seq + j] = 1 if doc_ids[i]==doc_ids[j] and j<=i (causal within doc), else 0.
+pub fn blockDiagonalMask(mask: []f32, doc_ids: []const u32, seq: usize) void {
+    std.debug.assert(mask.len == seq * seq);
+    std.debug.assert(doc_ids.len == seq);
+    var i: usize = 0;
+    while (i < seq) : (i += 1) {
+        var j: usize = 0;
+        while (j < seq) : (j += 1) {
+            if (j <= i and doc_ids[i] == doc_ids[j]) {
+                mask[i * seq + j] = 1.0;
+            } else {
+                mask[i * seq + j] = 0.0;
+            }
+        }
+    }
+}
+
+test "blockDiagonalMask" {
+    // two docs: [0,0,1,1], causal within doc
+    const doc_ids = [_]u32{ 0, 0, 1, 1 };
+    var mask = [_]f32{0} ** 16;
+    blockDiagonalMask(&mask, &doc_ids, 4);
+    // position 2 (doc1) cannot attend to position 0 (doc0)
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), mask[2 * 4 + 0], 1e-6);
+    // position 2 can attend to position 2
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mask[2 * 4 + 2], 1e-6);
+    // position 1 can attend to position 0 (same doc)
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mask[1 * 4 + 0], 1e-6);
+}
+
 // Blocked matmul: C[m,n] += A[m,k] * B[k,n], block size bs.
 pub fn matmulBlockedF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: usize, k: usize, bs: usize) void {
     std.debug.assert(C.len == m * n);
