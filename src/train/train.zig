@@ -311,3 +311,71 @@ test "TinyModel generate" {
     try std.testing.expectEqual(@as(usize, 5), out.len);
     for (out) |t| try std.testing.expect(t < 4);
 }
+
+// --- Gradient accumulator for micro-batching (PRD 3.8) ---
+pub const GradAccumulator = struct {
+    buf: []f32,
+    count: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, n: usize) !GradAccumulator {
+        const buf = try allocator.alloc(f32, n);
+        @memset(buf, 0);
+        return .{ .buf = buf, .count = 0, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *GradAccumulator) void {
+        self.allocator.free(self.buf);
+    }
+
+    pub fn accumulate(self: *GradAccumulator, grads: []const f32) void {
+        std.debug.assert(grads.len == self.buf.len);
+        for (self.buf, grads) |*b, g| b.* += g;
+        self.count += 1;
+    }
+
+    pub fn scale(self: *GradAccumulator) void {
+        if (self.count == 0) return;
+        const inv = 1.0 / @as(f32, @floatFromInt(self.count));
+        for (self.buf) |*b| b.* *= inv;
+    }
+
+    pub fn reset(self: *GradAccumulator) void {
+        @memset(self.buf, 0);
+        self.count = 0;
+    }
+};
+
+test "GradAccumulator" {
+    const allocator = std.testing.allocator;
+    var ga = try GradAccumulator.init(allocator, 2);
+    defer ga.deinit();
+    const g1 = [_]f32{ 1, 2 };
+    const g2 = [_]f32{ 3, 4 };
+    ga.accumulate(&g1);
+    ga.accumulate(&g2);
+    try std.testing.expectEqual(@as(usize, 2), ga.count);
+    ga.scale();
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), ga.buf[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), ga.buf[1], 1e-6);
+    ga.reset();
+    try std.testing.expectEqual(@as(usize, 0), ga.count);
+}
+
+// Cosine LR schedule (alternative to WSD).
+pub fn cosineLr(step: usize, total: usize, warmup: usize, peak: f32, min_lr: f32) f32 {
+    if (total == 0) return peak;
+    if (step < warmup) {
+        return peak * (@as(f32, @floatFromInt(step + 1)) / @as(f32, @floatFromInt(if (warmup > 0) warmup else 1)));
+    }
+    const progress = @as(f32, @floatFromInt(step - warmup)) / @as(f32, @floatFromInt(if (total > warmup) total - warmup else 1));
+    const cos = @cos(progress * std.math.pi);
+    return min_lr + (peak - min_lr) * (1 + cos) / 2.0;
+}
+
+test "cosineLr" {
+    const lr0 = cosineLr(0, 10, 2, 0.1, 0.0);
+    try std.testing.expect(lr0 < 0.1);
+    const lr_mid = cosineLr(5, 10, 2, 0.1, 0.0);
+    try std.testing.expect(lr_mid >= 0 and lr_mid <= 0.1);
+}
