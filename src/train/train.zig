@@ -5,12 +5,35 @@ const cpu = @import("../cpu/cpu.zig");
 const nn = @import("../nn/nn.zig");
 const autograd = @import("../autograd/autograd.zig");
 const optim = @import("../optim/optim.zig");
+const checkpoint = @import("../checkpoint/checkpoint.zig");
 
 pub const TrainConfig = struct {
     lr: f32 = 1e-2,
     batch_tokens: usize = 4,
     max_steps: usize = 100,
+    warmup_steps: usize = 5,
+    decay_fraction: f32 = 0.2,
 };
+
+// WSD (warmup-stable-decay) learning rate schedule.
+pub fn wsdLr(step: usize, cfg: TrainConfig) f32 {
+    const peak = cfg.lr;
+    const total = cfg.max_steps;
+    if (total == 0) return peak;
+    const warmup = if (cfg.warmup_steps > 0) cfg.warmup_steps else 1;
+    const decay_steps: usize = @intFromFloat(@as(f32, @floatFromInt(total)) * cfg.decay_fraction);
+    const stable_end = if (total > decay_steps) total - decay_steps else total;
+    if (step < warmup) {
+        return peak * (@as(f32, @floatFromInt(step + 1)) / @as(f32, @floatFromInt(warmup)));
+    }
+    if (step < stable_end) {
+        return peak;
+    }
+    // decay
+    const prog = @as(f32, @floatFromInt(step - stable_end + 1)) / @as(f32, @floatFromInt(if (decay_steps > 0) decay_steps else 1));
+    const factor = 1.0 - @min(prog, 1.0);
+    return peak * factor;
+}
 
 pub const Trainer = struct {
     cfg: TrainConfig,
@@ -143,4 +166,50 @@ test "TinyModel trainStep reduces loss" {
     // loss should generally decrease (not guaranteed single step, but check finite)
     try std.testing.expect(std.math.isFinite(l1));
     try std.testing.expect(std.math.isFinite(l2));
+}
+
+// Training loop with checkpoint save at interval.
+pub fn runTrainingLoop(model: *TinyModel, ids: []const u32, targets: []const u32, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    var trainer = Trainer.init(cfg);
+    var steps: usize = 0;
+    while (!trainer.done()) {
+        const loss = try model.trainStep(ids, targets);
+        _ = loss;
+        trainer.runStep();
+        steps += 1;
+        if (checkpoint_interval > 0 and steps % checkpoint_interval == 0) {
+            // save meta
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+        }
+    }
+    return steps;
+}
+
+test "wsdLr warmup" {
+    const cfg = TrainConfig{ .lr = 0.1, .max_steps = 10, .warmup_steps = 2, .decay_fraction = 0.2 };
+    // step 0 (first) -> warmup: 0.1 * 1/2 = 0.05
+    const lr0 = wsdLr(0, cfg);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), lr0, 1e-5);
+    // stable
+    const lr3 = wsdLr(3, cfg);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), lr3, 1e-5);
+}
+
+test "runTrainingLoop saves checkpoint" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/trainckpt";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    var model = try TinyModel.init(allocator, 4, 3, 0.1);
+    defer model.deinit();
+    const ids = [_]u32{ 0, 1, 2, 3 };
+    const targets = [_]u32{ 1, 2, 3, 0 };
+    const cfg = TrainConfig{ .max_steps = 4, .warmup_steps = 1 };
+    const steps = try runTrainingLoop(&model, &ids, &targets, cfg, base, 2);
+    try std.testing.expectEqual(@as(usize, 4), steps);
+    // checkpoint at step 2 or 4 should exist
+    const latest = try checkpoint.loadLatest(allocator, base);
+    try std.testing.expect(latest != null);
 }
