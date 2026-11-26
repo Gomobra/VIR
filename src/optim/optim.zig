@@ -51,8 +51,8 @@ test "AdamW step reduces param toward gradient" {
     const allocator = std.testing.allocator;
     var opt = try AdamW.init(allocator, 1, 0.1);
     defer opt.deinit();
-    var params = [_]f32{ 5.0 };
-    const grads = [_]f32{ 1.0 };
+    var params = [_]f32{5.0};
+    const grads = [_]f32{1.0};
     opt.step(&params, &grads);
     try std.testing.expect(params[0] < 5.0);
 }
