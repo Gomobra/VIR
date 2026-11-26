@@ -14,6 +14,7 @@ pub const FSQ = struct {
     }
 
     pub fn dequantize(self: FSQ, q: f32) f32 {
+        _ = self;
         return q; // FSQ is identity-ish after quantize
     }
 };
