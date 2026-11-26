@@ -21,6 +21,8 @@ pub const VocabLayout = struct {
     }
 };
 
+pub const fsq = @import("fsq.zig");
+
 pub fn defaultLayout() VocabLayout {
     return .{
         .text_offset = 0,
