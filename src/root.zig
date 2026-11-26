@@ -6,6 +6,7 @@ pub const version = "0.1.0";
 // Core modules (diisi bertahap)
 pub const tensor = @import("tensor/tensor.zig");
 pub const cpu = @import("cpu/cpu.zig");
+pub const autograd = @import("autograd/autograd.zig");
 
 test "smoke" {
     const std = @import("std");
