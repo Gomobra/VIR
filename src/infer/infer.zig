@@ -44,8 +44,12 @@ pub fn topK(logits: []f32, k: usize) void {
     while (i < k) : (i += 1) {
         var maxidx = i;
         var j = i + 1;
-        while (j < sorted.len) : (j += 1) if (sorted[j] > sorted[maxidx]) { maxidx = j; };
-        const tmp = sorted[i]; sorted[i] = sorted[maxidx]; sorted[maxidx] = tmp;
+        while (j < sorted.len) : (j += 1) if (sorted[j] > sorted[maxidx]) {
+            maxidx = j;
+        };
+        const tmp = sorted[i];
+        sorted[i] = sorted[maxidx];
+        sorted[maxidx] = tmp;
     }
     const thresh = sorted[k - 1];
     for (logits) |*v| if (v.* < thresh) v.* = -std.math.inf(f32);
@@ -55,7 +59,9 @@ pub fn topK(logits: []f32, k: usize) void {
 pub fn topP(logits: []f32, p: f32) void {
     // softmax
     var mx: f32 = logits[0];
-    for (logits) |v| if (v > mx) { mx = v; };
+    for (logits) |v| if (v > mx) {
+        mx = v;
+    };
     var sum: f32 = 0;
     for (logits) |v| sum += @exp(v - mx);
     // sort indices by prob desc
@@ -81,7 +87,10 @@ pub fn topP(logits: []f32, p: f32) void {
     var cutoff: usize = logits.len;
     for (idx, 0..) |id, rank| {
         cum += @exp(logits[id] - mx) / sum;
-        if (cum >= p) { cutoff = rank + 1; break; }
+        if (cum >= p) {
+            cutoff = rank + 1;
+            break;
+        }
     }
     // mask out beyond cutoff
     var mask = std.heap.page_allocator.alloc(bool, logits.len) catch return;
@@ -115,13 +124,15 @@ test "topP finite" {
     topP(&l, 0.9);
     // at least one finite
     var finite: usize = 0;
-    for (l) |v| if (std.math.isFinite(v)) { finite += 1; };
+    for (l) |v| if (std.math.isFinite(v)) {
+        finite += 1;
+    };
     try std.testing.expect(finite >= 1);
 }
 
 test "repetitionPenalty" {
     var l = [_]f32{ 2.0, 3.0 };
-    const appeared = [_]u32{ 0 };
+    const appeared = [_]u32{0};
     repetitionPenalty(&l, &appeared, 2.0);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), l[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), l[1], 1e-6);
