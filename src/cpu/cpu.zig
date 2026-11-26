@@ -318,7 +318,7 @@ pub fn crossEntropyF32(logits: []const f32, targets: []const u32, rows: usize, v
 test "crossEntropyF32" {
     // logits: row0 = [0,0], target 0 -> -log(0.5)=0.693
     var logits = [_]f32{ 0, 0 };
-    var targets = [_]u32{ 0 };
+    var targets = [_]u32{0};
     const ce = crossEntropyF32(&logits, &targets, 1, 2);
     try std.testing.expect(@abs(ce - 0.6931) < 1e-3);
 }
