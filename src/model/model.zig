@@ -209,7 +209,104 @@ pub const Model = struct {
     pub fn nBlocks(self: *const Model) usize {
         return self.blocks.len;
     }
-};
+
+    // Backward: given dLogits (seq x vocab), compute dEmbed (vocab x d) gradient
+    // and accumulate into dHead (d x vocab), dBlocks_attn/mlp. Returns via buffers.
+    pub fn backward(self: *const Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, tokens: []const u32, dLogits: []const f32) void {
+        const d = self.cfg.d_model;
+        const v = self.cfg.vocab_size;
+        const seq = tokens.len;
+        const n = self.blocks.len;
+
+        // forward intermediates
+        const hidden0 = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(hidden0);
+        cpuEmbeddingGather(hidden0, self.embed, tokens, v, d);
+
+        // store block inputs/outputs
+        const block_in = self.allocator.alloc([]f32, n) catch return;
+        defer self.allocator.free(block_in);
+        const block_out = self.allocator.alloc([]f32, n) catch return;
+        defer self.allocator.free(block_out);
+        for (0..n) |i| {
+            block_in[i] = self.allocator.alloc(f32, seq * d) catch return;
+            block_out[i] = self.allocator.alloc(f32, seq * d) catch return;
+        }
+        defer for (0..n) |i| { self.allocator.free(block_in[i]); self.allocator.free(block_out[i]); };
+
+        // run blocks
+        var cur = hidden0;
+        for (0..n) |i| {
+            @memcpy(block_in[i], cur);
+            self.blocks[i].forward(block_out[i], cur, seq, d);
+            cur = block_out[i];
+        }
+        const last = if (n > 0) block_out[n - 1] else hidden0;
+
+        // final norm
+        const normed = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(normed);
+        var i: usize = 0;
+        while (i < seq) : (i += 1) {
+            self.final_norm.forward(normed[i * d .. (i + 1) * d], last[i * d .. (i + 1) * d]);
+        }
+
+        // dNormed = dLogits @ W_head^T  (seq x d)
+        const dNormed = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(dNormed);
+        @memset(dNormed, 0);
+        for (0..seq) |b| {
+            for (0..d) |ddi| {
+                var acc: f32 = 0;
+                for (0..v) |vv| acc += dLogits[b * v + vv] * self.head.w[vv * d + ddi];
+                dNormed[b * d + ddi] = acc;
+            }
+        }
+        // dHead += normed^T @ dLogits
+        for (0..seq) |b| {
+            for (0..v) |vv| {
+                for (0..d) |ddi| {
+                    dHead[vv * d + ddi] += normed[b * d + ddi] * dLogits[b * v + vv];
+                }
+            }
+        }
+
+        // backward through final norm: dLast = backwardRMSNorm(last, dNormed)
+        const dLast = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(dLast);
+        @memset(dLast, 0);
+        for (0..seq) |b| {
+            const autograd = @import("../autograd/autograd.zig");
+            const sl_x = last[b * d .. (b + 1) * d];
+            const sl_do = dNormed[b * d .. (b + 1) * d];
+            const sl_dx = dLast[b * d .. (b + 1) * d];
+            autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+        }
+
+        // backward through blocks (reverse)
+        const dCur = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(dCur);
+        @memcpy(dCur, dLast);
+        var bi: usize = n;
+        while (bi > 0) {
+            bi -= 1;
+            const xin = if (bi == 0) hidden0 else block_out[bi - 1];
+            const dX = self.allocator.alloc(f32, seq * d) catch return;
+            defer self.allocator.free(dX);
+            @memset(dX, 0);
+            self.blocks[bi].backward(dX, dBlocks_attn[bi], dBlocks_mlp[bi], xin, dCur, seq, d);
+            @memcpy(dCur, dX);
+        }
+
+        // dEmbed scatter
+        @memset(dEmbed, 0);
+        for (tokens, 0..) |tok, pos| {
+            if (tok >= v) continue;
+            for (0..d) |ddi| {
+                dEmbed[tok * d + ddi] += dCur[pos * d + ddi];
+            }
+        }
+    }
 
 fn cpuEmbeddingGather(out: []f32, table: []const f32, ids: []const u32, vocab: usize, dim: usize) void {
     const cpu = @import("../cpu/cpu.zig");
@@ -261,4 +358,42 @@ test "Block backward gradcheck" {
     for (om) |v| sm += v;
     const fd = (sp - sm) / (2 * eps);
     try std.testing.expect(@abs(fd - dX[0]) < 1e-1);
+}
+
+test "Model backward finite" {
+    const allocator = std.testing.allocator;
+    const cfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3 };
+    var logits = try allocator.alloc(f32, tokens.len * 8);
+    defer allocator.free(logits);
+    m.forward(logits, &tokens);
+    // dLogits = ones
+    const dLogits = try allocator.alloc(f32, tokens.len * 8);
+    defer allocator.free(dLogits);
+    @memset(dLogits, 1);
+    const d = cfg.d_model;
+    const v = cfg.vocab_size;
+    const dEmbed = try allocator.alloc(f32, v * d);
+    defer allocator.free(dEmbed);
+    @memset(dEmbed, 0);
+    const dHead = try allocator.alloc(f32, v * d);
+    defer allocator.free(dHead);
+    @memset(dHead, 0);
+    const n = m.nBlocks();
+    const dBlocks_attn = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_attn);
+    const dBlocks_mlp = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_mlp);
+    for (0..n) |i| {
+        dBlocks_attn[i] = try allocator.alloc(f32, d * d);
+        dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
+        @memset(dBlocks_attn[i], 0);
+        @memset(dBlocks_mlp[i], 0);
+    }
+    defer for (0..n) |i| { allocator.free(dBlocks_attn[i]); allocator.free(dBlocks_mlp[i]); };
+    m.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, &tokens, dLogits);
+    // finite check dEmbed[0]
+    for (dEmbed) |x| try std.testing.expect(std.math.isFinite(x));
 }
