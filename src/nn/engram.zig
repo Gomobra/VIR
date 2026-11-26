@@ -139,5 +139,3 @@ test "Engram forward finite" {
     eng.forward(&out, &h, &ids, 2);
     for (out) |v| try std.testing.expect(std.math.isFinite(v));
 }
-EOF
-echo done
