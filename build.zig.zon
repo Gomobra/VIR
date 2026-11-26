@@ -1,4 +1,5 @@
 .{
+    .fingerprint = 0x13dc013569a979aa,
     .name = .vir_zig,
     .version = "0.1.0",
     .minimum_zig_version = "0.17.1",
