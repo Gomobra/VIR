@@ -379,3 +379,60 @@ test "cosineLr" {
     const lr_mid = cosineLr(5, 10, 2, 0.1, 0.0);
     try std.testing.expect(lr_mid >= 0 and lr_mid <= 0.1);
 }
+
+// --- Dynamic loss scaling (PRD 3.2, 3.8) ---
+pub const LossScaler = struct {
+    scale: f32 = 65536.0,
+    growth_factor: f32 = 2.0,
+    backoff_factor: f32 = 0.5,
+    growth_interval: usize = 2000,
+    steps_since_growth: usize = 0,
+
+    pub fn init() LossScaler {
+        return .{};
+    }
+
+    pub fn unscaleGrad(self: *const LossScaler, grad: []f32) void {
+        const inv = 1.0 / self.scale;
+        for (grad) |*g| g.* *= inv;
+    }
+
+    pub fn hasOverflow(self: *const LossScaler, grads: []const f32) bool {
+        for (grads) |g| {
+            if (std.math.isNan(g) or std.math.isInf(g)) return true;
+        }
+        return false;
+    }
+
+    pub fn update(self: *LossScaler, overflow: bool) void {
+        if (overflow) {
+            self.scale *= self.backoff_factor;
+            if (self.scale < 1.0) self.scale = 1.0;
+            self.steps_since_growth = 0;
+        } else {
+            self.steps_since_growth += 1;
+            if (self.steps_since_growth >= self.growth_interval) {
+                self.scale *= self.growth_factor;
+                self.steps_since_growth = 0;
+            }
+        }
+    }
+};
+
+test "LossScaler overflow backs off" {
+    var ls = LossScaler.init();
+    const s0 = ls.scale;
+    var grads = [_]f32{ std.math.inf(f32) };
+    try std.testing.expect(ls.hasOverflow(&grads));
+    ls.update(true);
+    try std.testing.expect(ls.scale < s0);
+}
+
+test "LossScaler no overflow grows" {
+    var ls = LossScaler.init();
+    ls.steps_since_growth = 1999;
+    var grads = [_]f32{ 1.0 };
+    try std.testing.expect(!ls.hasOverflow(&grads));
+    ls.update(false);
+    try std.testing.expect(ls.scale > 65536.0);
+}
