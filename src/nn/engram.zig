@@ -134,7 +134,7 @@ pub const Engram = struct {
     }
 
     // Backward: given dOut (seq x d), compute dH (seq x d) (engram contribution) and accumulate dWk, dWv.
-    pub fn backward(self: *Engram, dH: []f32, dWk: []f32, dWv: []f32, h: []const f32, token_ids: []const u32, dOut: []const f32, seq: usize) void {
+    pub fn backward(self: *Engram, dH: []f32, dWk: []f32, dWv: []f32, dTables: []f32, h: []const f32, token_ids: []const u32, dOut: []const f32, seq: usize) void {
         const d = self.d;
         const mem = self.mem_dim;
         const dd = @min(d, mem);
