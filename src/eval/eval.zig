@@ -16,7 +16,9 @@ test "bitsPerByte" {
 pub fn mcAccuracy(predictions: []const usize, labels: []const usize) f32 {
     if (predictions.len == 0 or predictions.len != labels.len) return 0;
     var correct: usize = 0;
-    for (predictions, labels) |p, l| if (p == l) { correct += 1; };
+    for (predictions, labels) |p, l| if (p == l) {
+        correct += 1;
+    };
     return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(predictions.len));
 }
 
