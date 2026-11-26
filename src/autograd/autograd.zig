@@ -297,7 +297,7 @@ pub fn gradCheckScalar(f: *const fn (x: f64) f64, analytic: f64, x: f64, eps: f6
 test "backwardCrossEntropy" {
     // logits [0,0], target 0 -> softmax [0.5,0.5], dLogit = [0.5-1, 0.5] = [-0.5, 0.5]
     var logits = [_]f32{ 0, 0 };
-    var targets = [_]u32{ 0 };
+    var targets = [_]u32{0};
     var dL = [_]f32{ 0, 0 };
     backwardCrossEntropy(&dL, &logits, &targets, 1, 2);
     try std.testing.expectApproxEqAbs(@as(f32, -0.5), dL[0], 1e-5);
