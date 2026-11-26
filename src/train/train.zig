@@ -213,3 +213,55 @@ test "runTrainingLoop saves checkpoint" {
     const latest = try checkpoint.loadLatest(allocator, base);
     try std.testing.expect(latest != null);
 }
+
+// --- TST (Token-Superposition Training, PRD 3.8) ---
+
+// Multi-hot cross-entropy: given logits (vocab) and a bag of target ids,
+// loss = -sum_{t in bag} log softmax(logits)[t] / |bag|.
+pub fn multiHotCE(logits: []const f32, bag: []const u32, vocab: usize) f32 {
+    std.debug.assert(logits.len == vocab);
+    if (bag.len == 0) return 0;
+    // softmax
+    var mx: f32 = logits[0];
+    var j: usize = 1;
+    while (j < vocab) : (j += 1) if (logits[j] > mx) { mx = logits[j]; };
+    var sum: f32 = 0;
+    j = 0;
+    while (j < vocab) : (j += 1) sum += @exp(logits[j] - mx);
+    var total: f32 = 0;
+    for (bag) |t| {
+        const p = @exp(logits[t] - mx) / sum;
+        total += -@log(p + 1e-12);
+    }
+    return total / @as(f32, @floatFromInt(bag.len));
+}
+
+// Build a bag of next s tokens from a token sequence starting at pos.
+pub fn tstBag(tokens: []const u32, pos: usize, s: usize, vocab: usize) []const u32 {
+    _ = vocab;
+    // returns slice into tokens[pos..pos+s] (caller must ensure bounds)
+    const end = @min(pos + s, tokens.len);
+    return tokens[pos..end];
+}
+
+test "multiHotCE single target equals CE" {
+    var logits = [_]f32{ 0, 0, 0, 0 };
+    const bag = [_]u32{ 0 };
+    const loss = multiHotCE(&logits, &bag, 4);
+    // uniform -> -log(0.25) = 1.386
+    try std.testing.expect(@abs(loss - 1.3863) < 1e-3);
+}
+
+test "multiHotCE bag" {
+    var logits = [_]f32{ 0, 0, 0, 0 };
+    const bag = [_]u32{ 0, 1 };
+    const loss = multiHotCE(&logits, &bag, 4);
+    try std.testing.expect(std.math.isFinite(loss));
+}
+
+test "tstBag" {
+    const toks = [_]u32{ 1, 2, 3, 4, 5 };
+    const b = tstBag(&toks, 1, 2, 10);
+    try std.testing.expectEqual(@as(usize, 2), b.len);
+    try std.testing.expectEqual(@as(u32, 2), b[0]);
+}
