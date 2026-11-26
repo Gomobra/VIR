@@ -58,7 +58,10 @@ pub const RVQ = struct {
                     const diff = residual[d] - self.codebooks[(cb * self.codebook_size + e) * self.dim + d];
                     dist += diff * diff;
                 }
-                if (dist < best_dist) { best_dist = dist; best = e; }
+                if (dist < best_dist) {
+                    best_dist = dist;
+                    best = e;
+                }
             }
             out_indices[cb] = best;
             // subtract
