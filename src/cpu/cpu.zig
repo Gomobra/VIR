@@ -163,7 +163,7 @@ pub fn blockDiagonalMask(mask: []f32, doc_ids: []const u32, seq: usize) void {
 test "blockDiagonalMask" {
     // two docs: [0,0,1,1], causal within doc
     const doc_ids = [_]u32{ 0, 0, 1, 1 };
-    var mask = [_]f32{0} ** 16;
+    var mask = [_]f32{0} * *16;
     blockDiagonalMask(&mask, &doc_ids, 4);
     // position 2 (doc1) cannot attend to position 0 (doc0)
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), mask[2 * 4 + 0], 1e-6);
