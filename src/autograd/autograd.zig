@@ -571,3 +571,31 @@ test "gradcheck rope" {
     // finite check: dx should reconstruct x
     for (dx, x) |a, b| try std.testing.expectApproxEqAbs(b, a, 1e-4);
 }
+
+test "gradcheck attention" {
+    const eps: f32 = 1e-3;
+    const seq = 2;
+    const d = 2;
+    var Q = [_]f32{ 1, 0, 0, 1 };
+    var K = [_]f32{ 1, 0, 0, 1 };
+    var V = [_]f32{ 1, 2, 3, 4 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dQ = [_]f32{ 0, 0, 0, 0 };
+    var dK = [_]f32{ 0, 0, 0, 0 };
+    var dV = [_]f32{ 0, 0, 0, 0 };
+    backwardAttention(&dQ, &dK, &dV, &Q, &K, &V, &dOut, seq, d);
+
+    // finite diff for Q[0]
+    var Qp = Q; Qp[0] += eps;
+    var Qm = Q; Qm[0] -= eps;
+    var Op = [_]f32{ 0, 0, 0, 0 };
+    var Om = [_]f32{ 0, 0, 0, 0 };
+    cpu.attentionNaiveF32(&Op, &Qp, &K, &V, seq, d);
+    cpu.attentionNaiveF32(&Om, &Qm, &K, &V, seq, d);
+    var sp: f32 = 0;
+    var sm: f32 = 0;
+    for (Op) |v| sp += v;
+    for (Om) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dQ[0]) < 1e-2);
+}
