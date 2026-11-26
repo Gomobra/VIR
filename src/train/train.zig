@@ -224,7 +224,9 @@ pub fn multiHotCE(logits: []const f32, bag: []const u32, vocab: usize) f32 {
     // softmax
     var mx: f32 = logits[0];
     var j: usize = 1;
-    while (j < vocab) : (j += 1) if (logits[j] > mx) { mx = logits[j]; };
+    while (j < vocab) : (j += 1) if (logits[j] > mx) {
+        mx = logits[j];
+    };
     var sum: f32 = 0;
     j = 0;
     while (j < vocab) : (j += 1) sum += @exp(logits[j] - mx);
@@ -246,7 +248,7 @@ pub fn tstBag(tokens: []const u32, pos: usize, s: usize, vocab: usize) []const u
 
 test "multiHotCE single target equals CE" {
     var logits = [_]f32{ 0, 0, 0, 0 };
-    const bag = [_]u32{ 0 };
+    const bag = [_]u32{0};
     const loss = multiHotCE(&logits, &bag, 4);
     // uniform -> -log(0.25) = 1.386
     try std.testing.expect(@abs(loss - 1.3863) < 1e-3);
