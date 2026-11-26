@@ -37,6 +37,43 @@ pub const BitLinear = struct {
     }
 
     // forward: out = (x_quant (int8) @ w_ternary (i8)) * scale_x * gamma
+    // Backward (STE): treat ternary weights as actual weights for gradient flow.
+    pub fn backward(self: *const BitLinear, dW: []f32, dX: []f32, x: []const f32, dOut: []const f32, batch: usize) void {
+        std.debug.assert(dW.len == self.w.len);
+        std.debug.assert(dX.len == x.len);
+        std.debug.assert(dOut.len == batch * self.out_dim);
+        // ternary weights
+        const wt = self.allocator.alloc(i8, self.w.len) catch return;
+        defer self.allocator.free(wt);
+        self.ternarize(wt);
+        // dW[d_out? ]: dW[j*in+i] += sum_b x[b,i] * dOut[b,j] (STE, ignore quant)
+        var j: usize = 0;
+        while (j < self.out_dim) : (j += 1) {
+            var i: usize = 0;
+            while (i < self.in_dim) : (i += 1) {
+                var acc: f32 = 0;
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    acc += x[b * self.in_dim + i] * dOut[b * self.out_dim + j];
+                }
+                dW[j * self.in_dim + i] += acc;
+            }
+        }
+        // dX[b,i] = sum_j W_ternary[j,i] * dOut[b,j]
+        var b: usize = 0;
+        while (b < batch) : (b += 1) {
+            var i: usize = 0;
+            while (i < self.in_dim) : (i += 1) {
+                var acc: f32 = 0;
+                var j: usize = 0;
+                while (j < self.out_dim) : (j += 1) {
+                    acc += @as(f32, @floatFromInt(wt[j * self.in_dim + i])) * dOut[b * self.out_dim + j];
+                }
+                dX[b * self.in_dim + i] += acc;
+            }
+        }
+    }
+
     pub fn forward(self: *const BitLinear, out: []f32, x: []const f32, batch: usize) void {
         std.debug.assert(x.len == batch * self.in_dim);
         std.debug.assert(out.len == batch * self.out_dim);
@@ -100,4 +137,21 @@ test "BitLinear ternarize values" {
     defer allocator.free(wt);
     bl.ternarize(wt);
     for (wt) |v| try std.testing.expect(v >= -1 and v <= 1);
+}
+
+test "BitLinear backward finite" {
+    const allocator = std.testing.allocator;
+    var bl = try BitLinear.init(allocator, 4, 3);
+    defer bl.deinit();
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var out = [_]f32{ 0, 0, 0, 0, 0, 0 };
+    bl.forward(&out, &x, 2);
+    var dW = try allocator.alloc(f32, bl.w.len);
+    defer allocator.free(dW);
+    @memset(dW, 0);
+    var dX = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 0, 0, 0, 1, 0 };
+    bl.backward(dW, &dX, &x, &dOut, 2);
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
 }
