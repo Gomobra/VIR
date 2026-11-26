@@ -356,13 +356,16 @@ test "Engram gradcheck h" {
     eng.backward(&dH, dWk, dWv, dTables, &h, &ids, &dOut, 2);
     // finite diff for h[0]: loss = sum(engram output), perturb h[0]
     const eps: f32 = 1e-3;
-    var hp = h; hp[0] += eps;
-    var hm = h; hm[0] -= eps;
+    var hp = h;
+    hp[0] += eps;
+    var hm = h;
+    hm[0] -= eps;
     var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
     var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
     eng.forward(&op, &hp, &ids, 2);
     eng.forward(&om, &hm, &ids, 2);
-    var sp: f32 = 0; var sm: f32 = 0;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (op) |v| sp += v;
     for (om) |v| sm += v;
     const fd = (sp - sm) / (2 * eps);
