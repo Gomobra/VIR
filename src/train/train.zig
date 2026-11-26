@@ -45,8 +45,8 @@ pub const TinyModel = struct {
         // small init
         for (embed, 0..) |*x, i| x.* = 0.01 * @as(f32, @floatFromInt(i % 5)) - 0.02;
         for (W, 0..) |*x, i| x.* = 0.01 * @as(f32, @floatFromInt(i % 7)) - 0.03;
-        var opt_e = try optim.AdamW.init(allocator, vocab * dim, lr);
-        var opt_w = try optim.AdamW.init(allocator, dim * vocab, lr);
+        const opt_e = try optim.AdamW.init(allocator, vocab * dim, lr);
+        const opt_w = try optim.AdamW.init(allocator, dim * vocab, lr);
         return .{ .vocab = vocab, .dim = dim, .embed = embed, .W = W, .opt_embed = opt_e, .opt_W = opt_w, .allocator = allocator };
     }
 
@@ -64,11 +64,11 @@ pub const TinyModel = struct {
         const vocab = self.vocab;
 
         // forward: embed -> (batch, dim); logits = embed @ W (batch, vocab)
-        var hidden = try self.allocator.alloc(f32, batch * dim);
+        const hidden = try self.allocator.alloc(f32, batch * dim);
         defer self.allocator.free(hidden);
         cpu.embeddingGatherF32(hidden, self.embed, ids, vocab, dim);
 
-        var logits = try self.allocator.alloc(f32, batch * vocab);
+        const logits = try self.allocator.alloc(f32, batch * vocab);
         defer self.allocator.free(logits);
         // logits[b, v] = sum_d hidden[b,d] * W[d, v]  (W stored dim*vocab, row-major d-major)
         var b: usize = 0;
@@ -85,16 +85,16 @@ pub const TinyModel = struct {
         const loss = cpu.crossEntropyF32(logits, targets, batch, vocab);
 
         // backward
-        var dLogits = try self.allocator.alloc(f32, batch * vocab);
+        const dLogits = try self.allocator.alloc(f32, batch * vocab);
         defer self.allocator.free(dLogits);
         @memset(dLogits, 0);
         autograd.backwardCrossEntropy(dLogits, logits, targets, batch, vocab);
 
         // dW and dHidden
-        var dW = try self.allocator.alloc(f32, dim * vocab);
+        const dW = try self.allocator.alloc(f32, dim * vocab);
         defer self.allocator.free(dW);
         @memset(dW, 0);
-        var dHidden = try self.allocator.alloc(f32, batch * dim);
+        const dHidden = try self.allocator.alloc(f32, batch * dim);
         defer self.allocator.free(dHidden);
         @memset(dHidden, 0);
 
@@ -119,7 +119,7 @@ pub const TinyModel = struct {
         }
 
         // embedding backward: scatter-add dHidden into dEmbed
-        var dEmbed = try self.allocator.alloc(f32, vocab * dim);
+        const dEmbed = try self.allocator.alloc(f32, vocab * dim);
         defer self.allocator.free(dEmbed);
         @memset(dEmbed, 0);
         autograd.backwardEmbedding(dEmbed, dHidden, ids, vocab, dim);
