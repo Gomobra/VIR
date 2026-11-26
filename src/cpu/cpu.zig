@@ -141,3 +141,47 @@ test "embeddingGatherF32" {
     embeddingGatherF32(&out, &table, &ids, 2, 2);
     try std.testing.expectEqualSlices(f32, &[_]f32{ 3, 4, 1, 2 }, &out);
 }
+
+// Blocked matmul: C[m,n] += A[m,k] * B[k,n], block size bs.
+pub fn matmulBlockedF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: usize, k: usize, bs: usize) void {
+    std.debug.assert(C.len == m * n);
+    std.debug.assert(A.len == m * k);
+    std.debug.assert(B.len == k * n);
+    // zero C first
+    for (C) |*c| c.* = 0;
+    var i0: usize = 0;
+    while (i0 < m) : (i0 += bs) {
+        var j0: usize = 0;
+        while (j0 < n) : (j0 += bs) {
+            var t0: usize = 0;
+            while (t0 < k) : (t0 += bs) {
+                const iend = @min(i0 + bs, m);
+                const jend = @min(j0 + bs, n);
+                const tend = @min(t0 + bs, k);
+                var i = i0;
+                while (i < iend) : (i += 1) {
+                    var t = t0;
+                    while (t < tend) : (t += 1) {
+                        const aik = A[i * k + t];
+                        var j = j0;
+                        while (j < jend) : (j += 1) {
+                            C[i * n + j] += aik * B[t * n + j];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "matmulBlockedF32 matches naif" {
+    var A = [_]f32{ 1, 2, 3, 4, 5, 6 };
+    // A: 2x3
+    var B = [_]f32{ 7, 8, 9, 10, 11, 12 };
+    // B: 3x2
+    var C1 = [_]f32{ 0, 0, 0, 0 };
+    var C2 = [_]f32{ 0, 0, 0, 0 };
+    matmulNaifF32(&C1, &A, &B, 2, 2, 3);
+    matmulBlockedF32(&C2, &A, &B, 2, 2, 3, 2);
+    for (C1, C2) |a, b| try std.testing.expect(@abs(a - b) < 1e-5);
+}
