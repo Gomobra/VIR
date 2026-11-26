@@ -185,3 +185,48 @@ test "matmulBlockedF32 matches naif" {
     matmulBlockedF32(&C2, &A, &B, 2, 2, 3, 2);
     for (C1, C2) |a, b| try std.testing.expect(@abs(a - b) < 1e-5);
 }
+
+// SIMD matmul (f32), vector width 4, naive with vectorized inner loop.
+pub fn matmulSIMDF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: usize, k: usize) void {
+    std.debug.assert(C.len == m * n);
+    std.debug.assert(A.len == m * k);
+    std.debug.assert(B.len == k * n);
+    for (C) |*c| c.* = 0;
+    const Vec = @Vector(4, f32);
+    var i: usize = 0;
+    while (i < m) : (i += 1) {
+        var j: usize = 0;
+        while (j + 4 <= n) : (j += 4) {
+            var acc: Vec = @splat(0);
+            var t: usize = 0;
+            while (t < k) : (t += 1) {
+                const aik: f32 = A[i * k + t];
+                const va: Vec = @splat(aik);
+                const vb: Vec = B[t * n + j ..][0..4].*;
+                acc += va * vb;
+            }
+            const res = acc;
+            C[i * n + j + 0] = res[0];
+            C[i * n + j + 1] = res[1];
+            C[i * n + j + 2] = res[2];
+            C[i * n + j + 3] = res[3];
+        }
+        // tail
+        while (j < n) : (j += 1) {
+            var acc: f32 = 0;
+            var t: usize = 0;
+            while (t < k) : (t += 1) acc += A[i * k + t] * B[t * n + j];
+            C[i * n + j] = acc;
+        }
+    }
+}
+
+test "matmulSIMDF32 matches naif" {
+    var A = [_]f32{ 1, 2, 3, 4, 5, 6 };
+    var B = [_]f32{ 7, 8, 9, 10, 11, 12 };
+    var C1 = [_]f32{ 0, 0, 0, 0 };
+    var C2 = [_]f32{ 0, 0, 0, 0 };
+    matmulNaifF32(&C1, &A, &B, 2, 2, 3);
+    matmulSIMDF32(&C2, &A, &B, 2, 2, 3);
+    for (C1, C2) |a, b| try std.testing.expect(@abs(a - b) < 1e-5);
+}

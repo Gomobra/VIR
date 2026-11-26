@@ -70,6 +70,73 @@ pub fn backwardRelu(dA: []f32, a: []const f32, dOut: []const f32) void {
     }
 }
 
+// Backward matmul: C=A@B (m x n), A (m x k), B (k x n).
+// dA[m,k] += dC[m,n] @ B^T ; dB[k,n] += A^T @ dC[m,n].
+pub fn backwardMatmul(dA: []f32, dB: []f32, A: []const f32, B: []const f32, dC: []const f32, m: usize, n: usize, k: usize) void {
+    std.debug.assert(dA.len == m * k);
+    std.debug.assert(dB.len == k * n);
+    std.debug.assert(dC.len == m * n);
+    // dA
+    var i: usize = 0;
+    while (i < m) : (i += 1) {
+        var t: usize = 0;
+        while (t < k) : (t += 1) {
+            var acc: f32 = 0;
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                acc += dC[i * n + j] * B[t * n + j];
+            }
+            dA[i * k + t] += acc;
+        }
+    }
+    // dB
+    var t2: usize = 0;
+    while (t2 < k) : (t2 += 1) {
+        var j: usize = 0;
+        while (j < n) : (j += 1) {
+            var acc: f32 = 0;
+            var i2: usize = 0;
+            while (i2 < m) : (i2 += 1) {
+                acc += A[i2 * k + t2] * dC[i2 * n + j];
+            }
+            dB[t2 * n + j] += acc;
+        }
+    }
+}
+
+// Backward softmax: given softmax output s (rows x cols) and dOut, dX = s*(dOut - sum(dOut*s)).
+pub fn backwardSoftmax(dX: []f32, s: []const f32, dOut: []const f32, rows: usize, cols: usize) void {
+    std.debug.assert(dX.len == s.len and s.len == dOut.len and s.len == rows * cols);
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const base = r * cols;
+        // sum(dOut * s)
+        var sum: f32 = 0;
+        var j: usize = 0;
+        while (j < cols) : (j += 1) sum += dOut[base + j] * s[base + j];
+        j = 0;
+        while (j < cols) : (j += 1) {
+            dX[base + j] += s[base + j] * (dOut[base + j] - sum);
+        }
+    }
+}
+
+// Backward RMSNorm (no gain): dX = dOut/rms - x * (sum(dOut*x))/(rms^3 * n) ... simplified: dX_i = (dOut_i - (sum dOut*x)/ss) / rms
+// where ss = sum x^2, rms = sqrt(ss/n + eps).
+pub fn backwardRMSNorm(dX: []f32, x: []const f32, dOut: []const f32, eps: f32) void {
+    std.debug.assert(dX.len == x.len and x.len == dOut.len);
+    const n = x.len;
+    var ss: f32 = 0;
+    for (x) |v| ss += v * v;
+    const rms = @sqrt(ss / @as(f32, @floatFromInt(n)) + eps);
+    var dot: f32 = 0;
+    for (x, dOut) |xi, gi| dot += xi * gi;
+    const scale = dot / (ss + eps * @as(f32, @floatFromInt(n)));
+    for (dX, x, dOut) |*dx, xi, gi| {
+        dx.* += (gi - xi * scale) / rms;
+    }
+}
+
 // Gradient check: finite difference for f(x)=sum? Here check scalar f.
 pub fn finiteDiff(f: *const fn (x: f64) f64, x: f64, eps: f64) f64 {
     return (f(x + eps) - f(x - eps)) / (2.0 * eps);
@@ -111,4 +178,34 @@ test "backwardRelu" {
     const g = [_]f32{ 1, 1, 1 };
     backwardRelu(&dA, &a, &g);
     try std.testing.expectEqualSlices(f32, &[_]f32{ 0, 1, 0 }, &dA);
+}
+
+test "backwardMatmul shapes" {
+    // A 2x2, B 2x2, C 2x2
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dB = [_]f32{ 0, 0, 0, 0 };
+    const A = [_]f32{ 1, 2, 3, 4 };
+    const B = [_]f32{ 5, 6, 7, 8 };
+    const dC = [_]f32{ 1, 0, 0, 1 };
+    backwardMatmul(&dA, &dB, &A, &B, &dC, 2, 2, 2);
+    // dA[0,0] = dC[0,0]*B[0,0]+dC[0,1]*B[0,1] = 5+0=5
+    try std.testing.expectApproxEqAbs(@as(f32, 5), dA[0], 1e-5);
+}
+
+test "backwardSoftmax" {
+    // s uniform 0.25, dOut all 1 -> dX should be 0
+    var s = [_]f32{ 0.25, 0.25, 0.25, 0.25 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0 };
+    backwardSoftmax(&dX, &s, &dOut, 1, 4);
+    for (dX) |v| try std.testing.expect(@abs(v) < 1e-5);
+}
+
+test "backwardRMSNorm" {
+    var x = [_]f32{ 1, 2, 3, 4 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0 };
+    backwardRMSNorm(&dX, &x, &dOut, 1e-6);
+    // sum of dX*x should relate; just check finite
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
 }
