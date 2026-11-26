@@ -199,3 +199,77 @@ test "sampleCategorical" {
     try std.testing.expectEqual(@as(usize, 0), sampleCategorical(&probs, 0.25));
     try std.testing.expectEqual(@as(usize, 1), sampleCategorical(&probs, 0.75));
 }
+
+// KV cache for attention (PRD 3.12).
+pub const KVCache = struct {
+    n_layers: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    max_seq: usize,
+    // k[layer][pos] = slice of n_kv_heads*head_dim
+    k: []f32,
+    v: []f32,
+    seq_len: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, n_layers: usize, n_kv_heads: usize, head_dim: usize, max_seq: usize) !KVCache {
+        const per = n_kv_heads * head_dim;
+        const total = n_layers * max_seq * per;
+        const k = try allocator.alloc(f32, total);
+        const v = try allocator.alloc(f32, total);
+        @memset(k, 0);
+        @memset(v, 0);
+        return .{ .n_layers = n_layers, .n_kv_heads = n_kv_heads, .head_dim = head_dim, .max_seq = max_seq, .k = k, .v = v, .seq_len = 0, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *KVCache) void {
+        self.allocator.free(self.k);
+        self.allocator.free(self.v);
+    }
+
+    fn offset(self: *const KVCache, layer: usize, pos: usize) usize {
+        const per = self.n_kv_heads * self.head_dim;
+        return (layer * self.max_seq + pos) * per;
+    }
+
+    pub fn append(self: *KVCache, layer: usize, kvec: []const f32, vvec: []const f32) void {
+        const per = self.n_kv_heads * self.head_dim;
+        std.debug.assert(kvec.len == per and vvec.len == per);
+        const off = self.offset(layer, self.seq_len);
+        @memcpy(self.k[off .. off + per], kvec);
+        @memcpy(self.v[off .. off + per], vvec);
+    }
+
+    pub fn advance(self: *KVCache) void {
+        self.seq_len += 1;
+    }
+
+    pub fn reset(self: *KVCache) void {
+        self.seq_len = 0;
+    }
+
+    pub fn getK(self: *const KVCache, layer: usize, pos: usize) []const f32 {
+        const per = self.n_kv_heads * self.head_dim;
+        const off = self.offset(layer, pos);
+        return self.k[off .. off + per];
+    }
+
+    pub fn getV(self: *const KVCache, layer: usize, pos: usize) []const f32 {
+        const per = self.n_kv_heads * self.head_dim;
+        const off = self.offset(layer, pos);
+        return self.v[off .. off + per];
+    }
+};
+
+test "KVCache append/get" {
+    const allocator = std.testing.allocator;
+    var cache = try KVCache.init(allocator, 1, 1, 2, 4);
+    defer cache.deinit();
+    const k = [_]f32{ 1, 2 };
+    const v = [_]f32{ 3, 4 };
+    cache.append(0, &k, &v);
+    const gk = cache.getK(0, 0);
+    try std.testing.expectEqualSlices(f32, &k, gk);
+    cache.advance();
+    try std.testing.expectEqual(@as(usize, 1), cache.seq_len);
+}
