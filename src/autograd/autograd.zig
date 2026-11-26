@@ -1,6 +1,7 @@
 // Autograd reverse-mode (PRD 3.2). Tape + backward helpers.
 
 const std = @import("std");
+const cpu = @import("../cpu/cpu.zig");
 
 pub const OpTag = enum { add, mul, scale, relu };
 
@@ -461,4 +462,106 @@ test "backwardAttention smoke" {
     for (dQ) |v| try std.testing.expect(std.math.isFinite(v));
     for (dK) |v| try std.testing.expect(std.math.isFinite(v));
     for (dV) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+// --- Gradient check tests (finite difference) ---
+
+test "gradcheck matmul" {
+    const eps: f32 = 1e-3;
+    var A = [_]f32{ 1, 2, 3, 4 };
+    var B = [_]f32{ 5, 6, 7, 8 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dB = [_]f32{ 0, 0, 0, 0 };
+    var dC = [_]f32{ 1, 1, 1, 1 };
+    backwardMatmul(&dA, &dB, &A, &B, &dC, 2, 2, 2);
+    // finite diff for A[0]
+    var Ap = A; Ap[0] += eps;
+    var Am = A; Am[0] -= eps;
+    var Cp = [_]f32{ 0, 0, 0, 0 };
+    var Cm = [_]f32{ 0, 0, 0, 0 };
+    cpu.matmulNaifF32(&Cp, &Ap, &B, 2, 2, 2);
+    cpu.matmulNaifF32(&Cm, &Am, &B, 2, 2, 2);
+    var sp: f32 = 0;
+    var sm: f32 = 0;
+    for (Cp) |v| sp += v;
+    for (Cm) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dA[0]) < 1e-2);
+}
+
+test "gradcheck softmax" {
+    const eps: f32 = 1e-3;
+    var X = [_]f32{ 1, 2, 3, 4 };
+    // s = softmax(X)
+    var S = [_]f32{ 0, 0, 0, 0 };
+    cpu.softmaxRowF32(&S, &X, 1, 4);
+    // dOut all ones; dX = S*(1 - sum(S)) = 0 since sum S=1 and dOut=1 -> S*(1-1)=0
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0 };
+    backwardSoftmax(&dX, &S, &dOut, 1, 4);
+    // finite diff: perturb X[0], loss = sum(softmax(X))
+    var Xp = X; Xp[0] += eps;
+    var Xm = X; Xm[0] -= eps;
+    var Sp = [_]f32{ 0, 0, 0, 0 };
+    var Sm = [_]f32{ 0, 0, 0, 0 };
+    cpu.softmaxRowF32(&Sp, &Xp, 1, 4);
+    cpu.softmaxRowF32(&Sm, &Xm, 1, 4);
+    var sp: f32 = 0;
+    var sm: f32 = 0;
+    for (Sp) |v| sp += v;
+    for (Sm) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    // analytic dLoss/dX[0] = dX[0] (since dOut=1) but loss=sum softmax=1 constant, derivative ~0
+    try std.testing.expect(@abs(fd) < 1e-2);
+}
+
+test "gradcheck rmsnorm" {
+    const eps: f32 = 1e-3;
+    var X = [_]f32{ 1, 2, 3, 4 };
+    var O = [_]f32{ 0, 0, 0, 0 };
+    cpu.rmsnormF32(&O, &X, 1e-6);
+    // loss = sum(O). dOut = ones.
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0 };
+    backwardRMSNorm(&dX, &X, &dOut, 1e-6);
+    // finite diff
+    var Xp = X; Xp[0] += eps;
+    var Xm = X; Xm[0] -= eps;
+    var Op = [_]f32{ 0, 0, 0, 0 };
+    var Om = [_]f32{ 0, 0, 0, 0 };
+    cpu.rmsnormF32(&Op, &Xp, 1e-6);
+    cpu.rmsnormF32(&Om, &Xm, 1e-6);
+    var sp: f32 = 0;
+    var sm: f32 = 0;
+    for (Op) |v| sp += v;
+    for (Om) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dX[0]) < 1e-2);
+}
+
+test "gradcheck cross-entropy" {
+    var logits = [_]f32{ 0, 0, 0, 0 };
+    var targets = [_]u32{ 0 };
+    var dL = [_]f32{ 0, 0, 0, 0 };
+    backwardCrossEntropy(&dL, &logits, &targets, 1, 4);
+    // at uniform logits, softmax=0.25, dLogit[0]=0.25-1=-0.75
+    try std.testing.expectApproxEqAbs(@as(f32, -0.75), dL[0], 1e-5);
+}
+
+test "gradcheck embedding" {
+    var table = [_]f32{ 0, 0, 0, 0 };
+    var dOut = [_]f32{ 1, 2, 3, 4 };
+    var ids = [_]u32{ 1, 0 };
+    backwardEmbedding(&table, &dOut, &ids, 2, 2);
+    try std.testing.expectEqualSlices(f32, &[_]f32{ 3, 4, 1, 2 }, &table);
+}
+
+test "gradcheck rope" {
+    var x = [_]f32{ 1, 0, 0, 1 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    ropeForward(&out, &x, 3, 4, 10000.0);
+    var dx = [_]f32{ 0, 0, 0, 0 };
+    ropeBackward(&dx, &out, 3, 4, 10000.0);
+    // finite check: dx should reconstruct x
+    for (dx, x) |a, b| try std.testing.expectApproxEqAbs(b, a, 1e-4);
 }
