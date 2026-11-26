@@ -437,3 +437,26 @@ test "LossScaler no overflow grows" {
     ls.update(false);
     try std.testing.expect(ls.scale > 65536.0);
 }
+
+// --- ZeRO-1 sharding (PRD 3.8): shard optimizer state across N shards ---
+pub const ZeroShard = struct {
+    n_shards: usize,
+    shard_id: usize,
+    pub fn range(self: ZeroShard, n_params: usize) struct { start: usize, end: usize } {
+        const per = (n_params + self.n_shards - 1) / self.n_shards;
+        const start = self.shard_id * per;
+        const end = @min(start + per, n_params);
+        return .{ .start = start, .end = end };
+    }
+};
+
+test "ZeroShard range" {
+    const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
+    const r = zs.range(10);
+    try std.testing.expectEqual(@as(usize, 0), r.start);
+    try std.testing.expectEqual(@as(usize, 5), r.end);
+    const zs2 = ZeroShard{ .n_shards = 2, .shard_id = 1 };
+    const r2 = zs2.range(10);
+    try std.testing.expectEqual(@as(usize, 5), r2.start);
+    try std.testing.expectEqual(@as(usize, 10), r2.end);
+}
