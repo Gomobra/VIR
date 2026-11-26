@@ -312,54 +312,6 @@ test "TinyModel generate" {
     for (out) |t| try std.testing.expect(t < 4);
 }
 
-// --- ZeRO-1 sharding (PRD 3.8): shard optimizer state across N shards ---
-pub const ZeroShard = struct {
-    n_shards: usize,
-    shard_id: usize,
-    // returns the range [start, end) of params owned by this shard
-    pub fn range(self: ZeroShard, n_params: usize) struct { start: usize, end: usize } {
-        const per = (n_params + self.n_shards - 1) / self.n_shards;
-        const start = self.shard_id * per;
-        const end = @min(start + per, n_params);
-        return .{ .start = start, .end = end };
-    }
-};
-
-test "ZeroShard range" {
-    const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
-    const r = zs.range(10);
-    try std.testing.expectEqual(@as(usize, 0), r.start);
-    try std.testing.expectEqual(@as(usize, 5), r.end);
-    const zs2 = ZeroShard{ .n_shards = 2, .shard_id = 1 };
-    const r2 = zs2.range(10);
-    try std.testing.expectEqual(@as(usize, 5), r2.start);
-    try std.testing.expectEqual(@as(usize, 10), r2.end);
-}
-
-// --- ZeRO-1 sharding (PRD 3.8): shard optimizer state across N shards ---
-pub const ZeroShard = struct {
-    n_shards: usize,
-    shard_id: usize,
-    // returns the range [start, end) of params owned by this shard
-    pub fn range(self: ZeroShard, n_params: usize) struct { start: usize, end: usize } {
-        const per = (n_params + self.n_shards - 1) / self.n_shards;
-        const start = self.shard_id * per;
-        const end = @min(start + per, n_params);
-        return .{ .start = start, .end = end };
-    }
-};
-
-test "ZeroShard range" {
-    const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
-    const r = zs.range(10);
-    try std.testing.expectEqual(@as(usize, 0), r.start);
-    try std.testing.expectEqual(@as(usize, 5), r.end);
-    const zs2 = ZeroShard{ .n_shards = 2, .shard_id = 1 };
-    const r2 = zs2.range(10);
-    try std.testing.expectEqual(@as(usize, 5), r2.start);
-    try std.testing.expectEqual(@as(usize, 10), r2.end);
-}
-
 // --- Gradient accumulator for micro-batching (PRD 3.8) ---
 pub const GradAccumulator = struct {
     buf: []f32,
@@ -487,3 +439,70 @@ test "LossScaler no overflow grows" {
 }
 
 // --- ZeRO-1 sharding (PRD 3.8): shard optimizer state across N shards ---
+pub const ZeroShard = struct {
+    n_shards: usize,
+    shard_id: usize,
+    pub fn range(self: ZeroShard, n_params: usize) struct { start: usize, end: usize } {
+        const per = (n_params + self.n_shards - 1) / self.n_shards;
+        const start = self.shard_id * per;
+        const end = @min(start + per, n_params);
+        return .{ .start = start, .end = end };
+    }
+};
+
+test "ZeroShard range" {
+    const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
+    const r = zs.range(10);
+    try std.testing.expectEqual(@as(usize, 0), r.start);
+    try std.testing.expectEqual(@as(usize, 5), r.end);
+    const zs2 = ZeroShard{ .n_shards = 2, .shard_id = 1 };
+    const r2 = zs2.range(10);
+    try std.testing.expectEqual(@as(usize, 5), r2.start);
+    try std.testing.expectEqual(@as(usize, 10), r2.end);
+}
+
+// --- LR Scheduler (PRD 3.8): wraps WSD/cosine/linear with state ---
+pub const LRScheduler = struct {
+    step: usize = 0,
+    total: usize,
+    warmup: usize,
+    peak: f32,
+    min_lr: f32,
+    mode: enum { wsd, cosine, linear } = .wsd,
+    cfg: TrainConfig,
+
+    pub fn init(total: usize, warmup: usize, peak: f32, min_lr: f32, mode: @TypeOf(@as(enum { wsd, cosine, linear }, .wsd))) LRScheduler {
+        return .{ .total = total, .warmup = warmup, .peak = peak, .min_lr = min_lr, .mode = mode, .cfg = .{ .lr = peak, .max_steps = total, .warmup_steps = warmup } };
+    }
+
+    pub fn getLr(self: *LRScheduler) f32 {
+        const lr = switch (self.mode) {
+            .wsd => wsdLr(self.step, self.cfg),
+            .cosine => cosineLr(self.step, self.total, self.warmup, self.peak, self.min_lr),
+            .linear => blk: {
+                if (self.step < self.warmup) break :blk self.peak * (@as(f32, @floatFromInt(self.step + 1)) / @as(f32, @floatFromInt(if (self.warmup > 0) self.warmup else 1)));
+                const prog = @as(f32, @floatFromInt(self.step - self.warmup)) / @as(f32, @floatFromInt(if (self.total > self.warmup) self.total - self.warmup else 1));
+                break :blk self.peak * (1.0 - @min(prog, 1.0)) + self.min_lr * @min(prog, 1.0);
+            },
+        };
+        return lr;
+    }
+
+    pub fn step(self: *LRScheduler) void {
+        self.step += 1;
+    }
+};
+
+test "LRScheduler cosine" {
+    var sch = LRScheduler.init(10, 2, 0.1, 0.0, .cosine);
+    const lr0 = sch.getLr();
+    sch.step();
+    const lr1 = sch.getLr();
+    try std.testing.expect(lr0 >= 0 and lr1 >= 0);
+}
+
+test "LRScheduler wsd" {
+    var sch = LRScheduler.init(10, 2, 0.1, 0.0, .wsd);
+    const lr = sch.getLr();
+    try std.testing.expect(lr > 0);
+}
