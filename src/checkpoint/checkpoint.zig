@@ -22,7 +22,7 @@ pub fn writeF32Tensor(allocator: std.mem.Allocator, path: []const u8, name: []co
     // build JSON header
     var json_buf = std.ArrayList(u8).init(allocator);
     defer json_buf.deinit();
-    try json_buf.appendSlice("{\""); 
+    try json_buf.appendSlice("{\"");
     try json_buf.appendSlice(name);
     try json_buf.appendSlice("\":{\"dtype\":\"F32\",\"shape\":[");
     for (shape, 0..) |s, i| {
