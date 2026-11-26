@@ -156,5 +156,3 @@ test "BPETrainer basic" {
     try std.testing.expect(tr.vocab.size() >= 256);
     try std.testing.expect(tr.merges.items.len >= 1);
 }
-EOF
-echo done
