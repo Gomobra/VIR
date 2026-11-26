@@ -146,7 +146,9 @@ pub fn minHashSignature(allocator: std.mem.Allocator, shingles: []const u64, h: 
 pub fn jaccardEstimate(sigA: []const u64, sigB: []const u64) f32 {
     if (sigA.len == 0 or sigA.len != sigB.len) return 0;
     var match: usize = 0;
-    for (sigA, sigB) |a, b| if (a == b) { match += 1; };
+    for (sigA, sigB) |a, b| if (a == b) {
+        match += 1;
+    };
     return @as(f32, @floatFromInt(match)) / @as(f32, @floatFromInt(sigA.len));
 }
 
