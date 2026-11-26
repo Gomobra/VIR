@@ -89,3 +89,41 @@ test "rougeL identical" {
     const r = rougeL(s, s);
     try std.testing.expect(@abs(r - 1.0) < 1e-5);
 }
+
+// Perplexity from average negative log-likelihood.
+pub fn perplexity(avg_nll: f64) f64 {
+    return @exp(avg_nll);
+}
+
+// F1 score (token-level) between prediction and reference sets.
+pub fn f1Score(pred: []const []const u8, ref: []const []const u8) f32 {
+    if (pred.len == 0 and ref.len == 0) return 1.0;
+    if (pred.len == 0 or ref.len == 0) return 0.0;
+    // count intersection
+    var inter: usize = 0;
+    for (pred) |p| for (ref) |r| if (std.mem.eql(u8, p, r)) { inter += 1; };
+    const prec = @as(f32, @floatFromInt(inter)) / @as(f32, @floatFromInt(pred.len));
+    const rec = @as(f32, @floatFromInt(inter)) / @as(f32, @floatFromInt(ref.len));
+    if (prec + rec == 0) return 0;
+    return 2 * prec * rec / (prec + rec);
+}
+
+// Exact match (string equality).
+pub fn exactMatch(a: []const u8, b: []const u8) bool {
+    return std.mem.eql(u8, a, b);
+}
+
+test "perplexity" {
+    try std.testing.expectApproxEqAbs(@as(f64, 2.71828), perplexity(1.0), 1e-4);
+}
+
+test "f1Score identical" {
+    const a = [_][]const u8{ "a", "b" };
+    const b = [_][]const u8{ "a", "b" };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), f1Score(&a, &b), 1e-6);
+}
+
+test "exactMatch" {
+    try std.testing.expect(exactMatch("abc", "abc"));
+    try std.testing.expect(!exactMatch("abc", "def"));
+}
