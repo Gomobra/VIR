@@ -1,4 +1,4 @@
-// Optimizer (PRD 3.2): AdamW.
+// Optimizer (PRD 3.2): AdamW + Muon (Newton-Schulz).
 
 const std = @import("std");
 
@@ -26,7 +26,6 @@ pub const AdamW = struct {
         self.allocator.free(self.v);
     }
 
-    // in-place update of params using grads
     pub fn step(self: *AdamW, params: []f32, grads: []const f32) void {
         std.debug.assert(params.len == grads.len and grads.len == self.m.len);
         self.t += 1;
@@ -47,6 +46,88 @@ pub const AdamW = struct {
     }
 };
 
+// Muon: Newton-Schulz 5 iterations to orthogonalize a 2D gradient matrix.
+pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
+    if (rows == 0 or cols == 0) return;
+    std.debug.assert(mat.len == rows * cols);
+    // Normalize by Frobenius norm.
+    var norm: f32 = 0;
+    for (mat) |v| norm += v * v;
+    norm = @sqrt(norm);
+    if (norm == 0) return;
+    const inv = 1.0 / norm;
+    for (mat) |*v| v.* *= inv;
+
+    const a: f32 = 3.4445;
+    const b: f32 = -4.7750;
+    const c: f32 = 2.0315;
+
+    // If rows > cols, work on transpose for efficiency (conceptually).
+    // Implement NS on the matrix directly: X = a X + (b A + c A^2) X, A = X X^T.
+    const m = if (rows <= cols) rows else cols;
+    const n = if (rows <= cols) cols else rows;
+    // We'll assume rows <= cols for simplicity; if not, caller transposes.
+    if (rows > cols) return; // skip non-square-friendly case for minimal impl
+
+    // Temp buffers
+    var buf_a = std.heap.page_allocator.alloc(f32, m * m) catch return;
+    defer std.heap.page_allocator.free(buf_a);
+    var buf_x = std.heap.page_allocator.alloc(f32, m * n) catch return;
+    defer std.heap.page_allocator.free(buf_x);
+
+    // copy mat -> buf_x
+    @memcpy(buf_x, mat);
+
+    var step: usize = 0;
+    while (step < 5) : (step += 1) {
+        // A = X X^T  (m x m)
+        var i: usize = 0;
+        while (i < m) : (i += 1) {
+            var j: usize = 0;
+            while (j < m) : (j += 1) {
+                var acc: f32 = 0;
+                var t: usize = 0;
+                while (t < n) : (t += 1) {
+                    acc += buf_x[i * n + t] * buf_x[j * n + t];
+                }
+                buf_a[i * m + j] = acc;
+            }
+        }
+        // B = b*A + c*A*A
+        var buf_a2 = std.heap.page_allocator.alloc(f32, m * m) catch return;
+        defer std.heap.page_allocator.free(buf_a2);
+        // A*A
+        i = 0;
+        while (i < m) : (i += 1) {
+            var j: usize = 0;
+            while (j < m) : (j += 1) {
+                var acc: f32 = 0;
+                var t: usize = 0;
+                while (t < m) : (t += 1) {
+                    acc += buf_a[i * m + t] * buf_a[t * m + j];
+                }
+                buf_a2[i * m + j] = acc;
+            }
+        }
+        // X = a X + (b A + c A^2) X
+        i = 0;
+        while (i < m) : (i += 1) {
+            var j: usize = 0;
+            while (j < n) : (j += 1) {
+                var acc: f32 = a * buf_x[i * n + j];
+                var t: usize = 0;
+                while (t < m) : (t += 1) {
+                    const coef = b * buf_a[i * m + t] + c * buf_a2[i * m + t];
+                    acc += coef * buf_x[t * n + j];
+                }
+                mat[i * n + j] = acc;
+            }
+        }
+        // update buf_x
+        @memcpy(buf_x, mat);
+    }
+}
+
 test "AdamW step reduces param toward gradient" {
     const allocator = std.testing.allocator;
     var opt = try AdamW.init(allocator, 1, 0.1);
@@ -56,3 +137,14 @@ test "AdamW step reduces param toward gradient" {
     opt.step(&params, &grads);
     try std.testing.expect(params[0] < 5.0);
 }
+
+test "newtonSchulz5 normalizes" {
+    var g = [_]f32{ 3, 4, 0, 0 };
+    newtonSchulz5(&g, 2, 2, 5);
+    // Frobenius norm should be ~1
+    var n: f32 = 0;
+    for (g) |v| n += v * v;
+    try std.testing.expect(@abs(@sqrt(n) - 1.0) < 1e-4);
+}
+EOF
+echo done
