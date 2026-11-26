@@ -141,3 +141,54 @@ test "repetitionPenalty" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), l[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), l[1], 1e-6);
 }
+
+// Log-softmax in place.
+pub fn logSoftmax(logits: []f32) void {
+    if (logits.len == 0) return;
+    var mx: f32 = logits[0];
+    for (logits) |v| if (v > mx) { mx = v; };
+    var sum: f32 = 0;
+    for (logits) |v| sum += @exp(v - mx);
+    const lse = mx + @log(sum);
+    for (logits) |*v| v.* -= lse;
+}
+
+// Softmax in place.
+pub fn softmax(logits: []f32) void {
+    if (logits.len == 0) return;
+    var mx: f32 = logits[0];
+    for (logits) |v| if (v > mx) { mx = v; };
+    var sum: f32 = 0;
+    for (logits) |*v| { v.* = @exp(v.* - mx); sum += v.*; };
+    for (logits) |*v| v.* /= sum;
+}
+
+// Sample from categorical distribution given probs and uniform u in [0,1).
+pub fn sampleCategorical(probs: []const f32, u: f32) usize {
+    var cum: f32 = 0;
+    for (probs, 0..) |p, i| {
+        cum += p;
+        if (u < cum) return i;
+    }
+    return probs.len - 1;
+}
+
+test "logSoftmax sums to 1" {
+    var l = [_]f32{ 1.0, 2.0, 3.0 };
+    logSoftmax(&l);
+    var sum: f32 = 0;
+    for (l) |v| sum += @exp(v);
+    try std.testing.expect(@abs(sum - 1.0) < 1e-5);
+}
+
+test "softmax" {
+    var l = [_]f32{ 0, 0 };
+    softmax(&l);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), l[0], 1e-6);
+}
+
+test "sampleCategorical" {
+    const probs = [_]f32{ 0.5, 0.5 };
+    try std.testing.expectEqual(@as(usize, 0), sampleCategorical(&probs, 0.25));
+    try std.testing.expectEqual(@as(usize, 1), sampleCategorical(&probs, 0.75));
+}
