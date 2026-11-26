@@ -39,7 +39,10 @@ pub const VQ = struct {
                 const diff = x[d] - self.codebook[e * self.dim + d];
                 dist += diff * diff;
             }
-            if (dist < best_dist) { best_dist = dist; best = e; }
+            if (dist < best_dist) {
+                best_dist = dist;
+                best = e;
+            }
         }
         return best;
     }
@@ -98,5 +101,3 @@ test "VQ emaUpdate" {
     vq.emaUpdate(&xs, &codes, 2);
     try std.testing.expect(vq.codebook[0] > 0);
 }
-EOF
-echo done
