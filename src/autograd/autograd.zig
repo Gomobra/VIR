@@ -350,9 +350,9 @@ pub fn backwardAttention(dQ: []f32, dK: []f32, dV: []f32, Q: []const f32, K: []c
         var t: usize = 0;
         while (t < d) : (t += 1) {
             var acc: f32 = 0;
-            var i2: usize = 0;
-            while (i2 < seq) : (i2 += 1) {
-                if (j <= i2) acc += S[i2 * seq + j] * dOut[i2 * d + t];
+            var iidx: usize = 0;
+            while (iidx < seq) : (iidx += 1) {
+                if (j <= iidx) acc += S[iidx * seq + j] * dOut[iidx * d + t];
             }
             dV[j * d + t] += acc;
         }
