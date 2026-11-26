@@ -65,10 +65,62 @@ pub fn matmulNaifF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: usiz
 }
 
 test "matmulNaifF32" {
-    // A = [[1,2],[3,4]] (2x2), B = [[5,6],[7,8]] (2x2) -> C = [[19,22],[43,50]]
     var A = [_]f32{ 1, 2, 3, 4 };
     var B = [_]f32{ 5, 6, 7, 8 };
     var C = [_]f32{ 0, 0, 0, 0 };
     matmulNaifF32(&C, &A, &B, 2, 2, 2);
     try std.testing.expectEqualSlices(f32, &[_]f32{ 19, 22, 43, 50 }, &C);
+}
+
+// Softmax stabil per baris: in shape [rows, cols], out[i] = exp(x_i - max) / sum.
+pub fn softmaxRowF32(out: []f32, x: []const f32, rows: usize, cols: usize) void {
+    std.debug.assert(out.len == x.len and x.len == rows * cols);
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const base = r * cols;
+        var mx: f32 = x[base];
+        var j: usize = 1;
+        while (j < cols) : (j += 1) if (x[base + j] > mx) { mx = x[base + j]; };
+        var sum: f32 = 0;
+        j = 0;
+        while (j < cols) : (j += 1) {
+            out[base + j] = @exp(x[base + j] - mx);
+            sum += out[base + j];
+        }
+        j = 0;
+        while (j < cols) : (j += 1) out[base + j] /= sum;
+    }
+}
+
+test "softmaxRowF32" {
+    var x = [_]f32{ 1, 2, 3, 4 };
+    var o = [_]f32{ 0, 0, 0, 0 };
+    softmaxRowF32(&o, &x, 1, 4);
+    // sum should be ~1
+    var s: f32 = 0;
+    for (o) |v| s += v;
+    try std.testing.expect(@abs(s - 1.0) < 1e-6);
+    // monotonic
+    try std.testing.expect(o[0] < o[1] and o[1] < o[2] and o[2] < o[3]);
+}
+
+// RMSNorm: out = x / sqrt(mean(x^2)+eps) * (no gain here, gain applied separately).
+pub fn rmsnormF32(out: []f32, x: []const f32, eps: f32) void {
+    std.debug.assert(out.len == x.len);
+    var ss: f32 = 0;
+    for (x) |v| ss += v * v;
+    const rms = @sqrt(ss / @as(f32, @floatFromInt(x.len)) + eps);
+    const inv = 1.0 / rms;
+    for (out, x) |*o, v| o.* = v * inv;
+}
+
+test "rmsnormF32" {
+    var x = [_]f32{ 1, 2, 3, 4 };
+    var o = [_]f32{ 0, 0, 0, 0 };
+    rmsnormF32(&o, &x, 1e-6);
+    // RMS of output should be ~1
+    var ss: f32 = 0;
+    for (o) |v| ss += v * v;
+    const rms = @sqrt(ss / 4.0);
+    try std.testing.expect(@abs(rms - 1.0) < 1e-5);
 }
