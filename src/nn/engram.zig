@@ -215,12 +215,12 @@ pub const Engram = struct {
                 if (ii < mem) dvvec[ii] = alpha * dout[ii];
             }
             // dWv += dvvec (outer) e
-            var i: usize = 0;
-            while (i < mem) : (i += 1) {
+            var i3: usize = 0;
+            while (i3 < mem) : (i3 += 1) {
                 var j: usize = 0;
                 while (j < mem) : (j += 1) {
-                    self.wv[i * mem + j] += 0;
-                    dWv[i * mem + j] += dvvec[i] * e[j];
+                    self.wv[i3 * mem + j] += 0;
+                    dWv[i3 * mem + j] += dvvec[i3] * e[j];
                 }
             }
 
