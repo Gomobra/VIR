@@ -137,3 +137,31 @@ test "parseKeyValue" {
     try std.testing.expectEqualStrings("0.01", map.get("lr").?);
     try std.testing.expectEqualStrings("128", map.get("hidden").?);
 }
+
+// Load config from a file (key=value lines).
+pub fn loadConfigFile(allocator: std.mem.Allocator, path: []const u8) !std.StringHashMap([]const u8) {
+    var map = std.StringHashMap([]const u8).init(allocator);
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const st = try file.stat();
+    const buf = try allocator.alloc(u8, st.size);
+    defer allocator.free(buf);
+    _ = try file.readAll(buf);
+    _ = try parseKeyValue(allocator, buf, &map);
+    return map;
+}
+
+test "loadConfigFile" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/scratchpad/cfg.txt";
+    std.fs.cwd().makePath("/tmp/scratchpad") catch {};
+    {
+        const f = try std.fs.cwd().createFile(path, .{});
+        defer f.close();
+        try f.writeAll("a=1\nb=2");
+    }
+    var map = try loadConfigFile(allocator, path);
+    defer map.deinit();
+    try std.testing.expectEqualStrings("1", map.get("a").?);
+    try std.testing.expectEqualStrings("2", map.get("b").?);
+}
