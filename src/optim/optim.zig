@@ -146,5 +146,3 @@ test "newtonSchulz5 normalizes" {
     for (g) |v| n += v * v;
     try std.testing.expect(@abs(@sqrt(n) - 1.0) < 1e-4);
 }
-EOF
-echo done
