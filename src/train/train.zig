@@ -144,5 +144,3 @@ test "TinyModel trainStep reduces loss" {
     try std.testing.expect(std.math.isFinite(l1));
     try std.testing.expect(std.math.isFinite(l2));
 }
-EOF
-echo done
