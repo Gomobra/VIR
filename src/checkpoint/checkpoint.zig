@@ -218,3 +218,63 @@ test "writeF32Tensor creates file" {
     const st = try f.stat();
     try std.testing.expect(st.size > 0);
 }
+
+// --- Watchdog (PRD 3.4) ---
+
+pub const Watchdog = struct {
+    start_time: i64,
+    interval_sec: i64 = 30 * 60,
+    hard_limit_sec: i64 = 11 * 3600 + 50 * 60,
+    last_checkpoint: i64,
+
+    pub fn init() Watchdog {
+        const now = std.time.timestamp();
+        return .{ .start_time = now, .last_checkpoint = now };
+    }
+
+    pub fn elapsed(self: *const Watchdog) i64 {
+        return std.time.timestamp() - self.start_time;
+    }
+
+    pub fn shouldCheckpoint(self: *const Watchdog) bool {
+        return (std.time.timestamp() - self.last_checkpoint) >= self.interval_sec;
+    }
+
+    pub fn recordCheckpoint(self: *Watchdog) void {
+        self.last_checkpoint = std.time.timestamp();
+    }
+
+    pub fn shouldStop(self: *const Watchdog) bool {
+        return self.elapsed() >= self.hard_limit_sec - 10 * 60; // stop 10 min before hard limit
+    }
+
+    pub fn shouldHardStop(self: *const Watchdog) bool {
+        return self.elapsed() >= self.hard_limit_sec;
+    }
+};
+
+// SIGTERM handling: global flag.
+var sigterm_received: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+pub fn sigtermHandler(_: c_int) callconv(.c) void {
+    sigterm_received.store(true, .seq_cst);
+}
+
+pub fn installSigtermHandler() void {
+    const sa = std.posix.Sigaction{
+        .handler = .{ .handler = sigtermHandler },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.TERM, &sa, null) catch {};
+}
+
+pub fn sigtermReceived() bool {
+    return sigterm_received.load(.seq_cst);
+}
+
+test "Watchdog basic" {
+    const wd = Watchdog.init();
+    try std.testing.expect(wd.elapsed() >= 0);
+    try std.testing.expect(!wd.shouldHardStop());
+}

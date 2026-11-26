@@ -52,6 +52,14 @@ pub const RMSNorm = struct {
     }
 };
 
+pub const RoPE = struct {
+    base: f32 = 10000.0,
+    pub fn forward(self: *const RoPE, out: []f32, x: []const f32, pos: usize, d: usize) void {
+        const autograd = @import("../autograd/autograd.zig");
+        autograd.ropeForward(out, x, pos, d, self.base);
+    }
+};
+
 test "Linear forward shape" {
     const allocator = std.testing.allocator;
     var lin = try Linear.init(allocator, 4, 3);
