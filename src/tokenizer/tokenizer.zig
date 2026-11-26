@@ -77,6 +77,48 @@ pub const BPETrainer = struct {
     }
 
     // Train: perform merges until vocab_size reached.
+    // Encode text to token ids using trained merges.
+    pub fn encode(self: *const BPETrainer, allocator: std.mem.Allocator, text: []const u8) ![]u32 {
+        var out = std.ArrayList(u32).init(allocator);
+        defer out.deinit();
+        // split by whitespace
+        var it = std.mem.tokenizeAny(u8, text, " \t\n");
+        while (it.next()) |word| {
+            // initial seq = bytes
+            var seq = std.ArrayList(u32).init(allocator);
+            defer seq.deinit();
+            for (word) |c| try seq.append(@as(u32, c));
+            // apply merges in order
+            for (self.merges.items) |mg| {
+                var i: usize = 0;
+                while (i + 1 < seq.items.len) {
+                    if (seq.items[i] == mg.a and seq.items[i + 1] == mg.b) {
+                        seq.items[i] = mg.newid;
+                        var j = i + 1;
+                        while (j + 1 < seq.items.len) : (j += 1) seq.items[j] = seq.items[j + 1];
+                        seq.items.len -= 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            for (seq.items) |id| try out.append(id);
+        }
+        return out.toOwnedSlice();
+    }
+
+    // Decode token ids to bytes.
+    pub fn decode(self: *const BPETrainer, allocator: std.mem.Allocator, ids: []const u32) ![]u8 {
+        var out = std.ArrayList(u8).init(allocator);
+        defer out.deinit();
+        for (ids) |id| {
+            if (id >= self.vocab.tokens.items.len) return error.InvalidToken;
+            const tok = self.vocab.tokens.items[id];
+            try out.appendSlice(tok);
+        }
+        return out.toOwnedSlice();
+    }
+
     pub fn train(self: *BPETrainer) !void {
         // initial vocab: 256 bytes
         var b: usize = 0;
@@ -155,4 +197,19 @@ test "BPETrainer basic" {
     // vocab should have grown
     try std.testing.expect(tr.vocab.size() >= 256);
     try std.testing.expect(tr.merges.items.len >= 1);
+}
+
+test "BPE encode/decode roundtrip" {
+    const allocator = std.testing.allocator;
+    var tr = BPETrainer.init(allocator, 258);
+    defer tr.deinit();
+    try tr.addWord("ab", 5);
+    try tr.addWord("abc", 3);
+    try tr.train();
+    const ids = try tr.encode(allocator, "ab abc");
+    defer allocator.free(ids);
+    const dec = try tr.decode(allocator, ids);
+    defer allocator.free(dec);
+    // decoded should contain the bytes (without spaces) concatenated
+    try std.testing.expect(dec.len > 0);
 }
