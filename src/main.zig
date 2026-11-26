@@ -21,5 +21,3 @@ pub fn main() void {
     }
     std.debug.print("done\n", .{});
 }
-EOF
-echo done
