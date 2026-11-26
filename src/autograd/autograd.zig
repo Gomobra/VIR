@@ -112,5 +112,3 @@ test "backwardRelu" {
     backwardRelu(&dA, &a, &g);
     try std.testing.expectEqualSlices(f32, &[_]f32{ 0, 1, 0 }, &dA);
 }
-EOF
-echo done
