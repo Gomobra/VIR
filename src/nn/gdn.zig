@@ -223,3 +223,37 @@ test "GDN backward finite" {
     for (dK) |v| try std.testing.expect(std.math.isFinite(v));
     for (dV) |v| try std.testing.expect(std.math.isFinite(v));
 }
+
+test "GDN gradcheck Q" {
+    const d = 2;
+    const seq = 2;
+    const gdn = GDN{ .d = d };
+    var Q = [_]f32{ 1, 0, 0, 1 };
+    var K = [_]f32{ 1, 0, 0, 1 };
+    var V = [_]f32{ 1, 2, 3, 4 };
+    var alpha = [_]f32{ 0.9, 0.9 };
+    var beta = [_]f32{ 0.5, 0.5 };
+
+    // analytic
+    var dQ = [_]f32{ 0, 0, 0, 0 };
+    var dK = [_]f32{ 0, 0, 0, 0 };
+    var dV = [_]f32{ 0, 0, 0, 0 };
+    var dA = [_]f32{ 0, 0 };
+    var dB = [_]f32{ 0, 0 };
+    var dO = [_]f32{ 1, 1, 1, 1 };
+    gdn.backward(&dQ, &dK, &dV, &dA, &dB, &Q, &K, &V, &alpha, &beta, &dO, seq);
+
+    // finite diff for Q[0]
+    const eps: f32 = 1e-3;
+    var Qp = Q; Qp[0] += eps;
+    var Qm = Q; Qm[0] -= eps;
+    var Op = [_]f32{ 0, 0, 0, 0 };
+    var Om = [_]f32{ 0, 0, 0, 0 };
+    gdn.forward(&Op, &Qp, &K, &V, &alpha, &beta, seq);
+    gdn.forward(&Om, &Qm, &K, &V, &alpha, &beta, seq);
+    var sp: f32 = 0; var sm: f32 = 0;
+    for (Op) |v| sp += v;
+    for (Om) |v| sm += v;
+    const fd = (sp - sm) / (2 * eps);
+    try std.testing.expect(@abs(fd - dQ[0]) < 1e-2);
+}
