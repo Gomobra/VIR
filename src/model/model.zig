@@ -64,7 +64,6 @@ pub const Model = struct {
             std.debug.assert(dX.len == batch * d and dOut.len == batch * d);
             std.debug.assert(dW_attn.len == d * d);
             std.debug.assert(dW_mlp.len == (d * 2) * d);
-            const autograd = @import("../autograd/autograd.zig");
             const cpu = @import("../cpu/cpu.zig");
             // recompute intermediates
             const norm1 = self.allocator.alloc(f32, batch * d) catch return;
@@ -163,14 +162,14 @@ pub const Model = struct {
         for (blocks) |*bl| bl.* = try Block.init(allocator, d);
         const head = try nn.Linear.init(allocator, d, v);
         // optimizers
-        var opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
+        const opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
         const opt_blocks_attn = try allocator.alloc(optim.AdamW, n_blocks);
         const opt_blocks_mlp = try allocator.alloc(optim.AdamW, n_blocks);
         for (0..n_blocks) |i| {
             opt_blocks_attn[i] = try optim.AdamW.init(allocator, d * d, 0.01);
             opt_blocks_mlp[i] = try optim.AdamW.init(allocator, (d * 2) * d, 0.01);
         }
-        var opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
+        const opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
         return .{
             .cfg = cfg,
             .embed = embed,
@@ -361,7 +360,6 @@ pub const Model = struct {
         defer self.allocator.free(dLast);
         @memset(dLast, 0);
         for (0..seq) |b| {
-            const autograd = @import("../autograd/autograd.zig");
             const sl_x = last[b * d .. (b + 1) * d];
             const sl_do = dNormed[b * d .. (b + 1) * d];
             const sl_dx = dLast[b * d .. (b + 1) * d];
