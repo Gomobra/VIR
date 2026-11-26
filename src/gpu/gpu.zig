@@ -35,6 +35,20 @@ pub extern "c" fn cuLaunchKernel(
     extra: ?*anyopaque,
 ) CUresult;
 
+// Memory management
+pub extern "c" fn cuMemAlloc(dptr: *u64, bytesize: usize) CUresult;
+pub extern "c" fn cuMemFree(dptr: u64) CUresult;
+pub extern "c" fn cuMemcpyHtoD(dstDevice: u64, srcHost: *const anyopaque, ByteCount: usize) CUresult;
+pub extern "c" fn cuMemcpyDtoH(dstHost: *anyopaque, srcDevice: u64, ByteCount: usize) CUresult;
+pub extern "c" fn cuStreamCreate(phStream: *CUstream, Flags: u32) CUresult;
+pub extern "c" fn cuStreamDestroy(hStream: CUstream) CUresult;
+pub extern "c" fn cuStreamSynchronize(hStream: CUstream) CUresult;
+
+pub const DeviceBuffer = struct {
+    ptr: u64,
+    size: usize,
+};
+
 pub fn resultOk(r: CUresult) bool {
     return r == CUDA_SUCCESS;
 }
