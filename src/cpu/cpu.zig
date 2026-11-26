@@ -149,21 +149,21 @@ pub fn matmulBlockedF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: u
     std.debug.assert(B.len == k * n);
     // zero C first
     for (C) |*c| c.* = 0;
-    var i0: usize = 0;
-    while (i0 < m) : (i0 += bs) {
-        var j0: usize = 0;
-        while (j0 < n) : (j0 += bs) {
-            var t0: usize = 0;
-            while (t0 < k) : (t0 += bs) {
-                const iend = @min(i0 + bs, m);
-                const jend = @min(j0 + bs, n);
-                const tend = @min(t0 + bs, k);
-                var i = i0;
+    var ii0: usize = 0;
+    while (ii0 < m) : (ii0 += bs) {
+        var jj0: usize = 0;
+        while (jj0 < n) : (jj0 += bs) {
+            var tt0: usize = 0;
+            while (tt0 < k) : (tt0 += bs) {
+                const iend = @min(ii0 + bs, m);
+                const jend = @min(jj0 + bs, n);
+                const tend = @min(tt0 + bs, k);
+                var i = ii0;
                 while (i < iend) : (i += 1) {
-                    var t = t0;
+                    var t = tt0;
                     while (t < tend) : (t += 1) {
                         const aik = A[i * k + t];
-                        var j = j0;
+                        var j = jj0;
                         while (j < jend) : (j += 1) {
                             C[i * n + j] += aik * B[t * n + j];
                         }
