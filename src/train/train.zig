@@ -422,7 +422,7 @@ pub const LossScaler = struct {
 test "LossScaler overflow backs off" {
     var ls = LossScaler.init();
     const s0 = ls.scale;
-    var grads = [_]f32{ std.math.inf(f32) };
+    var grads = [_]f32{std.math.inf(f32)};
     try std.testing.expect(ls.hasOverflow(&grads));
     ls.update(true);
     try std.testing.expect(ls.scale < s0);
@@ -431,7 +431,7 @@ test "LossScaler overflow backs off" {
 test "LossScaler no overflow grows" {
     var ls = LossScaler.init();
     ls.steps_since_growth = 1999;
-    var grads = [_]f32{ 1.0 };
+    var grads = [_]f32{1.0};
     try std.testing.expect(!ls.hasOverflow(&grads));
     ls.update(false);
     try std.testing.expect(ls.scale > 65536.0);
