@@ -105,7 +105,7 @@ pub const TinyModel = struct {
             }
         }
 
-        const loss = cpu.crossEntropyF32(logits, targets, batch, vocab);
+        const loss = @as(f32, @floatCast(cpu.crossEntropyF32(logits, targets, batch, vocab)));
 
         // backward
         const dLogits = try self.allocator.alloc(f32, batch * vocab);
