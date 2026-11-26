@@ -112,7 +112,7 @@ pub const Model = struct {
             const dR1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dR1);
             for (dR1, dOut, dR1_mlp) |*o, a, bb| o.* = a + bb;
-            // dAttnOut = dR1 (from attn residual) 
+            // dAttnOut = dR1 (from attn residual)
             // dNorm1 = dR1 @ W_attn^T
             const dNorm1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dNorm1);
@@ -245,13 +245,16 @@ test "Block backward gradcheck" {
     blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
     // finite diff for x[0]
     const eps: f32 = 1e-3;
-    var xp = x; xp[0] += eps;
-    var xm = x; xm[0] -= eps;
+    var xp = x;
+    xp[0] += eps;
+    var xm = x;
+    xm[0] -= eps;
     var op = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
     var om = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
     blk.forward(&op, &xp, 2, 4);
     blk.forward(&om, &xm, 2, 4);
-    var sp: f32 = 0; var sm: f32 = 0;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (op) |v| sp += v;
     for (om) |v| sm += v;
     const fd = (sp - sm) / (2 * eps);
