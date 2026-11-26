@@ -245,13 +245,16 @@ test "GDN gradcheck Q" {
 
     // finite diff for Q[0]
     const eps: f32 = 1e-3;
-    var Qp = Q; Qp[0] += eps;
-    var Qm = Q; Qm[0] -= eps;
+    var Qp = Q;
+    Qp[0] += eps;
+    var Qm = Q;
+    Qm[0] -= eps;
     var Op = [_]f32{ 0, 0, 0, 0 };
     var Om = [_]f32{ 0, 0, 0, 0 };
     gdn.forward(&Op, &Qp, &K, &V, &alpha, &beta, seq);
     gdn.forward(&Om, &Qm, &K, &V, &alpha, &beta, seq);
-    var sp: f32 = 0; var sm: f32 = 0;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (Op) |v| sp += v;
     for (Om) |v| sm += v;
     const fd = (sp - sm) / (2 * eps);
