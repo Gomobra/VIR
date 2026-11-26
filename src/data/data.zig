@@ -346,7 +346,7 @@ pub fn decontaminate(allocator: std.mem.Allocator, docs: []const []const u8, eva
 test "decontaminate removes overlapping doc" {
     const allocator = std.testing.allocator;
     const docs = [_][]const u8{ "hello world foo bar baz", "completely unrelated text here" };
-    const evals = [_][]const u8{ "hello world foo bar baz extra" };
+    const evals = [_][]const u8{"hello world foo bar baz extra"};
     const kept = try decontaminate(allocator, &docs, &evals, 5);
     defer allocator.free(kept);
     // first doc shares 5-grams with eval -> removed; second kept
