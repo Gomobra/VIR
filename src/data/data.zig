@@ -474,3 +474,48 @@ test "runPipeline end-to-end" {
     // doc1 (short) filtered; doc2 dup removed; doc3 decontaminated -> only doc0
     try std.testing.expect(kept.len <= 2);
 }
+
+// --- Pipeline -> Shard integration (PRD 3.6, 4.11) ---
+
+pub const ShardWriteConfig = struct {
+    out_dir: []const u8,
+    vocab_size: u32 = 256,
+    tok_hash: [32]u8 = [_]u8{0} ** 32,
+    dtype: DType = .u32,
+};
+
+pub fn pipelineToShards(allocator: std.mem.Allocator, docs: []const []const u8, pcfg: PipelineConfig, scfg: ShardWriteConfig) !usize {
+    const kept = try runPipeline(allocator, docs, pcfg);
+    defer allocator.free(kept);
+    try std.fs.cwd().makePath(scfg.out_dir);
+    var count: usize = 0;
+    for (kept) |idx| {
+        const doc = docs[idx];
+        var toks = try allocator.alloc(u32, doc.len);
+        defer allocator.free(toks);
+        for (doc, 0..) |c, i| toks[i] = @as(u32, c);
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/shard_{d}.ztok", .{ scfg.out_dir, count });
+        try writeShard(allocator, path, scfg.dtype, toks, scfg.vocab_size, scfg.tok_hash);
+        count += 1;
+    }
+    return count;
+}
+
+test "pipelineToShards creates files" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/pipeshards";
+    std.fs.cwd().deleteTree(base) catch {};
+    const docs = [_][]const u8{
+        "This is a long enough document that passes the quality filter rules.",
+        "short",
+    };
+    const cfg = PipelineConfig{};
+    const scfg = ShardWriteConfig{ .out_dir = base };
+    const n = try pipelineToShards(allocator, &docs, cfg, scfg);
+    try std.testing.expect(n >= 1);
+    var path_buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/shard_0.ztok", .{base});
+    const f = try std.fs.cwd().openFile(path, .{});
+    f.close();
+}
