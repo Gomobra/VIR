@@ -248,15 +248,15 @@ pub const Model = struct {
         const loss = @as(f32, @floatCast(cpu_mod.crossEntropyF32(logits, targets, seq, v)));
 
         // backward
-        var dLogits = try allocator.alloc(f32, seq * v);
+        const dLogits = try allocator.alloc(f32, seq * v);
         defer allocator.free(dLogits);
         @memset(dLogits, 0);
         autograd.backwardCrossEntropy(dLogits, logits, targets, seq, v);
 
-        var dEmbed = try allocator.alloc(f32, v * d);
+        const dEmbed = try allocator.alloc(f32, v * d);
         defer allocator.free(dEmbed);
         @memset(dEmbed, 0);
-        var dHead = try allocator.alloc(f32, v * d);
+        const dHead = try allocator.alloc(f32, v * d);
         defer allocator.free(dHead);
         @memset(dHead, 0);
         const dBlocks_attn = try allocator.alloc([]f32, n);
