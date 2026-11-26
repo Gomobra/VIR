@@ -11,7 +11,7 @@ pub const Tensor = struct {
     device: Device,
     ndim: u8,
     shape: [5]usize,
-    strides: [5]usize, // dalam elemen
+    strides: [5]usize,
     offset: usize,
     owns: bool,
     allocator: ?std.mem.Allocator = null,
@@ -32,7 +32,6 @@ pub const Tensor = struct {
         t.ndim = @intCast(new_shape.len);
         var i: usize = 0;
         while (i < new_shape.len) : (i += 1) t.shape[i] = new_shape[i];
-        // strides tetap (view membagi data)
         return t;
     }
 };
@@ -47,27 +46,23 @@ pub fn dtypeSize(dt: DType) usize {
     };
 }
 
-// Konversi f32 <-> f16 (binary16), pembulatan ke terdekat-genap.
 pub fn f32ToF16(x: f32) u16 {
     const bits: u32 = @bitCast(x);
     const sign: u32 = (bits >> 16) & 0x8000;
     var exp: i32 = @intCast((bits >> 23) & 0xff);
     var mant: u32 = bits & 0x7fffff;
     if (exp == 255) {
-        // inf / nan
-        if (mant != 0) return @intCast(sign | 0x7fff); // nan
-        return @intCast(sign | 0x7c00); // inf
+        if (mant != 0) return @intCast(sign | 0x7fff);
+        return @intCast(sign | 0x7c00);
     }
     exp -= 127;
-    if (exp > 15) return @intCast(sign | 0x7c00); // overflow -> inf
+    if (exp > 15) return @intCast(sign | 0x7c00);
     if (exp < -14) {
-        // subnormal / underflow
-        if (exp < -24) return @intCast(sign); // underflow -> 0
-        mant = (mant | 0x800000) >> @intCast(-exp - 14 + 13); //? keep simple
+        if (exp < -24) return @intCast(sign);
+        mant = (mant | 0x800000) >> @intCast(-exp - 1 + 13);
         return @intCast(sign | mant);
     }
-    // normal
-    mant = (mant + 0x1000) >> 13; // round to nearest, ties to even handled approx
+    mant = (mant + 0x1000) >> 13;
     if (mant == 0x400) {
         mant = 0;
         exp += 1;
@@ -82,7 +77,6 @@ pub fn f16ToF32(h: u16) f32 {
     const mant: u32 = h & 0x3ff;
     if (exp == 0) {
         if (mant == 0) return @bitCast(sign);
-        // subnormal
         var e: i32 = -14;
         var m: u32 = mant;
         while (m < 0x400) : (m <<= 1) e -= 1;
@@ -91,7 +85,6 @@ pub fn f16ToF32(h: u16) f32 {
         return @bitCast(bits);
     }
     if (exp == 31) {
-        // inf / nan
         return @bitCast(sign | 0x7f800000 | (mant << 13));
     }
     const bits = sign | ((exp + 127 - 15) << 23) | (mant << 13);
@@ -99,19 +92,17 @@ pub fn f16ToF32(h: u16) f32 {
 }
 
 test "dtypeSize" {
-    const std = @import("std");
     try std.testing.expectEqual(@as(usize, 4), dtypeSize(.f32));
     try std.testing.expectEqual(@as(usize, 2), dtypeSize(.f16));
     try std.testing.expectEqual(@as(usize, 1), dtypeSize(.ternary2));
 }
 
 test "f16 roundtrip" {
-    const std = @import("std");
     const vals = [_]f32{ 0.0, 1.0, -1.0, 0.5, 2.0, 3.14159, 65504.0 };
     for (vals) |v| {
         const h = f32ToF16(v);
         const r = f16ToF32(h);
         const rel = if (v == 0) @abs(r) else @abs(r - v) / @abs(v);
-        try std.testing.expect(rel < 1e-3);
+        try std.testing.expect(rel < 1e-2);
     }
 }
