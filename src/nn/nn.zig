@@ -4,6 +4,7 @@ const std = @import("std");
 const cpu = @import("../cpu/cpu.zig");
 
 pub const gdn = @import("gdn.zig");
+pub const engram = @import("engram.zig");
 
 pub const Linear = struct {
     // W: [out, in], no bias
