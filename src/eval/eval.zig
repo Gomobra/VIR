@@ -129,3 +129,30 @@ test "exactMatch" {
     try std.testing.expect(exactMatch("abc", "abc"));
     try std.testing.expect(!exactMatch("abc", "def"));
 }
+
+// pass@k unbiased estimator (PRD 4.1): 1 - C(n-c, k) / C(n, k).
+pub fn passAtK(n: usize, c: usize, k: usize) f64 {
+    if (n == 0) return 0;
+    if (k > n) return 0;
+    if (c >= n) return 1.0;
+    // compute C(n-c, k) / C(n, k) via product
+    // = prod_{i=0}^{k-1} (n - c - i) / (n - i)
+    var ratio: f64 = 1.0;
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        const num = @as(f64, @floatFromInt(n - c - i));
+        const den = @as(f64, @floatFromInt(n - i));
+        if (den == 0) return 0;
+        ratio *= num / den;
+    }
+    return 1.0 - ratio;
+}
+
+test "passAtK" {
+    // n=10, c=1, k=1 -> 0.1
+    try std.testing.expectApproxEqAbs(@as(f64, 0.1), passAtK(10, 1, 1), 1e-9);
+    // n=5, c=5, k=1 -> 1.0
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), passAtK(5, 5, 1), 1e-9);
+    // n=10, c=0, k=1 -> 0
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), passAtK(10, 0, 1), 1e-9);
+}
