@@ -146,7 +146,9 @@ test "repetitionPenalty" {
 pub fn logSoftmax(logits: []f32) void {
     if (logits.len == 0) return;
     var mx: f32 = logits[0];
-    for (logits) |v| if (v > mx) { mx = v; };
+    for (logits) |v| if (v > mx) {
+        mx = v;
+    };
     var sum: f32 = 0;
     for (logits) |v| sum += @exp(v - mx);
     const lse = mx + @log(sum);
@@ -157,9 +159,14 @@ pub fn logSoftmax(logits: []f32) void {
 pub fn softmax(logits: []f32) void {
     if (logits.len == 0) return;
     var mx: f32 = logits[0];
-    for (logits) |v| if (v > mx) { mx = v; };
+    for (logits) |v| if (v > mx) {
+        mx = v;
+    };
     var sum: f32 = 0;
-    for (logits) |*v| { v.* = @exp(v.* - mx); sum += v.*; };
+    for (logits) |*v| {
+        v.* = @exp(v.* - mx);
+        sum += v.*;
+    }
     for (logits) |*v| v.* /= sum;
 }
 
