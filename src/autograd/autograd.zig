@@ -613,9 +613,12 @@ test "gradcheck add" {
     var dOut = [_]f32{ 1, 1, 1, 1 };
     backwardAdd(&dA, &dB, &dOut);
     // finite diff for a[0]: loss = sum(a+b), derivative wrt a[0] = 1
-    var ap = a; ap[0] += eps;
-    var am = a; am[0] -= eps;
-    var sp: f32 = 0; var sm: f32 = 0;
+    var ap = a;
+    ap[0] += eps;
+    var am = a;
+    am[0] -= eps;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (ap, b) |x, y| sp += x + y;
     for (am, b) |x, y| sm += x + y;
     const fd = (sp - sm) / (2 * eps);
@@ -631,9 +634,12 @@ test "gradcheck mul" {
     var dOut = [_]f32{ 1, 1, 1, 1 };
     backwardMul(&dA, &dB, &a, &b, &dOut);
     // finite diff for a[0]: loss = sum(a*b), derivative wrt a[0] = b[0] = 6
-    var ap = a; ap[0] += eps;
-    var am = a; am[0] -= eps;
-    var sp: f32 = 0; var sm: f32 = 0;
+    var ap = a;
+    ap[0] += eps;
+    var am = a;
+    am[0] -= eps;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (ap, b) |x, y| sp += x * y;
     for (am, b) |x, y| sm += x * y;
     const fd = (sp - sm) / (2 * eps);
@@ -647,9 +653,12 @@ test "gradcheck scale" {
     var dA = [_]f32{ 0, 0, 0, 0 };
     var dOut = [_]f32{ 1, 1, 1, 1 };
     backwardScale(&dA, &dOut, s);
-    var ap = a; ap[0] += eps;
-    var am = a; am[0] -= eps;
-    var sp: f32 = 0; var sm: f32 = 0;
+    var ap = a;
+    ap[0] += eps;
+    var am = a;
+    am[0] -= eps;
+    var sp: f32 = 0;
+    var sm: f32 = 0;
     for (ap) |x| sp += x * s;
     for (am) |x| sm += x * s;
     const fd = (sp - sm) / (2 * eps);
