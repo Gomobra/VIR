@@ -72,7 +72,7 @@ pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
     // Temp buffers
     var buf_a = std.heap.page_allocator.alloc(f32, m * m) catch return;
     defer std.heap.page_allocator.free(buf_a);
-    var buf_x = std.heap.page_allocator.alloc(f32, m * n) catch return;
+    const buf_x = std.heap.page_allocator.alloc(f32, m * n) catch return;
     defer std.heap.page_allocator.free(buf_x);
 
     // copy mat -> buf_x
