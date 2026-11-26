@@ -56,7 +56,6 @@ pub fn passesFilter(cfg: FilterConfig, text: []const u8) bool {
 test "passesFilter basic" {
     const cfg = FilterConfig{};
     try std.testing.expect(!passesFilter(cfg, "short"));
-    var buf: [100]u8 = undefined;
     const txt = "This is a normal sentence with enough characters to pass the filter.";
     try std.testing.expect(passesFilter(cfg, txt));
     // high symbol ratio
