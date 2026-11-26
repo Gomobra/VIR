@@ -165,7 +165,7 @@ pub const TinyModel = struct {
         var i: usize = 0;
         while (i < max_new) : (i += 1) {
             const n = seq.items.len;
-            var hidden = try allocator.alloc(f32, n * dim);
+            const hidden = try allocator.alloc(f32, n * dim);
             defer allocator.free(hidden);
             cpu.embeddingGatherF32(hidden, self.embed, seq.items, vocab, dim);
             var logits = try allocator.alloc(f32, n * vocab);
