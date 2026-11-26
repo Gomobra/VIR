@@ -241,7 +241,7 @@ pub const Model = struct {
         const n = self.blocks.len;
 
         // forward
-        var logits = try allocator.alloc(f32, seq * v);
+        const logits = try allocator.alloc(f32, seq * v);
         defer allocator.free(logits);
         self.forward(logits, tokens);
 
