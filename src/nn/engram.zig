@@ -108,9 +108,9 @@ pub const Engram = struct {
                 vvec[i] = acc;
             }
             const dd = @min(self.d, self.mem_dim);
-            var hrms = self.allocator.alloc(f32, self.d) catch return;
+            const hrms = self.allocator.alloc(f32, self.d) catch return;
             defer self.allocator.free(hrms);
-            var krms = self.allocator.alloc(f32, self.mem_dim) catch return;
+            const krms = self.allocator.alloc(f32, self.mem_dim) catch return;
             defer self.allocator.free(krms);
             const hslice = h[t * self.d .. (t + 1) * self.d];
             cpu.rmsnormF32(hrms, hslice, 1e-6);
