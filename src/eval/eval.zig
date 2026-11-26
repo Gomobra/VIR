@@ -101,7 +101,9 @@ pub fn f1Score(pred: []const []const u8, ref: []const []const u8) f32 {
     if (pred.len == 0 or ref.len == 0) return 0.0;
     // count intersection
     var inter: usize = 0;
-    for (pred) |p| for (ref) |r| if (std.mem.eql(u8, p, r)) { inter += 1; };
+    for (pred) |p| for (ref) |r| if (std.mem.eql(u8, p, r)) {
+        inter += 1;
+    };
     const prec = @as(f32, @floatFromInt(inter)) / @as(f32, @floatFromInt(pred.len));
     const rec = @as(f32, @floatFromInt(inter)) / @as(f32, @floatFromInt(ref.len));
     if (prec + rec == 0) return 0;
