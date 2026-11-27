@@ -23,6 +23,10 @@ pub const Model = struct {
     opt_gdn_a: []optim.AdamW,
     opt_gdn_b: []optim.AdamW,
     opt_head: optim.AdamW,
+    mtp_enabled: bool = false,
+    mtp_loss_weight: f32 = 0.3,
+    mtp_head: nn.Linear,
+    opt_mtp_head: optim.AdamW,
     loop_enabled: bool = false,
     loop_repeats: usize = 1,
     loop_embed: []f32,
@@ -508,6 +512,9 @@ pub const Model = struct {
             }
         }
         const head = try nn.Linear.init(allocator, d, v);
+        const mtp_enabled = cfg.mtp.enabled;
+        const mtp_loss_weight = cfg.mtp.loss_weight;
+        const mtp_head = try nn.Linear.init(allocator, d, v);
         // optimizers
         const opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
         const loop_enabled = cfg.loop.enabled;
@@ -532,6 +539,7 @@ pub const Model = struct {
             opt_gdn_b[i] = try optim.AdamW.init(allocator, d, 0.01);
         }
         const opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
+        const opt_mtp_head = try optim.AdamW.init(allocator, d * v, 0.01);
         return .{
             .cfg = cfg,
             .embed = embed,
@@ -547,6 +555,10 @@ pub const Model = struct {
             .opt_gdn_a = opt_gdn_a,
             .opt_gdn_b = opt_gdn_b,
             .opt_head = opt_head,
+            .mtp_enabled = mtp_enabled,
+            .mtp_loss_weight = mtp_loss_weight,
+            .mtp_head = mtp_head,
+            .opt_mtp_head = opt_mtp_head,
             .loop_enabled = loop_enabled,
             .loop_repeats = loop_repeats,
             .loop_embed = loop_embed,
@@ -576,8 +588,60 @@ pub const Model = struct {
         for (self.opt_gdn_b) |*o| o.deinit();
         self.allocator.free(self.opt_gdn_b);
         self.opt_head.deinit();
+        self.mtp_head.deinit();
+        self.opt_mtp_head.deinit();
         self.opt_loop_embed.deinit();
         self.allocator.free(self.loop_embed);
+    }
+
+    // Forward hidden states after all blocks (before final norm).
+    pub fn forwardHidden(self: *const Model, hidden: []f32, tokens: []const u32) void {
+        const d = self.cfg.d_model;
+        const seq = tokens.len;
+        std.debug.assert(hidden.len == seq * d);
+        cpuEmbeddingGather(hidden, self.embed, tokens, self.cfg.vocab_size, d);
+
+        const prelude_count: usize = if (self.blocks.len >= 3) 1 else 0;
+        const coda_count: usize = if (self.blocks.len >= 3) 1 else 0;
+        const core_count: usize = if (self.blocks.len > prelude_count + coda_count) self.blocks.len - prelude_count - coda_count else self.blocks.len;
+        const repeats = if (self.loop_enabled) self.loop_repeats else 1;
+
+        var cur = hidden;
+        var next = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(next);
+
+        var bi: usize = 0;
+        while (bi < prelude_count) : (bi += 1) {
+            if (self.loop_enabled and false) {}
+            self.blocks[bi].forward(next, cur, tokens, seq, d);
+            const tmp = cur;
+            cur = next;
+            next = tmp;
+        }
+        var rep: usize = 0;
+        while (rep < repeats) : (rep += 1) {
+            var ci: usize = 0;
+            while (ci < core_count) : (ci += 1) {
+                const idx = prelude_count + ci;
+                if (idx >= self.blocks.len - coda_count) break;
+                if (self.loop_enabled and rep > 0 and ci == 0) {
+                    var i: usize = 0;
+                    while (i < seq * d) : (i += 1) cur[i] += self.loop_embed[i % d];
+                }
+                self.blocks[idx].forward(next, cur, tokens, seq, d);
+                const tmp = cur;
+                cur = next;
+                next = tmp;
+            }
+        }
+        bi = self.blocks.len - coda_count;
+        while (bi < self.blocks.len) : (bi += 1) {
+            self.blocks[bi].forward(next, cur, tokens, seq, d);
+            const tmp = cur;
+            cur = next;
+            next = tmp;
+        }
+        if (cur.ptr != hidden.ptr) @memcpy(hidden, cur);
     }
 
     // forward: token ids [seq] -> logits [seq, vocab]
@@ -592,64 +656,10 @@ pub const Model = struct {
         defer self.allocator.free(hidden);
         cpuEmbeddingGather(hidden, self.embed, tokens, v, d);
 
-        // blocks
-        var cur = hidden;
-        var next = self.allocator.alloc(f32, seq * d) catch return;
-        defer self.allocator.free(next);
-        var last = self.allocator.alloc(f32, seq * d) catch return;
-        defer self.allocator.free(last);
-
-        const Pass = struct { block_idx: usize, input: []f32, add_loop: bool };
-        var passes = std.ArrayList(Pass).init(self.allocator);
-        defer {
-            for (passes.items) |p| self.allocator.free(p.input);
-            passes.deinit();
-        }
-
-        const prelude_count: usize = if (self.blocks.len >= 3) 1 else 0;
-        const coda_count: usize = if (self.blocks.len >= 3) 1 else 0;
-        const core_count: usize = if (self.blocks.len > prelude_count + coda_count) self.blocks.len - prelude_count - coda_count else self.blocks.len;
-
-        const runBlock = struct {
-            fn call(self2: *const Model, passes2: *std.ArrayList(Pass), cur2: *[]f32, next2: *[]f32, tokens2: []const u32, seq2: usize, d2: usize, idx: usize, add_loop: bool) void {
-                const input_copy = self2.allocator.alloc(f32, seq2 * d2) catch return;
-                @memcpy(input_copy, cur2.*);
-                passes2.append(.{ .block_idx = idx, .input = input_copy, .add_loop = add_loop }) catch return;
-                if (add_loop) {
-                    var i: usize = 0;
-                    while (i < seq2 * d2) : (i += 1) cur2.*[i] += self2.loop_embed[i % d2];
-                }
-                self2.blocks[idx].forward(next2.*, cur2.*, tokens2, seq2, d2);
-                const tmp = cur2.*;
-                cur2.* = next2.*;
-                next2.* = tmp;
-            }
-        }.call;
-
-        // prelude
-        var bi: usize = 0;
-        while (bi < prelude_count) : (bi += 1) {
-            runBlock(self, &passes, &cur, &next, tokens, seq, d, bi, false);
-        }
-        // core repeated
-        var rep: usize = 0;
-        const repeats = if (self.loop_enabled) self.loop_repeats else 1;
-        while (rep < repeats) : (rep += 1) {
-            var ci: usize = 0;
-            while (ci < core_count) : (ci += 1) {
-                const idx = prelude_count + ci;
-                if (idx >= self.blocks.len - coda_count) break;
-                const add_loop = self.loop_enabled and rep > 0 and ci == 0;
-                runBlock(self, &passes, &cur, &next, tokens, seq, d, idx, add_loop);
-            }
-        }
-        // coda
-        bi = self.blocks.len - coda_count;
-        while (bi < self.blocks.len) : (bi += 1) {
-            runBlock(self, &passes, &cur, &next, tokens, seq, d, bi, false);
-        }
-
-        @memcpy(last, cur);
+        const hidden = self.allocator.alloc(f32, seq * d) catch return;
+        defer self.allocator.free(hidden);
+        self.forwardHidden(hidden, tokens);
+        const last = hidden;
         // final norm
         var normed = self.allocator.alloc(f32, seq * d) catch return;
         defer self.allocator.free(normed);
@@ -729,7 +739,40 @@ pub const Model = struct {
             allocator.free(dBlocks_gdn_b[i]);
         };
 
-        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits);
+        var mtp_loss: f32 = 0;
+        const dExtra = try allocator.alloc(f32, seq * d);
+        defer allocator.free(dExtra);
+        @memset(dExtra, 0);
+        if (self.mtp_enabled and seq >= 3) {
+            const mtp_seq = seq - 2;
+            const mtp_logits = try allocator.alloc(f32, mtp_seq * v);
+            defer allocator.free(mtp_logits);
+            const hidden = try allocator.alloc(f32, seq * d);
+            defer allocator.free(hidden);
+            self.forwardHidden(hidden, tokens);
+            var t: usize = 0;
+            while (t < mtp_seq) : (t += 1) {
+                self.mtp_head.forward(mtp_logits[t * v .. (t + 1) * v], hidden[t * d .. (t + 1) * d], 1);
+            }
+            mtp_loss = @as(f32, @floatCast(cpu_mod.crossEntropyF32(mtp_logits, targets[2..], mtp_seq, v))) * self.mtp_loss_weight;
+
+            const d_mtp_logits = try allocator.alloc(f32, mtp_seq * v);
+            defer allocator.free(d_mtp_logits);
+            @memset(d_mtp_logits, 0);
+            autograd.backwardCrossEntropy(d_mtp_logits, mtp_logits, targets[2..], mtp_seq, v);
+            const dW_mtp = try allocator.alloc(f32, d * v);
+            defer allocator.free(dW_mtp);
+            @memset(dW_mtp, 0);
+            var tt: usize = 0;
+            while (tt < mtp_seq) : (tt += 1) {
+                self.mtp_head.backward(dW_mtp, dExtra[tt * d .. (tt + 1) * d], hidden[tt * d .. (tt + 1) * d], d_mtp_logits[tt * v .. (tt + 1) * v], 1);
+            }
+            for (dExtra) |*e| e.* *= self.mtp_loss_weight;
+            for (dW_mtp) |*e| e.* *= self.mtp_loss_weight;
+            self.opt_mtp_head.step(self.mtp_head.w, dW_mtp);
+        }
+
+        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
@@ -755,7 +798,7 @@ pub const Model = struct {
         }
         self.opt_head.step(self.head.w, dHead);
 
-        return loss;
+        return loss + mtp_loss;
     }
 
     pub fn nBlocks(self: *const Model) usize {
@@ -764,7 +807,7 @@ pub const Model = struct {
 
     // Backward: given dLogits (seq x vocab), compute dEmbed (vocab x d) gradient
     // and accumulate into dHead (d x vocab), dBlocks_attn/mlp. Returns via buffers.
-    pub fn backward(self: *Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, dBlocks_gdn_q: [][]f32, dBlocks_gdn_k: [][]f32, dBlocks_gdn_v: [][]f32, dBlocks_gdn_a: [][]f32, dBlocks_gdn_b: [][]f32, tokens: []const u32, dLogits: []const f32) void {
+    pub fn backward(self: *Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, dBlocks_gdn_q: [][]f32, dBlocks_gdn_k: [][]f32, dBlocks_gdn_v: [][]f32, dBlocks_gdn_a: [][]f32, dBlocks_gdn_b: [][]f32, tokens: []const u32, dLogits: []const f32, dExtraHidden: []const f32) void {
         const d = self.cfg.d_model;
         const v = self.cfg.vocab_size;
         const seq = tokens.len;
@@ -869,6 +912,10 @@ pub const Model = struct {
             const sl_do = dNormed[b * d .. (b + 1) * d];
             const sl_dx = dLast[b * d .. (b + 1) * d];
             autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+        }
+        // MTP extra hidden gradient.
+        if (dExtraHidden.len == seq * d) {
+            for (dLast, dExtraHidden) |*a, e| a.* += e;
         }
 
         // backward through unrolled passes (reverse)
@@ -991,17 +1038,45 @@ test "Model backward finite" {
     defer allocator.free(dBlocks_attn);
     const dBlocks_mlp = try allocator.alloc([]f32, n);
     defer allocator.free(dBlocks_mlp);
+    const dBlocks_gdn_q = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_gdn_q);
+    const dBlocks_gdn_k = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_gdn_k);
+    const dBlocks_gdn_v = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_gdn_v);
+    const dBlocks_gdn_a = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_gdn_a);
+    const dBlocks_gdn_b = try allocator.alloc([]f32, n);
+    defer allocator.free(dBlocks_gdn_b);
     for (0..n) |i| {
         dBlocks_attn[i] = try allocator.alloc(f32, d * d);
         dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
+        dBlocks_gdn_q[i] = try allocator.alloc(f32, d * d);
+        dBlocks_gdn_k[i] = try allocator.alloc(f32, d * d);
+        dBlocks_gdn_v[i] = try allocator.alloc(f32, d * d);
+        dBlocks_gdn_a[i] = try allocator.alloc(f32, d);
+        dBlocks_gdn_b[i] = try allocator.alloc(f32, d);
         @memset(dBlocks_attn[i], 0);
         @memset(dBlocks_mlp[i], 0);
+        @memset(dBlocks_gdn_q[i], 0);
+        @memset(dBlocks_gdn_k[i], 0);
+        @memset(dBlocks_gdn_v[i], 0);
+        @memset(dBlocks_gdn_a[i], 0);
+        @memset(dBlocks_gdn_b[i], 0);
     }
     defer for (0..n) |i| {
         allocator.free(dBlocks_attn[i]);
         allocator.free(dBlocks_mlp[i]);
+        allocator.free(dBlocks_gdn_q[i]);
+        allocator.free(dBlocks_gdn_k[i]);
+        allocator.free(dBlocks_gdn_v[i]);
+        allocator.free(dBlocks_gdn_a[i]);
+        allocator.free(dBlocks_gdn_b[i]);
     };
-    m.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, &tokens, dLogits);
+    const dExtra = try allocator.alloc(f32, tokens.len * 4);
+    defer allocator.free(dExtra);
+    @memset(dExtra, 0);
+    m.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, &tokens, dLogits, dExtra);
     // finite check dEmbed[0]
     for (dEmbed) |x| try std.testing.expect(std.math.isFinite(x));
 }
@@ -1013,6 +1088,23 @@ test "Model trainStep finite" {
     defer m.deinit();
     const tokens = [_]u32{ 1, 2, 3 };
     const targets = [_]u32{ 2, 3, 4 };
+    const loss = try m.trainStep(&tokens, &targets);
+    try std.testing.expect(std.math.isFinite(loss));
+}
+
+test "Model with MTP finite" {
+    const allocator = std.testing.allocator;
+    const cfg = config.ModelConfig{
+        .d_model = 4,
+        .n_groups = 1,
+        .vocab_size = 8,
+        .seq_len = 4,
+        .mtp = .{ .enabled = true, .loss_weight = 0.3 },
+    };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3, 4 };
+    const targets = [_]u32{ 2, 3, 4, 5 };
     const loss = try m.trainStep(&tokens, &targets);
     try std.testing.expect(std.math.isFinite(loss));
 }
