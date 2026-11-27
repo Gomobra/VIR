@@ -57,28 +57,28 @@ pub const Model = struct {
                 const s = try allocator.alloc(f32, d * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
                 break :blk s;
-            } else &.{};
+            } else &[_]f32{};
             const wk = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
                 break :blk s;
-            } else &.{};
+            } else &[_]f32{};
             const wv = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
                 break :blk s;
-            } else &.{};
+            } else &[_]f32{};
             const wa = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d);
                 for (s) |*x| x.* = 0.0;
                 break :blk s;
-            } else &.{};
+            } else &[_]f32{};
             const wb = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d);
                 for (s) |*x| x.* = 0.0;
                 break :blk s;
-            } else &.{};
-            _ = is_gdn;
+            } else &[_]f32{};
+
             var bit_attn: ?nn.bitlinear.BitLinear = null;
             var bit_mlp: ?nn.bitlinear.BitLinear = null;
             if (use_bit) {
