@@ -487,6 +487,77 @@ pub const ZeroShard = struct {
     }
 };
 
+// --- LRScheduler (PRD 3.8): wsd / cosine / linear ---
+pub const LRScheduleKind = enum { wsd, cosine, linear };
+
+pub const LRScheduler = struct {
+    kind: LRScheduleKind = .wsd,
+    peak: f32 = 1e-2,
+    min_lr: f32 = 0,
+    warmup: usize = 1,
+    total: usize = 100,
+    decay_fraction: f32 = 0.2,
+    step: usize = 0,
+
+    pub fn init(kind: LRScheduleKind, peak: f32, min_lr: f32, warmup: usize, total: usize, decay_fraction: f32) LRScheduler {
+        return .{ .kind = kind, .peak = peak, .min_lr = min_lr, .warmup = warmup, .total = total, .decay_fraction = decay_fraction };
+    }
+
+    pub fn current(self: *const LRScheduler) f32 {
+        return self.at(self.step);
+    }
+
+    pub fn at(self: *const LRScheduler, step: usize) f32 {
+        switch (self.kind) {
+            .wsd => {
+                var cfg = TrainConfig{ .lr = self.peak, .max_steps = if (self.total == 0) 1 else self.total, .warmup_steps = if (self.warmup == 0) 1 else self.warmup, .decay_fraction = self.decay_fraction };
+                _ = cfg;
+                // reuse wsdLr with temp config
+                const tcfg = TrainConfig{ .lr = self.peak, .max_steps = if (self.total == 0) 1 else self.total, .warmup_steps = if (self.warmup == 0) 1 else self.warmup, .decay_fraction = self.decay_fraction };
+                return wsdLr(step, tcfg);
+            },
+            .cosine => return cosineLr(step, self.total, self.warmup, self.peak, self.min_lr),
+            .linear => {
+                if (self.total == 0) return self.peak;
+                const prog = @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(self.total));
+                const factor = 1.0 - @min(prog, 1.0);
+                return self.min_lr + (self.peak - self.min_lr) * factor;
+            },
+        }
+    }
+
+    pub fn step(self: *LRScheduler) f32 {
+        const lr = self.current();
+        self.step += 1;
+        return lr;
+    }
+
+    pub fn reset(self: *LRScheduler) void {
+        self.step = 0;
+    }
+};
+
+test "LRScheduler wsd" {
+    var sched = LRScheduler.init(.wsd, 0.1, 0.0, 2, 10, 0.2);
+    const lr0 = sched.step();
+    try std.testing.expect(lr0 < 0.1);
+    try std.testing.expect(sched.step() <= 0.1);
+}
+
+test "LRScheduler cosine" {
+    var sched = LRScheduler.init(.cosine, 0.1, 0.0, 2, 10, 0.0);
+    const lr = sched.at(5);
+    try std.testing.expect(lr >= 0 and lr <= 0.1);
+}
+
+test "LRScheduler linear" {
+    var sched = LRScheduler.init(.linear, 0.1, 0.0, 0, 10, 0.0);
+    const lr0 = sched.at(0);
+    const lr_end = sched.at(10);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), lr0, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), lr_end, 1e-6);
+}
+
 test "ZeroShard range" {
     const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
     const r = zs.range(10);
