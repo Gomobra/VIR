@@ -15,10 +15,10 @@ jobs:
         run: |
           mkdir -p /tmp/mnist
           cd /tmp/mnist
-          curl -fsSL http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz -o train-images-idx3-ubyte.gz
-          curl -fsSL http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz -o train-labels-idx1-ubyte.gz
-          curl -fsSL http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz -o t10k-images-idx3-ubyte.gz
-          curl -fsSL http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz -o t10k-labels-idx1-ubyte.gz
+          curl -fsSL https://storage.googleapis.com/cvdf-datasets/mnist/train-images-idx3-ubyte.gz -o train-images-idx3-ubyte.gz
+          curl -fsSL https://storage.googleapis.com/cvdf-datasets/mnist/train-labels-idx1-ubyte.gz -o train-labels-idx1-ubyte.gz
+          curl -fsSL https://storage.googleapis.com/cvdf-datasets/mnist/t10k-images-idx3-ubyte.gz -o t10k-images-idx3-ubyte.gz
+          curl -fsSL https://storage.googleapis.com/cvdf-datasets/mnist/t10k-labels-idx1-ubyte.gz -o t10k-labels-idx1-ubyte.gz
           gunzip -f *.gz
       - name: build
         run: zig build
