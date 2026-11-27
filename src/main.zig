@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) void {
     const mnist_dir: ?[]const u8 = if (mnist_dir_c) |p| std.mem.span(p) else null;
     if (mnist_dir) |dir| {
         std.debug.print("loading MNIST from {s}\n", .{dir});
-        var train = loadMnist(io, allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
+        const train = loadMnist(io, allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
             std.debug.print("MNIST load failed: {s}\n", .{@errorName(err)});
             return;
         };
@@ -113,15 +113,15 @@ pub fn main(init: std.process.Init) void {
         std.Io.Dir.cwd().createDirPath(io, base) catch {};
 
         // Use a binary subset (digits 0 and 1) for clearer learning.
-        var bin_images = std.ArrayList([]const f32).init(allocator);
-        defer bin_images.deinit();
-        var bin_labels = std.ArrayList(u32).init(allocator);
-        defer bin_labels.deinit();
+        var bin_images = std.ArrayList([]const f32).empty;
+        defer bin_images.deinit(allocator);
+        var bin_labels = std.ArrayList(u32).empty;
+        defer bin_labels.deinit(allocator);
         var i: usize = 0;
         while (i < train.n and bin_images.items.len < 200) : (i += 1) {
             if (train.labels[i] == 0 or train.labels[i] == 1) {
-                try bin_images.append(train.images[i]);
-                try bin_labels.append(train.labels[i]);
+                try bin_images.append(allocator, train.images[i]);
+                try bin_labels.append(allocator, train.labels[i]);
             }
         }
         const train_images = bin_images.items;
