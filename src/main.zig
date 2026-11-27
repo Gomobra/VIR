@@ -19,9 +19,9 @@ fn loadMnist(io: std.Io, allocator: std.mem.Allocator, dir: []const u8, image_na
     const img_path = try std.fmt.bufPrint(&img_buf, "{s}/{s}", .{ dir, image_name });
     const lbl_path = try std.fmt.bufPrint(&lbl_buf, "{s}/{s}", .{ dir, label_name });
 
-    const img_bytes = try std.Io.Dir.cwd().readFileAlloc(io, allocator, img_path, .limited(100_000_000));
+    const img_bytes = try std.Io.Dir.cwd().readFileAlloc(io, img_path, allocator, .limited(100_000_000));
     defer allocator.free(img_bytes);
-    const lbl_bytes = try std.Io.Dir.cwd().readFileAlloc(io, allocator, lbl_path, .limited(100_000_000));
+    const lbl_bytes = try std.Io.Dir.cwd().readFileAlloc(io, lbl_path, allocator, .limited(100_000_000));
     defer allocator.free(lbl_bytes);
 
     if (img_bytes.len < 16) return error.BadImageHeader;
