@@ -1076,3 +1076,91 @@ test "groupNorm backward finite" {
     groupNormBackwardF32(&dX, &x, &dOut, 1, c, h, w, 1e-6);
     for (dX) |v| try std.testing.expect(std.math.isFinite(v));
 }
+
+// Flash-style attention backward (causal, single head). Accumulates into dQ,dK,dV.
+pub fn attentionFlashBackwardF32(dQ: []f32, dK: []f32, dV: []f32, Q: []const f32, K: []const f32, V: []const f32, dOut: []const f32, seq: usize, d: usize) void {
+    std.debug.assert(dQ.len == seq * d and dK.len == seq * d and dV.len == seq * d);
+    std.debug.assert(Q.len == seq * d and K.len == seq * d and V.len == seq * d and dOut.len == seq * d);
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(d)));
+    var i: usize = 0;
+    while (i < seq) : (i += 1) {
+        // softmax row i
+        var Srow = std.heap.page_allocator.alloc(f32, i + 1) catch return;
+        defer std.heap.page_allocator.free(Srow);
+        var m: f32 = -std.math.inf(f32);
+        var j: usize = 0;
+        while (j <= i) : (j += 1) {
+            var score: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) score += Q[i * d + t] * K[j * d + t];
+            score *= scale;
+            if (score > m) m = score;
+        }
+        var l: f32 = 0;
+        j = 0;
+        while (j <= i) : (j += 1) {
+            var score: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) score += Q[i * d + t] * K[j * d + t];
+            score *= scale;
+            Srow[j] = @exp(score - m);
+            l += Srow[j];
+        }
+        j = 0;
+        while (j <= i) : (j += 1) Srow[j] /= l;
+
+        const dS = std.heap.page_allocator.alloc(f32, i + 1) catch return;
+        defer std.heap.page_allocator.free(dS);
+        var rowsum: f32 = 0;
+        j = 0;
+        while (j <= i) : (j += 1) {
+            var ds: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) ds += dOut[i * d + t] * V[j * d + t];
+            dS[j] = ds;
+            rowsum += Srow[j] * ds;
+        }
+        const dP = std.heap.page_allocator.alloc(f32, i + 1) catch return;
+        defer std.heap.page_allocator.free(dP);
+        j = 0;
+        while (j <= i) : (j += 1) {
+            dP[j] = Srow[j] * (dS[j] - rowsum);
+        }
+
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            var acc: f32 = 0;
+            j = 0;
+            while (j <= i) : (j += 1) acc += dP[j] * K[j * d + t];
+            dQ[i * d + t] += acc * scale;
+        }
+        j = 0;
+        while (j <= i) : (j += 1) {
+            var t2: usize = 0;
+            while (t2 < d) : (t2 += 1) {
+                dK[j * d + t2] += dP[j] * Q[i * d + t2] * scale;
+                dV[j * d + t2] += Srow[j] * dOut[i * d + t2];
+            }
+        }
+    }
+}
+
+test "attentionFlashBackward parity with naive" {
+    const seq = 3;
+    const d = 2;
+    var q = [_]f32{ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 };
+    var k = [_]f32{ 0.2, 0.1, 0.3, 0.2, 0.4, 0.3 };
+    var v = [_]f32{ 1.0, 0.0, 0.0, 1.0, 0.5, 0.5 };
+    var dout = [_]f32{ 1.0, 0.0, 0.0, 1.0, 0.5, 0.5 };
+    var dq1 = [_]f32{0} * *(seq * d);
+    var dk1 = [_]f32{0} * *(seq * d);
+    var dv1 = [_]f32{0} * *(seq * d);
+    var dq2 = [_]f32{0} * *(seq * d);
+    var dk2 = [_]f32{0} * *(seq * d);
+    var dv2 = [_]f32{0} * *(seq * d);
+    backwardAttention(&dq1, &dk1, &dv1, &q, &k, &v, &dout, seq, d);
+    attentionFlashBackwardF32(&dq2, &dk2, &dv2, &q, &k, &v, &dout, seq, d);
+    for (dq1, dq2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
+    for (dk1, dk2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
+    for (dv1, dv2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
+}
