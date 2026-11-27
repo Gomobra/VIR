@@ -13,25 +13,15 @@ const MnistData = struct {
     cols: usize,
 };
 
-fn readWholeFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const st = try file.stat();
-    const buf = try allocator.alloc(u8, st.size);
-    const n = try file.readAll(buf);
-    if (n != st.size) return error.ShortRead;
-    return buf;
-}
-
-fn loadMnist(allocator: std.mem.Allocator, dir: []const u8, image_name: []const u8, label_name: []const u8, max_n: usize) !MnistData {
+fn loadMnist(io: std.Io, allocator: std.mem.Allocator, dir: []const u8, image_name: []const u8, label_name: []const u8, max_n: usize) !MnistData {
     var img_buf: [512]u8 = undefined;
     var lbl_buf: [512]u8 = undefined;
     const img_path = try std.fmt.bufPrint(&img_buf, "{s}/{s}", .{ dir, image_name });
     const lbl_path = try std.fmt.bufPrint(&lbl_buf, "{s}/{s}", .{ dir, label_name });
 
-    const img_bytes = try readWholeFile(allocator, img_path);
+    const img_bytes = try std.Io.Dir.cwd().readFileAlloc(io, allocator, img_path, .limited(100_000_000));
     defer allocator.free(img_bytes);
-    const lbl_bytes = try readWholeFile(allocator, lbl_path);
+    const lbl_bytes = try std.Io.Dir.cwd().readFileAlloc(io, allocator, lbl_path, .limited(100_000_000));
     defer allocator.free(lbl_bytes);
 
     if (img_bytes.len < 16) return error.BadImageHeader;
@@ -63,19 +53,20 @@ fn loadMnist(allocator: std.mem.Allocator, dir: []const u8, image_name: []const 
     return .{ .images = images, .labels = labels, .n = n, .rows = rows, .cols = cols };
 }
 
-pub fn main() void {
+pub fn main(init: std.process.Init) void {
     std.debug.print("vir {s}\n", .{root.version});
     const allocator = std.heap.page_allocator;
+    const io = init.io;
 
     const mnist_dir_c = std.c.getenv("MNIST_DIR");
     const mnist_dir: ?[]const u8 = if (mnist_dir_c) |p| std.mem.span(p) else null;
     if (mnist_dir) |dir| {
         std.debug.print("loading MNIST from {s}\n", .{dir});
-        var train = loadMnist(allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
+        var train = loadMnist(io, allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
             std.debug.print("MNIST load failed: {s}\n", .{@errorName(err)});
             return;
         };
-        var testdata = loadMnist(allocator, dir, "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 100) catch |err| {
+        var testdata = loadMnist(io, allocator, dir, "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 100) catch |err| {
             std.debug.print("MNIST test load failed: {s}\n", .{@errorName(err)});
             return;
         };
