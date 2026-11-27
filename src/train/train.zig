@@ -239,6 +239,33 @@ pub fn runModelTrainingLoop(model: *model_mod.Model, ids: []const u32, targets: 
     return steps;
 }
 
+// Apply a single learning rate to all Model optimizers (Muon + AdamW).
+pub fn applyModelLr(model: *model_mod.Model, lr: f32) void {
+    model.opt_embed.lr = lr;
+    for (model.opt_blocks_attn) |*o| o.lr = lr;
+    for (model.opt_blocks_mlp) |*o| o.lr = lr;
+    model.opt_head.lr = lr;
+}
+
+// Model training loop driven by an LRScheduler (PRD 3.8).
+pub fn runModelTrainingLoopWithScheduler(model: *model_mod.Model, ids: []const u32, targets: []const u32, scheduler: *LRScheduler, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    const total = if (scheduler.total == 0) 1 else scheduler.total;
+    var steps: usize = 0;
+    while (steps < total) {
+        const lr = scheduler.advance();
+        applyModelLr(model, lr);
+        const loss = try model.trainStep(ids, targets);
+        _ = loss;
+        steps += 1;
+        if (checkpoint_interval > 0 and steps % checkpoint_interval == 0) {
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+        }
+    }
+    return steps;
+}
+
 test "runModelTrainingLoop saves checkpoint" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelckpt";
@@ -255,6 +282,25 @@ test "runModelTrainingLoop saves checkpoint" {
     try std.testing.expectEqual(@as(usize, 3), steps);
     const latest = try checkpoint.loadLatest(allocator, base);
     try std.testing.expect(latest != null);
+}
+
+test "runModelTrainingLoopWithScheduler saves checkpoint" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/modelschedckpt";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    const ids = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+    var sched = LRScheduler.init(.wsd, 0.01, 0.0, 1, 3, 0.2);
+    const steps = try runModelTrainingLoopWithScheduler(&m, &ids, &targets, &sched, base, 2);
+    try std.testing.expectEqual(@as(usize, 3), steps);
+    const latest = try checkpoint.loadLatest(allocator, base);
+    try std.testing.expect(latest != null);
+    try std.testing.expectEqual(@as(?u64, 2), latest);
 }
 
 test "wsdLr warmup" {
