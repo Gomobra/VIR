@@ -76,6 +76,7 @@ pub const VQ = struct {
                 var d: usize = 0;
                 while (d < self.dim) : (d += 1) {
                     self.codebook[e * self.dim + d] = data[src * self.dim + d];
+                    self.ema_sum[e * self.dim + d] = data[src * self.dim + d];
                 }
                 self.ema_count[e] = 1;
             }
