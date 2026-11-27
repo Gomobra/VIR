@@ -133,6 +133,34 @@ pub const Engram = struct {
         }
     }
 
+    // Deterministic prefetch addresses for host-side table lookup (PRD 2.5/3.7).
+    // Returns a flat list of (table_idx * table_size + entry_idx) for each (position, order, head).
+    pub fn prefetchIndices(self: *const Engram, allocator: std.mem.Allocator, token_ids: []const u32, seq: usize) ![]usize {
+        var out = std.ArrayList(usize).init(allocator);
+        defer out.deinit();
+        var t: usize = 0;
+        while (t < seq) : (t += 1) {
+            for (self.orders, 0..) |ord, oi| {
+                if (t + 1 < ord) continue;
+                var ng: [4]u32 = undefined;
+                var ni: usize = 0;
+                const start = t + 1 - ord;
+                while (start + ni <= t) : (ni += 1) {
+                    if (ni >= 4) break;
+                    ng[ni] = token_ids[start + ni];
+                }
+                const gram = ng[0..ord];
+                var hi: usize = 0;
+                while (hi < self.n_heads) : (hi += 1) {
+                    const table_idx = oi * self.n_heads + hi;
+                    const idx = hashNgram(gram, self.table_size, hi);
+                    try out.append(table_idx * self.table_size + idx);
+                }
+            }
+        }
+        return out.toOwnedSlice();
+    }
+
     // Backward: given dOut (seq x d), compute dH (seq x d) (engram contribution) and accumulate dWk, dWv.
     pub fn backward(self: *Engram, dH: []f32, dWk: []f32, dWv: []f32, dTables: []f32, h: []const f32, token_ids: []const u32, dOut: []const f32, seq: usize) void {
         const d = self.d;
@@ -330,6 +358,20 @@ test "Engram backward finite" {
     @memset(dTables, 0);
     eng.backward(&dH, dWk, dWv, dTables, &h, &ids, &dOut, 2);
     for (dH) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "Engram prefetch deterministic" {
+    const allocator = std.testing.allocator;
+    const orders = [_]u8{ 2, 3 };
+    var eng = try Engram.init(allocator, 4, 2, &orders, 16);
+    defer eng.deinit();
+    const ids = [_]u32{ 1, 2, 3 };
+    const a = try eng.prefetchIndices(allocator, &ids, 3);
+    defer allocator.free(a);
+    const b = try eng.prefetchIndices(allocator, &ids, 3);
+    defer allocator.free(b);
+    try std.testing.expectEqualSlices(usize, a, b);
+    try std.testing.expect(a.len > 0);
 }
 
 test "Engram gradcheck h" {
