@@ -116,7 +116,7 @@ pub fn main(init: std.process.Init) void {
         const train_labels = train.labels[0..train.n];
 
         // Direct linear classifier baseline on VQ code histograms.
-        const n_codes = 16;
+        const n_codes = 16; // comptime-known for array repeat
         const w = allocator.alloc(f32, 10 * n_codes) catch return;
         defer allocator.free(w);
         const bias = allocator.alloc(f32, 10) catch return;
@@ -130,7 +130,7 @@ pub fn main(init: std.process.Init) void {
                 const codes = allocator.alloc(usize, 49) catch return;
                 defer allocator.free(codes);
                 _ = ivq.encode(train_images[i], codes);
-                var hist = [_]f32{0}**n_codes;
+                var hist = [_]f32{0} * * n_codes;
                 var ci: usize = 0;
                 while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
                 // softmax
@@ -179,7 +179,7 @@ pub fn main(init: std.process.Init) void {
             const codes = allocator.alloc(usize, 49) catch return;
             defer allocator.free(codes);
             _ = ivq.encode(testdata.images[ei], codes);
-            var hist = [_]f32{0}**n_codes;
+            var hist = [_]f32{0} * * n_codes;
             var ci: usize = 0;
             while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
             var logits = [_]f32{0} * *10;
