@@ -138,7 +138,7 @@ pub fn main(init: std.process.Init) void {
         var e: usize = 0;
         while (e < 10) : (e += 1) {
             var ii: usize = 0;
-            while (ii < train.n) : (ii += 1) {
+            while (ii < train_images.len) : (ii += 1) {
                 const codes = allocator.alloc(usize, 49) catch return;
                 defer allocator.free(codes);
                 _ = ivq.encode(train_images[ii], codes);
