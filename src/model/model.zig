@@ -708,30 +708,30 @@ pub const Model = struct {
         defer allocator.free(dBlocks_gdn_a);
         const dBlocks_gdn_b = try allocator.alloc([]f32, n);
         defer allocator.free(dBlocks_gdn_b);
-        for (0..n) |i| {
-            dBlocks_attn[i] = try allocator.alloc(f32, d * d);
-            dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
-            dBlocks_gdn_q[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_k[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_v[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_a[i] = try allocator.alloc(f32, d);
-            dBlocks_gdn_b[i] = try allocator.alloc(f32, d);
-            @memset(dBlocks_attn[i], 0);
-            @memset(dBlocks_mlp[i], 0);
-            @memset(dBlocks_gdn_q[i], 0);
-            @memset(dBlocks_gdn_k[i], 0);
-            @memset(dBlocks_gdn_v[i], 0);
-            @memset(dBlocks_gdn_a[i], 0);
-            @memset(dBlocks_gdn_b[i], 0);
+        for (0..n) |bi| {
+            dBlocks_attn[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_mlp[bi] = try allocator.alloc(f32, (d * 2) * d);
+            dBlocks_gdn_q[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_k[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_v[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_a[bi] = try allocator.alloc(f32, d);
+            dBlocks_gdn_b[bi] = try allocator.alloc(f32, d);
+            @memset(dBlocks_attn[bi], 0);
+            @memset(dBlocks_mlp[bi], 0);
+            @memset(dBlocks_gdn_q[bi], 0);
+            @memset(dBlocks_gdn_k[bi], 0);
+            @memset(dBlocks_gdn_v[bi], 0);
+            @memset(dBlocks_gdn_a[bi], 0);
+            @memset(dBlocks_gdn_b[bi], 0);
         }
-        defer for (0..n) |i| {
-            allocator.free(dBlocks_attn[i]);
-            allocator.free(dBlocks_mlp[i]);
-            allocator.free(dBlocks_gdn_q[i]);
-            allocator.free(dBlocks_gdn_k[i]);
-            allocator.free(dBlocks_gdn_v[i]);
-            allocator.free(dBlocks_gdn_a[i]);
-            allocator.free(dBlocks_gdn_b[i]);
+        defer for (0..n) |bi| {
+            allocator.free(dBlocks_attn[bi]);
+            allocator.free(dBlocks_mlp[bi]);
+            allocator.free(dBlocks_gdn_q[bi]);
+            allocator.free(dBlocks_gdn_k[bi]);
+            allocator.free(dBlocks_gdn_v[bi]);
+            allocator.free(dBlocks_gdn_a[bi]);
+            allocator.free(dBlocks_gdn_b[bi]);
         };
 
         var mtp_loss: f32 = 0;
@@ -771,24 +771,24 @@ pub const Model = struct {
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
-        for (0..n) |i| {
-            if (self.blocks[i].use_bit) {
-                if (self.blocks[i].bit_attn) |_| {
-                    self.opt_blocks_attn[i].step(self.blocks[i].bit_attn.?.w, dBlocks_attn[i], "original");
+        for (0..n) |bi| {
+            if (self.blocks[bi].use_bit) {
+                if (self.blocks[bi].bit_attn) |_| {
+                    self.opt_blocks_attn[bi].step(self.blocks[bi].bit_attn.?.w, dBlocks_attn[bi], "original");
                 }
-                if (self.blocks[i].bit_mlp) |_| {
-                    self.opt_blocks_mlp[i].step(self.blocks[i].bit_mlp.?.w, dBlocks_mlp[i], "original");
+                if (self.blocks[bi].bit_mlp) |_| {
+                    self.opt_blocks_mlp[bi].step(self.blocks[bi].bit_mlp.?.w, dBlocks_mlp[bi], "original");
                 }
-            } else if (self.blocks[i].is_gdn) {
-                self.opt_gdn_q[i].step(self.blocks[i].wq, dBlocks_gdn_q[i], "original");
-                self.opt_gdn_k[i].step(self.blocks[i].wk, dBlocks_gdn_k[i], "original");
-                self.opt_gdn_v[i].step(self.blocks[i].wv, dBlocks_gdn_v[i], "original");
-                self.opt_gdn_a[i].step(self.blocks[i].wa, dBlocks_gdn_a[i]);
-                self.opt_gdn_b[i].step(self.blocks[i].wb, dBlocks_gdn_b[i]);
-                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+            } else if (self.blocks[bi].is_gdn) {
+                self.opt_gdn_q[bi].step(self.blocks[bi].wq, dBlocks_gdn_q[bi], "original");
+                self.opt_gdn_k[bi].step(self.blocks[bi].wk, dBlocks_gdn_k[bi], "original");
+                self.opt_gdn_v[bi].step(self.blocks[bi].wv, dBlocks_gdn_v[bi], "original");
+                self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
+                self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
+                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             } else {
-                self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
-                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+                self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
+                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             }
         }
         self.opt_head.step(self.head.w, dHead);
@@ -862,30 +862,30 @@ pub const Model = struct {
         defer allocator.free(dBlocks_gdn_a);
         const dBlocks_gdn_b = try allocator.alloc([]f32, n);
         defer allocator.free(dBlocks_gdn_b);
-        for (0..n) |i| {
-            dBlocks_attn[i] = try allocator.alloc(f32, d * d);
-            dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
-            dBlocks_gdn_q[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_k[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_v[i] = try allocator.alloc(f32, d * d);
-            dBlocks_gdn_a[i] = try allocator.alloc(f32, d);
-            dBlocks_gdn_b[i] = try allocator.alloc(f32, d);
-            @memset(dBlocks_attn[i], 0);
-            @memset(dBlocks_mlp[i], 0);
-            @memset(dBlocks_gdn_q[i], 0);
-            @memset(dBlocks_gdn_k[i], 0);
-            @memset(dBlocks_gdn_v[i], 0);
-            @memset(dBlocks_gdn_a[i], 0);
-            @memset(dBlocks_gdn_b[i], 0);
+        for (0..n) |bi| {
+            dBlocks_attn[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_mlp[bi] = try allocator.alloc(f32, (d * 2) * d);
+            dBlocks_gdn_q[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_k[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_v[bi] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_a[bi] = try allocator.alloc(f32, d);
+            dBlocks_gdn_b[bi] = try allocator.alloc(f32, d);
+            @memset(dBlocks_attn[bi], 0);
+            @memset(dBlocks_mlp[bi], 0);
+            @memset(dBlocks_gdn_q[bi], 0);
+            @memset(dBlocks_gdn_k[bi], 0);
+            @memset(dBlocks_gdn_v[bi], 0);
+            @memset(dBlocks_gdn_a[bi], 0);
+            @memset(dBlocks_gdn_b[bi], 0);
         }
-        defer for (0..n) |i| {
-            allocator.free(dBlocks_attn[i]);
-            allocator.free(dBlocks_mlp[i]);
-            allocator.free(dBlocks_gdn_q[i]);
-            allocator.free(dBlocks_gdn_k[i]);
-            allocator.free(dBlocks_gdn_v[i]);
-            allocator.free(dBlocks_gdn_a[i]);
-            allocator.free(dBlocks_gdn_b[i]);
+        defer for (0..n) |bi| {
+            allocator.free(dBlocks_attn[bi]);
+            allocator.free(dBlocks_mlp[bi]);
+            allocator.free(dBlocks_gdn_q[bi]);
+            allocator.free(dBlocks_gdn_k[bi]);
+            allocator.free(dBlocks_gdn_v[bi]);
+            allocator.free(dBlocks_gdn_a[bi]);
+            allocator.free(dBlocks_gdn_b[bi]);
         };
 
         const dExtra = try allocator.alloc(f32, seq * d);
@@ -896,24 +896,24 @@ pub const Model = struct {
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
-        for (0..n) |i| {
-            if (self.blocks[i].use_bit) {
-                if (self.blocks[i].bit_attn) |_| {
-                    self.opt_blocks_attn[i].step(self.blocks[i].bit_attn.?.w, dBlocks_attn[i], "original");
+        for (0..n) |bi| {
+            if (self.blocks[bi].use_bit) {
+                if (self.blocks[bi].bit_attn) |_| {
+                    self.opt_blocks_attn[bi].step(self.blocks[bi].bit_attn.?.w, dBlocks_attn[bi], "original");
                 }
-                if (self.blocks[i].bit_mlp) |_| {
-                    self.opt_blocks_mlp[i].step(self.blocks[i].bit_mlp.?.w, dBlocks_mlp[i], "original");
+                if (self.blocks[bi].bit_mlp) |_| {
+                    self.opt_blocks_mlp[bi].step(self.blocks[bi].bit_mlp.?.w, dBlocks_mlp[bi], "original");
                 }
-            } else if (self.blocks[i].is_gdn) {
-                self.opt_gdn_q[i].step(self.blocks[i].wq, dBlocks_gdn_q[i], "original");
-                self.opt_gdn_k[i].step(self.blocks[i].wk, dBlocks_gdn_k[i], "original");
-                self.opt_gdn_v[i].step(self.blocks[i].wv, dBlocks_gdn_v[i], "original");
-                self.opt_gdn_a[i].step(self.blocks[i].wa, dBlocks_gdn_a[i]);
-                self.opt_gdn_b[i].step(self.blocks[i].wb, dBlocks_gdn_b[i]);
-                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+            } else if (self.blocks[bi].is_gdn) {
+                self.opt_gdn_q[bi].step(self.blocks[bi].wq, dBlocks_gdn_q[bi], "original");
+                self.opt_gdn_k[bi].step(self.blocks[bi].wk, dBlocks_gdn_k[bi], "original");
+                self.opt_gdn_v[bi].step(self.blocks[bi].wv, dBlocks_gdn_v[bi], "original");
+                self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
+                self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
+                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             } else {
-                self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
-                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+                self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
+                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             }
         }
         self.opt_head.step(self.head.w, dHead);
