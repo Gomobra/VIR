@@ -133,8 +133,9 @@ pub fn main(init: std.process.Init) void {
             }
         }
         // Debug: print VQ codes for first image.
-        var dbg_codes = [_]usize{0}**49;
-        const dbg_np = ivq.encode(train.images[0], &dbg_codes);
+        const dbg_codes = try allocator.alloc(usize, 49);
+        defer allocator.free(dbg_codes);
+        const dbg_np = ivq.encode(train.images[0], dbg_codes);
         std.debug.print("first image VQ codes: ", .{});
         var di: usize = 0;
         while (di < dbg_np) : (di += 1) std.debug.print("{d} ", .{dbg_codes[di]});
