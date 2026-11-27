@@ -51,10 +51,10 @@ pub const MimiCodec = struct {
         std.debug.assert(out_codes.len >= nf * self.n_codebooks);
         var f: usize = 0;
         while (f < nf) : (f += 1) {
-            var feat = self.allocator.alloc(f32, self.dim) catch return f;
+            const feat = self.allocator.alloc(f32, self.dim) catch return f;
             defer self.allocator.free(feat);
             self.frameFeature(audio, f, feat);
-            var idx = self.allocator.alloc(usize, self.n_codebooks) catch return f;
+            const idx = self.allocator.alloc(usize, self.n_codebooks) catch return f;
             defer self.allocator.free(idx);
             self.rvq.quantize(feat, idx);
             var cb: usize = 0;
@@ -71,7 +71,7 @@ pub const MimiCodec = struct {
         var f: usize = 0;
         while (f < n_frames) : (f += 1) {
             const idx = codes[f * self.n_codebooks .. (f + 1) * self.n_codebooks];
-            var feat = self.allocator.alloc(f32, self.dim) catch return;
+            const feat = self.allocator.alloc(f32, self.dim) catch return;
             defer self.allocator.free(feat);
             self.rvq.dequantize(idx, feat);
             const val = feat[0];
