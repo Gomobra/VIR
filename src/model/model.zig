@@ -984,6 +984,12 @@ pub const Model = struct {
 
         // update params
         if (!overflow) {
+            const _gn0 = blk: {
+                var ss: f32 = 0;
+                for (dBlocks_gdn_q[0]) |g| ss += g * g;
+                break :blk @sqrt(ss);
+            };
+            if (true) std.debug.print("dbg gradnorm gdn_q0={d:.4} dlogits={d:.4}\n", .{ _gn0, gn_logits });
             self.opt_embed.step(self.embed, dEmbed);
             for (0..n) |bi| {
                 if (self.blocks[bi].use_bit) {
