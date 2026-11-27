@@ -157,8 +157,8 @@ pub fn main(init: std.process.Init) void {
     const labels = [_]u32{ 0, 1 };
 
     const base = "/tmp/scratchpad/imgclasstrain_main";
-    std.fs.cwd().deleteTree(base) catch {};
-    std.fs.cwd().makePath(base) catch {};
+    std.Io.Dir.cwd().deleteTree(io, base) catch {};
+    std.Io.Dir.cwd().createDirPath(io, base) catch {};
 
     const tcfg = train_mod.TrainConfig{ .max_steps = 100, .warmup_steps = 5 };
     const steps = train_mod.runImageClassificationTraining(&model, &images, &labels, &ivq, layout, tcfg, base, 0) catch {
