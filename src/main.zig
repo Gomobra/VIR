@@ -157,7 +157,7 @@ pub fn main(init: std.process.Init) void {
                 while (j < 10) : (j += 1) logits[j] /= sum;
                 const y = train_labels[i];
                 // gradient: dlogit = prob - onehot
-                var grads = [_]f32{0} * *10;
+                var grads: [10]f32 = @splat(0);
                 j = 0;
                 while (j < 10) : (j += 1) grads[j] = logits[j];
                 grads[y] -= 1;
