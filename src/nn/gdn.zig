@@ -100,9 +100,9 @@ pub const GDN = struct {
                     var c: usize = 0;
                     while (c < d) : (c += 1) dot += K[tj * d + c] * Q[ti * d + c];
                     const coeff = (gamma[i] / gamma[jtok]) * dot;
-                    var r: usize = 0;
-                    while (r < d) : (r += 1) {
-                        O[ti * d + r] += coeff * Vt[jtok * d + r];
+                    var rr: usize = 0;
+                    while (rr < d) : (rr += 1) {
+                        O[ti * d + rr] += coeff * Vt[jtok * d + rr];
                     }
                 }
             }
