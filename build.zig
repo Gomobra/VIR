@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
         .os_tag = .cuda,
         .abi = .none,
     });
-    const elem_kernel = b.addExecutable(.{
+    const elem_kernel = b.addObject(.{
         .name = "elementwise_kernel",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/kernels/elementwise.zig"),
@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
-    const matmul_kernel = b.addExecutable(.{
+    const matmul_kernel = b.addObject(.{
         .name = "matmul_kernel",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/kernels/matmul.zig"),
