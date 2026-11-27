@@ -55,3 +55,35 @@ pub const matmul_tiled_ptx =
 test "matmul_tiled_ptx nonempty" {
     try std.testing.expect(matmul_tiled_ptx.len > 0);
 }
+
+test "elementwise ptx embedded" {
+    const ptx = @embedFile("elementwise_ptx");
+    try std.testing.expect(ptx.len > 0);
+}
+
+test "matmul ptx embedded" {
+    const ptx = @embedFile("matmul_ptx");
+    try std.testing.expect(ptx.len > 0);
+}
+
+test "cpu elementwise parity (add)" {
+    const cpu = @import("../cpu/cpu.zig");
+    var a = [_]f32{ 1, 2, 3 };
+    var b = [_]f32{ 4, 5, 6 };
+    var dst = [_]f32{ 0, 0, 0 };
+    cpu.addF32(&dst, &a, &b);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), dst[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 7), dst[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 9), dst[2], 1e-6);
+}
+
+test "cpu matmul parity (naive vs blocked)" {
+    const cpu = @import("../cpu/cpu.zig");
+    var a = [_]f32{ 1, 2, 3, 4 };
+    var b = [_]f32{ 5, 6, 7, 8 };
+    var c1 = [_]f32{ 0, 0, 0, 0 };
+    var c2 = [_]f32{ 0, 0, 0, 0 };
+    cpu.matmulNaifF32(&c1, &a, &b, 2, 2, 2);
+    cpu.matmulBlockedF32(&c2, &a, &b, 2, 2, 2, 2);
+    for (c1, c2) |x, y| try std.testing.expectApproxEqAbs(x, y, 1e-5);
+}
