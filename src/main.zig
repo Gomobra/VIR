@@ -275,6 +275,82 @@ pub fn main(init: std.process.Init) void {
             }
             ivq.vq.restartDead(data_buf, 49);
             std.debug.print("VQ epoch {d} done\n", .{epoch});
+    }
+
+    // Real CPU classifier baseline on raw MNIST pixels (softmax regression).
+    const n_train = @min(train.n, 2000);
+    const n_test = @min(testdata.n, 500);
+    const in_dim = 28 * 28;
+    const n_classes = 10;
+    const w = allocator.alloc(f32, n_classes * in_dim) catch return;
+    defer allocator.free(w);
+    const bias = allocator.alloc(f32, n_classes) catch return;
+    defer allocator.free(bias);
+    @memset(w, 0);
+    @memset(bias, 0);
+    var epoch2: usize = 0;
+    while (epoch2 < 10) : (epoch2 += 1) {
+        var i: usize = 0;
+        while (i < n_train) : (i += 1) {
+            const x = train.images[i];
+            var logits = [_]f32{0}* *10;
+            var j: usize = 0;
+            while (j < n_classes) : (j += 1) {
+                var acc: f32 = bias[j];
+                var k: usize = 0;
+                while (k < in_dim) : (k += 1) acc += w[j * in_dim + k] * x[k];
+                logits[j] = acc;
+            }
+            var mx: f32 = logits[0];
+            j = 1;
+            while (j < n_classes) : (j += 1) if (logits[j] > mx) {
+                mx = logits[j];
+            };
+            var sum: f32 = 0;
+            j = 0;
+            while (j < n_classes) : (j += 1) {
+                logits[j] = @exp(logits[j] - mx);
+                sum += logits[j];
+            }
+            j = 0;
+            while (j < n_classes) : (j += 1) logits[j] /= sum;
+            const y = train.labels[i];
+            j = 0;
+            while (j < n_classes) : (j += 1) {
+                const grad = logits[j] - (if (j == y) @as(f32, 1) else @as(f32, 0));
+                bias[j] -= 0.05 * grad;
+                var k: usize = 0;
+                while (k < in_dim) : (k += 1) {
+                    w[j * in_dim + k] -= 0.05 * grad * x[k];
+                }
+            }
+        }
+    }
+    var correct: usize = 0;
+    var ei: usize = 0;
+    while (ei < n_test) : (ei += 1) {
+        const x = testdata.images[ei];
+        var logits = [_]f32{0}* *10;
+        var j: usize = 0;
+        while (j < n_classes) : (j += 1) {
+            var acc: f32 = bias[j];
+            var k: usize = 0;
+            while (k < in_dim) : (k += 1) acc += w[j * in_dim + k] * x[k];
+            logits[j] = acc;
+        }
+        var best: usize = 0;
+        var bestv: f32 = logits[0];
+        j = 1;
+        while (j < n_classes) : (j += 1) {
+            if (logits[j] > bestv) {
+                bestv = logits[j];
+                best = j;
+            }
+        }
+        if (best == testdata.labels[ei]) correct += 1;
+    }
+    const raw_acc = @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(n_test));
+    std.debug.print("raw-pixel softmax classifier accuracy: {d:.4}\n", .{raw_acc});
         }
 
         // Debug: print VQ codes for first image.
