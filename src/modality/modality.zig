@@ -26,6 +26,7 @@ pub const vq = @import("vq.zig");
 pub const connector = @import("connector.zig");
 pub const mimi = @import("mimi.zig");
 pub const image_vq = @import("image_vq.zig");
+pub const video_vq = @import("video_vq.zig");
 
 pub fn defaultLayout() VocabLayout {
     return .{
