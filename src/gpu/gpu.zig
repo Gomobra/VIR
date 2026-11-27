@@ -53,6 +53,8 @@ pub fn resultOk(r: CUresult) bool {
     return r == CUDA_SUCCESS;
 }
 
+pub const parity = @import("parity.zig");
+
 test "resultOk" {
     try std.testing.expect(resultOk(0));
     try std.testing.expect(!resultOk(1));
