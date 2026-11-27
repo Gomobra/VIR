@@ -206,12 +206,12 @@ pub fn main(init: std.process.Init) void {
 
         std.debug.print("embed[0] before/after: {d:.6} -> {d:.6}\n", .{ w_before, model.embed[0] });
         // Debug: print last-patch VQ code per digit for first 10 training images.
-        var di: usize = 0;
-        while (di < 10 and di < train.n) : (di += 1) {
+        var k: usize = 0;
+        while (k < 10 and k < train.n) : (k += 1) {
             var codes = allocator.alloc(usize, 49) catch return;
             defer allocator.free(codes);
-            _ = ivq.encode(train.images[di], codes);
-            std.debug.print("train image {d} label {d} last_code {d}\n", .{ di, train.labels[di], codes[48] });
+            _ = ivq.encode(train.images[k], codes);
+            std.debug.print("train image {d} label {d} last_code {d}\n", .{ k, train.labels[k], codes[48] });
         }
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
