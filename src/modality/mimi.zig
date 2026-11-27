@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const fsq_mod = @import("fsq.zig");
+const cpu = @import("../cpu/cpu.zig");
 
 pub const MimiCodec = struct {
     sample_rate: usize = 24000,
@@ -12,15 +13,23 @@ pub const MimiCodec = struct {
     n_codebooks: usize,
     codebook_size: usize,
     dim: usize,
+    upsample_stride: usize = 1920,
+    upsample_kernel: usize = 1920,
+    upsample_weight: []f32,
     rvq: fsq_mod.RVQ,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, n_codebooks: usize, codebook_size: usize, dim: usize) !MimiCodec {
         const rvq = try fsq_mod.RVQ.init(allocator, n_codebooks, codebook_size, dim);
-        return .{ .n_codebooks = n_codebooks, .codebook_size = codebook_size, .dim = dim, .rvq = rvq, .allocator = allocator };
+        const w = try allocator.alloc(f32, 1 * 1 * 1920);
+        for (w) |*v| v.* = 0.01;
+        // make first tap dominant for stable upsampling
+        if (w.len > 0) w[0] = 1.0;
+        return .{ .n_codebooks = n_codebooks, .codebook_size = codebook_size, .dim = dim, .upsample_weight = w, .rvq = rvq, .allocator = allocator };
     }
 
     pub fn deinit(self: *MimiCodec) void {
+        self.allocator.free(self.upsample_weight);
         self.rvq.deinit();
     }
 
@@ -65,21 +74,27 @@ pub const MimiCodec = struct {
         return nf;
     }
 
-    // Decode code indices into audio (frame_size samples per frame).
+    // Decode code indices into audio using transposed causal conv1d upsampling.
     pub fn decode(self: *const MimiCodec, codes: []const usize, n_frames: usize, out_audio: []f32) void {
         std.debug.assert(out_audio.len >= n_frames * self.frame_size);
+        const stride = self.upsample_stride;
+        const kernel = self.upsample_kernel;
+        std.debug.assert(kernel == stride);
+        const feat_len = n_frames;
+        const out_len = (feat_len - 1) * stride + kernel;
+        std.debug.assert(out_audio.len >= out_len);
+        var feat = self.allocator.alloc(f32, feat_len) catch return;
+        defer self.allocator.free(feat);
+        @memset(feat, 0);
         var f: usize = 0;
         while (f < n_frames) : (f += 1) {
             const idx = codes[f * self.n_codebooks .. (f + 1) * self.n_codebooks];
-            const feat = self.allocator.alloc(f32, self.dim) catch return;
-            defer self.allocator.free(feat);
-            self.rvq.dequantize(idx, feat);
-            const val = feat[0];
-            var i: usize = 0;
-            while (i < self.frame_size) : (i += 1) {
-                out_audio[f * self.frame_size + i] = val;
-            }
+            const fv = self.allocator.alloc(f32, self.dim) catch return;
+            defer self.allocator.free(fv);
+            self.rvq.dequantize(idx, fv);
+            feat[f] = fv[0];
         }
+        cpu.convTranspose1dF32(out_audio[0..out_len], feat, self.upsample_weight, 1, 1, kernel, stride, feat_len);
     }
 };
 

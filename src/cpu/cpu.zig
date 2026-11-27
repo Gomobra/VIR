@@ -630,3 +630,93 @@ test "elementwise new ops finite" {
     logF32(&d, &d);
     for (d, p) |v, x| try std.testing.expectApproxEqAbs(x, v, 1e-5);
 }
+
+// Transposed causal 1D convolution (upsampling): x [Cin, Lin], w [Cout, Cin, K], out [Cout, (Lin-1)*stride + K].
+pub fn convTranspose1dF32(out: []f32, x: []const f32, w: []const f32, cin: usize, cout: usize, kernel: usize, stride: usize, in_len: usize) void {
+    const out_len = (in_len - 1) * stride + kernel;
+    std.debug.assert(out.len == cout * out_len);
+    std.debug.assert(x.len == cin * in_len);
+    std.debug.assert(w.len == cout * cin * kernel);
+    @memset(out, 0);
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci: usize = 0;
+        while (ci < cin) : (ci += 1) {
+            var i: usize = 0;
+            while (i < in_len) : (i += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const t = i * stride + k;
+                    out[co * out_len + t] += x[ci * in_len + i] * w[(co * cin + ci) * kernel + k];
+                }
+            }
+        }
+    }
+}
+
+pub fn convTranspose1dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, dOut: []const f32, cin: usize, cout: usize, kernel: usize, stride: usize, in_len: usize) void {
+    const out_len = (in_len - 1) * stride + kernel;
+    std.debug.assert(dX.len == cin * in_len);
+    std.debug.assert(dW.len == cout * cin * kernel);
+    std.debug.assert(dOut.len == cout * out_len);
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci: usize = 0;
+        while (ci < cin) : (ci += 1) {
+            var i: usize = 0;
+            while (i < in_len) : (i += 1) {
+                var acc: f32 = 0;
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const t = i * stride + k;
+                    acc += dOut[co * out_len + t] * w[(co * cin + ci) * kernel + k];
+                }
+                dX[ci * in_len + i] += acc;
+            }
+            var k: usize = 0;
+            while (k < kernel) : (k += 1) {
+                var acc: f32 = 0;
+                var i2: usize = 0;
+                while (i2 < in_len) : (i2 += 1) {
+                    const t = i2 * stride + k;
+                    acc += x[ci * in_len + i2] * dOut[co * out_len + t];
+                }
+                dW[(co * cin + ci) * kernel + k] += acc;
+            }
+        }
+    }
+}
+
+test "convTranspose1d shape" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 4;
+    const stride = 2;
+    const in_len = 3;
+    const out_len = (in_len - 1) * stride + kernel;
+    var x = [_]f32{ 1, 2, 3 };
+    var w = [_]f32{ 1, 0, 0, 0 };
+    var out = [_]f32{0} * *out_len;
+    convTranspose1dF32(&out, &x, &w, cin, cout, kernel, stride, in_len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), out[2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), out[4], 1e-6);
+}
+
+test "convTranspose1d backward finite" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 3;
+    const stride = 2;
+    const in_len = 2;
+    const out_len = (in_len - 1) * stride + kernel;
+    var x = [_]f32{ 1, 2 };
+    var w = [_]f32{ 0.5, -0.25, 0.1 };
+    var dOut = [_]f32{0} * *out_len;
+    for (&dOut) |*v| v.* = 1;
+    var dX = [_]f32{ 0, 0 };
+    var dW = [_]f32{ 0, 0, 0 };
+    convTranspose1dBackwardF32(&dX, &dW, &x, &w, &dOut, cin, cout, kernel, stride, in_len);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+}
