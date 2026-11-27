@@ -781,9 +781,7 @@ pub const Model = struct {
             self.opt_mtp_head.step(self.mtp_head.w, dW_mtp);
         }
 
-        if (!overflow) {
-            self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
-        }
+        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
