@@ -280,6 +280,100 @@ pub const MultimodalSample = struct {
     mask: []const bool,
 };
 
+// --- Image classification harness (PRD 3.14) ---
+
+pub fn buildImageClassificationSamples(allocator: std.mem.Allocator, images: []const []const f32, labels: []const u32, ivq: *const modality_mod.image_vq.ImageVQ, layout: modality_mod.VocabLayout) ![]MultimodalSample {
+    if (images.len != labels.len) return error.LengthMismatch;
+    const samples = try allocator.alloc(MultimodalSample, images.len);
+    var i: usize = 0;
+    while (i < images.len) : (i += 1) {
+        const img_tokens = try modality_mod.image_understanding.imageTokensFromPixels(allocator, images[i], ivq, layout);
+        const seq = img_tokens.len;
+        const tokens = try allocator.alloc(u32, seq);
+        @memcpy(tokens, img_tokens);
+        const targets = try allocator.alloc(u32, seq);
+        const mask = try allocator.alloc(bool, seq);
+        @memset(mask, false);
+        // causal targets: intermediate positions predict next image token; last predicts label.
+        var j: usize = 0;
+        while (j + 1 < seq) : (j += 1) targets[j] = img_tokens[j + 1];
+        if (seq > 0) {
+            targets[seq - 1] = labels[i];
+            mask[seq - 1] = true;
+        }
+        if (seq == 0) {
+            // degenerate: single label position
+            allocator.free(tokens);
+            allocator.free(targets);
+            allocator.free(mask);
+            allocator.free(img_tokens);
+            continue;
+        }
+        samples[i] = .{ .tokens = tokens, .targets = targets, .mask = mask };
+        allocator.free(img_tokens);
+    }
+    return samples;
+}
+
+pub fn freeImageClassificationSamples(allocator: std.mem.Allocator, samples: []MultimodalSample) void {
+    for (samples) |s| {
+        allocator.free(s.tokens);
+        allocator.free(s.targets);
+        allocator.free(s.mask);
+    }
+    allocator.free(samples);
+}
+
+pub fn runImageClassificationTraining(model: *model_mod.Model, images: []const []const f32, labels: []const u32, ivq: *const modality_mod.image_vq.ImageVQ, layout: modality_mod.VocabLayout, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    const allocator = model.allocator;
+    const samples = try buildImageClassificationSamples(allocator, images, labels, ivq, layout);
+    defer freeImageClassificationSamples(allocator, samples);
+    return runMultimodalTrainingLoop(model, samples, cfg, checkpoint_dir, checkpoint_interval);
+}
+
+pub fn classifyImage(model: *const model_mod.Model, allocator: std.mem.Allocator, image: []const f32, ivq: *const modality_mod.image_vq.ImageVQ, layout: modality_mod.VocabLayout, label_tokens: []const u32) !usize {
+    const img_tokens = try modality_mod.image_understanding.imageTokensFromPixels(allocator, image, ivq, layout);
+    defer allocator.free(img_tokens);
+    const logits = try allocator.alloc(f32, img_tokens.len * model.cfg.vocab_size);
+    defer allocator.free(logits);
+    model.forward(logits, img_tokens);
+    const last = logits[(img_tokens.len - 1) * model.cfg.vocab_size .. img_tokens.len * model.cfg.vocab_size];
+    if (label_tokens.len == 0) return infer_argmax(last);
+    var best_idx: usize = 0;
+    var best_val: f32 = last[label_tokens[0]];
+    var i: usize = 1;
+    while (i < label_tokens.len) : (i += 1) {
+        if (last[label_tokens[i]] > best_val) {
+            best_val = last[label_tokens[i]];
+            best_idx = i;
+        }
+    }
+    return label_tokens[best_idx];
+}
+
+pub fn evalImageClassification(model: *const model_mod.Model, allocator: std.mem.Allocator, images: []const []const f32, labels: []const u32, ivq: *const modality_mod.image_vq.ImageVQ, layout: modality_mod.VocabLayout, label_tokens: []const u32) !f32 {
+    if (images.len == 0) return 0;
+    var correct: usize = 0;
+    for (images, labels) |img, lab| {
+        const pred = try classifyImage(model, allocator, img, ivq, layout, label_tokens);
+        if (pred == lab) correct += 1;
+    }
+    return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(images.len));
+}
+
+fn infer_argmax(logits: []const f32) usize {
+    if (logits.len == 0) return 0;
+    var best: usize = 0;
+    var bestv: f32 = logits[0];
+    for (logits, 0..) |v, i| {
+        if (v > bestv) {
+            bestv = v;
+            best = i;
+        }
+    }
+    return best;
+}
+
 // Multimodal training loop: masked loss over packed image/audio+text sequences.
 pub fn runMultimodalTrainingLoop(model: *model_mod.Model, samples: []const MultimodalSample, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
     if (samples.len == 0) return 0;
@@ -570,6 +664,43 @@ test "runMultimodalTier finite" {
     try std.testing.expectEqual(@as(usize, 2), res.steps);
     try std.testing.expect(std.math.isFinite(res.eval_loss));
     try std.testing.expect(res.eval_accuracy >= 0 and res.eval_accuracy <= 1);
+}
+
+test "image classification training finite" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/imgclasstrain";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    var ivq = try modality_mod.image_vq.ImageVQ.init(allocator, 2, 2, 1, 1, 4);
+    defer ivq.deinit();
+    const layout = modality_mod.VocabLayout{
+        .text_offset = 0,
+        .text_size = 8,
+        .image_offset = 8,
+        .image_size = 4,
+        .audio_offset = 12,
+        .audio_size = 1,
+        .video_offset = 13,
+        .video_size = 1,
+        .special_offset = 14,
+        .special_size = 2,
+    };
+    var img0 = [_]f32{ 0.1, 0.2, 0.3, 0.4 };
+    var img1 = [_]f32{ 0.4, 0.3, 0.2, 0.1 };
+    const images = [_][]const f32{ &img0, &img1 };
+    const labels = [_]u32{ 0, 1 };
+    const tcfg = TrainConfig{ .max_steps = 2, .warmup_steps = 1 };
+    const steps = try runImageClassificationTraining(&m, &images, &labels, &ivq, layout, tcfg, base, 2);
+    try std.testing.expectEqual(@as(usize, 2), steps);
+    const label_tokens = [_]u32{ 0, 1 };
+    const pred = try classifyImage(&m, allocator, &img0, &ivq, layout, &label_tokens);
+    try std.testing.expect(pred == 0 or pred == 1);
+    const acc = try evalImageClassification(&m, allocator, &images, &labels, &ivq, layout, &label_tokens);
+    try std.testing.expect(acc >= 0 and acc <= 1);
 }
 
 test "wsdLr warmup" {
