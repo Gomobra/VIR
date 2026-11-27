@@ -807,10 +807,10 @@ pub fn conv3dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, d
         }
     }
     // dW
-    var co: usize = 0;
-    while (co < cout) : (co += 1) {
-        var ci: usize = 0;
-        while (ci < cin) : (ci += 1) {
+    var co2: usize = 0;
+    while (co2 < cout) : (co2 += 1) {
+        var ci2: usize = 0;
+        while (ci2 < cin) : (ci2 += 1) {
             var kti: usize = 0;
             while (kti < kt) : (kti += 1) {
                 var khi: usize = 0;
@@ -828,13 +828,13 @@ pub fn conv3dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, d
                                     const iy = @as(isize, @intCast(y)) + @as(isize, @intCast(khi)) - @as(isize, @intCast(pad_h));
                                     const ix = @as(isize, @intCast(xidx)) + @as(isize, @intCast(kwi)) - @as(isize, @intCast(pad_w));
                                     if (it >= 0 and it < @as(isize, @intCast(t)) and iy >= 0 and iy < @as(isize, @intCast(h)) and ix >= 0 and ix < @as(isize, @intCast(wd))) {
-                                        const xi = ci * t * h * wd + @as(usize, @intCast(it)) * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
-                                        acc += x[xi] * dOut[co * t * h * wd + tt * h * wd + y * wd + xidx];
+                                        const xi = ci2 * t * h * wd + @as(usize, @intCast(it)) * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
+                                        acc += x[xi] * dOut[co2 * t * h * wd + tt * h * wd + y * wd + xidx];
                                     }
                                 }
                             }
                         }
-                        dW[(co * cin + ci) * kt * kh * kw + kti * kh * kw + khi * kw + kwi] += acc;
+                        dW[(co2 * cin + ci2) * kt * kh * kw + kti * kh * kw + khi * kw + kwi] += acc;
                     }
                 }
             }
