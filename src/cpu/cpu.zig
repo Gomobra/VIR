@@ -676,10 +676,10 @@ pub fn convTranspose1dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []con
             var k: usize = 0;
             while (k < kernel) : (k += 1) {
                 var acc: f32 = 0;
-                var i2: usize = 0;
-                while (i2 < in_len) : (i2 += 1) {
-                    const t = i2 * stride + k;
-                    acc += x[ci * in_len + i2] * dOut[co * out_len + t];
+                var ii: usize = 0;
+                while (ii < in_len) : (ii += 1) {
+                    const t = ii * stride + k;
+                    acc += x[ci * in_len + ii] * dOut[co * out_len + t];
                 }
                 dW[(co * cin + ci) * kernel + k] += acc;
             }
