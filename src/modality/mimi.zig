@@ -7,6 +7,38 @@ const std = @import("std");
 const fsq_mod = @import("fsq.zig");
 const cpu = @import("../cpu/cpu.zig");
 
+// SEANet-style causal convolution residual block (CPU reference).
+fn causalConvBlockForward(out: []f32, x: []const f32, w: []const f32, bias: []const f32, cin: usize, cout: usize, kernel: usize, dilation: usize, len: usize) void {
+    std.debug.assert(out.len == cout * len);
+    std.debug.assert(x.len == cin * len);
+    std.debug.assert(w.len == cout * cin * kernel);
+    std.debug.assert(bias.len == cout);
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var t: usize = 0;
+        while (t < len) : (t += 1) {
+            var acc: f32 = bias[co];
+            var ci: usize = 0;
+            while (ci < cin) : (ci += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const ti = @as(isize, @intCast(t)) - @as(isize, @intCast((kernel - 1) * dilation)) + @as(isize, @intCast(k * dilation));
+                    if (ti >= 0 and ti < @as(isize, @intCast(len))) {
+                        const xi = ci * len + @as(usize, @intCast(ti));
+                        const wi = (co * cin + ci) * kernel + k;
+                        acc += x[xi] * w[wi];
+                    }
+                }
+            }
+            // ReLU
+            var v = if (acc > 0) acc else 0;
+            // residual if channel counts match
+            if (cin == cout) v += x[co * len + t];
+            out[co * len + t] = v;
+        }
+    }
+}
+
 pub const MimiCodec = struct {
     sample_rate: usize = 24000,
     frame_size: usize = 1920,
@@ -16,6 +48,11 @@ pub const MimiCodec = struct {
     upsample_stride: usize = 1920,
     upsample_kernel: usize = 1920,
     upsample_weight: []f32,
+    // SEANet-style residual conv weights (1 channel, kernel 3).
+    enc_conv_w: []f32,
+    enc_conv_b: []f32,
+    dec_conv_w: []f32,
+    dec_conv_b: []f32,
     rvq: fsq_mod.RVQ,
     allocator: std.mem.Allocator,
 
@@ -23,13 +60,35 @@ pub const MimiCodec = struct {
         const rvq = try fsq_mod.RVQ.init(allocator, n_codebooks, codebook_size, dim);
         const w = try allocator.alloc(f32, 1 * 1 * 1920);
         for (w) |*v| v.* = 0.01;
-        // make first tap dominant for stable upsampling
         if (w.len > 0) w[0] = 1.0;
-        return .{ .n_codebooks = n_codebooks, .codebook_size = codebook_size, .dim = dim, .upsample_weight = w, .rvq = rvq, .allocator = allocator };
+        const ew = try allocator.alloc(f32, 1 * 1 * 3);
+        for (ew) |*v| v.* = 0.1;
+        const eb = try allocator.alloc(f32, 1);
+        eb[0] = 0.0;
+        const dw = try allocator.alloc(f32, 1 * 1 * 3);
+        for (dw) |*v| v.* = 0.1;
+        const db = try allocator.alloc(f32, 1);
+        db[0] = 0.0;
+        return .{
+            .n_codebooks = n_codebooks,
+            .codebook_size = codebook_size,
+            .dim = dim,
+            .upsample_weight = w,
+            .enc_conv_w = ew,
+            .enc_conv_b = eb,
+            .dec_conv_w = dw,
+            .dec_conv_b = db,
+            .rvq = rvq,
+            .allocator = allocator,
+        };
     }
 
     pub fn deinit(self: *MimiCodec) void {
         self.allocator.free(self.upsample_weight);
+        self.allocator.free(self.enc_conv_w);
+        self.allocator.free(self.enc_conv_b);
+        self.allocator.free(self.dec_conv_w);
+        self.allocator.free(self.dec_conv_b);
         self.rvq.deinit();
     }
 
@@ -58,11 +117,14 @@ pub const MimiCodec = struct {
     pub fn encode(self: *const MimiCodec, audio: []const f32, out_codes: []usize) usize {
         const nf = self.nFrames(audio.len);
         std.debug.assert(out_codes.len >= nf * self.n_codebooks);
+        const conv_audio = self.allocator.alloc(f32, audio.len) catch return 0;
+        defer self.allocator.free(conv_audio);
+        causalConvBlockForward(conv_audio, audio, self.enc_conv_w, self.enc_conv_b, 1, 1, 3, 1, audio.len);
         var f: usize = 0;
         while (f < nf) : (f += 1) {
             const feat = self.allocator.alloc(f32, self.dim) catch return f;
             defer self.allocator.free(feat);
-            self.frameFeature(audio, f, feat);
+            self.frameFeature(conv_audio, f, feat);
             const idx = self.allocator.alloc(usize, self.n_codebooks) catch return f;
             defer self.allocator.free(idx);
             self.rvq.quantize(feat, idx);
@@ -94,7 +156,10 @@ pub const MimiCodec = struct {
             self.rvq.dequantize(idx, fv);
             feat[f] = fv[0];
         }
-        cpu.convTranspose1dF32(out_audio[0..out_len], feat, self.upsample_weight, 1, 1, kernel, stride, feat_len);
+        const up = self.allocator.alloc(f32, out_len) catch return;
+        defer self.allocator.free(up);
+        cpu.convTranspose1dF32(up, feat, self.upsample_weight, 1, 1, kernel, stride, feat_len);
+        causalConvBlockForward(out_audio[0..out_len], up, self.dec_conv_w, self.dec_conv_b, 1, 1, 3, 1, out_len);
     }
 };
 
