@@ -72,6 +72,22 @@ pub const RVQ = struct {
             }
         }
     }
+
+    // Reconstruct a vector from codebook indices (sum of selected entries).
+    pub fn dequantize(self: *const RVQ, indices: []const usize, out: []f32) void {
+        std.debug.assert(indices.len == self.n_codebooks);
+        std.debug.assert(out.len == self.dim);
+        @memset(out, 0);
+        var cb: usize = 0;
+        while (cb < self.n_codebooks) : (cb += 1) {
+            const idx = indices[cb];
+            std.debug.assert(idx < self.codebook_size);
+            var d: usize = 0;
+            while (d < self.dim) : (d += 1) {
+                out[d] += self.codebooks[(cb * self.codebook_size + idx) * self.dim + d];
+            }
+        }
+    }
 };
 
 test "FSQ quantize range" {
@@ -91,4 +107,14 @@ test "RVQ quantize" {
     rvq.quantize(&x, &idx);
     try std.testing.expect(idx[0] < 4);
     try std.testing.expect(idx[1] < 4);
+}
+
+test "RVQ dequantize" {
+    const allocator = std.testing.allocator;
+    var rvq = try RVQ.init(allocator, 2, 4, 3);
+    defer rvq.deinit();
+    const idx = [_]usize{ 0, 1 };
+    var out = [_]f32{ 0, 0, 0 };
+    rvq.dequantize(&idx, &out);
+    for (out) |v| try std.testing.expect(std.math.isFinite(v));
 }
