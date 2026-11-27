@@ -120,8 +120,8 @@ pub fn main(init: std.process.Init) void {
         var i: usize = 0;
         while (i < train.n and bin_images.items.len < 200) : (i += 1) {
             if (train.labels[i] == 0 or train.labels[i] == 1) {
-                try bin_images.append(allocator, train.images[i]);
-                try bin_labels.append(allocator, train.labels[i]);
+                bin_images.append(allocator, train.images[i]) catch return;
+                bin_labels.append(allocator, train.labels[i]) catch return;
             }
         }
         const train_images = bin_images.items;
