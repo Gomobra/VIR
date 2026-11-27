@@ -25,4 +25,4 @@ jobs:
       - name: train
         env:
           MNIST_DIR: /tmp/mnist
-        run: zig build run
+        run: ./zig-out/bin/vir
