@@ -67,7 +67,8 @@ pub fn main() void {
     std.debug.print("vir {s}\n", .{root.version});
     const allocator = std.heap.page_allocator;
 
-    const mnist_dir = std.posix.getenv("MNIST_DIR");
+    const mnist_dir_c = std.c.getenv("MNIST_DIR");
+    const mnist_dir: ?[]const u8 = if (mnist_dir_c) |p| std.mem.span(p) else null;
     if (mnist_dir) |dir| {
         std.debug.print("loading MNIST from {s}\n", .{dir});
         var train = loadMnist(allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
