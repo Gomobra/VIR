@@ -25,6 +25,7 @@ pub const Model = struct {
         mlp: nn.Linear,
         norm1: nn.RMSNorm,
         norm2: nn.RMSNorm,
+        engram: ?nn.engram.Engram = null,
         allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator, d: usize) !Block {
@@ -33,6 +34,7 @@ pub const Model = struct {
                 .mlp = try nn.Linear.init(allocator, d, d * 2),
                 .norm1 = .{},
                 .norm2 = .{},
+                .engram = null,
                 .allocator = allocator,
             };
         }
@@ -40,15 +42,27 @@ pub const Model = struct {
         pub fn deinit(self: *Block) void {
             self.attn.deinit();
             self.mlp.deinit();
+            if (self.engram) |*e| e.deinit();
         }
 
-        pub fn forward(self: *const Block, out: []f32, x: []const f32, batch: usize, d: usize) void {
+        pub fn forward(self: *const Block, out: []f32, x: []const f32, tokens: []const u32, batch: usize, d: usize) void {
             std.debug.assert(x.len == batch * d and out.len == batch * d);
+            // Optional Engram contribution added to the residual stream.
+            const xcur = self.allocator.alloc(f32, batch * d) catch return;
+            defer self.allocator.free(xcur);
+            @memcpy(xcur, x);
+            if (self.engram) |*eng| {
+                const contrib = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(contrib);
+                @memset(contrib, 0);
+                eng.forward(contrib, x, tokens, batch);
+                for (xcur, contrib) |*v, c| v.* += c;
+            }
             const tmp = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(tmp);
-            self.norm1.forward(tmp, x);
+            self.norm1.forward(tmp, xcur);
             self.attn.forward(out, tmp, batch);
-            for (out, x) |*o, v| o.* += v;
+            for (out, xcur) |*o, v| o.* += v;
             const tmp2 = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(tmp2);
             self.norm2.forward(tmp, out);
@@ -60,7 +74,7 @@ pub const Model = struct {
             }
         }
 
-        pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, x: []const f32, dOut: []const f32, batch: usize, d: usize) void {
+        pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, x: []const f32, tokens: []const u32, dOut: []const f32, batch: usize, d: usize) void {
             std.debug.assert(dX.len == batch * d and dOut.len == batch * d);
             std.debug.assert(dW_attn.len == d * d);
             std.debug.assert(dW_mlp.len == (d * 2) * d);
@@ -148,6 +162,24 @@ pub const Model = struct {
             }
             // dX = dR1 (residual from first) + dX_attn
             for (dX, dR1, dX_attn) |*o, a, bb| o.* = a + bb;
+            // Optional Engram backward contribution.
+            if (self.engram) |*eng| {
+                const mem = eng.mem_dim;
+                const dWk = self.allocator.alloc(f32, mem * mem) catch return;
+                defer self.allocator.free(dWk);
+                @memset(dWk, 0);
+                const dWv = self.allocator.alloc(f32, mem * mem) catch return;
+                defer self.allocator.free(dWv);
+                @memset(dWv, 0);
+                const dTables = self.allocator.alloc(f32, eng.tables.len) catch return;
+                defer self.allocator.free(dTables);
+                @memset(dTables, 0);
+                const dEng = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dEng);
+                @memset(dEng, 0);
+                eng.backward(dEng, dWk, dWv, dTables, x, tokens, dOut, batch);
+                for (dX, dEng) |*o, e| o.* += e;
+            }
             _ = cpu;
         }
     };
@@ -160,6 +192,13 @@ pub const Model = struct {
         for (embed, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.12;
         const blocks = try allocator.alloc(Block, n_blocks);
         for (blocks) |*bl| bl.* = try Block.init(allocator, d);
+        if (cfg.engram.enabled) {
+            for (cfg.engram.layers) |li| {
+                if (li < n_blocks) {
+                    blocks[li].engram = try nn.engram.Engram.init(allocator, d, cfg.engram.n_heads, cfg.engram.orders, cfg.engram.table_size);
+                }
+            }
+        }
         const head = try nn.Linear.init(allocator, d, v);
         // optimizers
         const opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
@@ -214,7 +253,7 @@ pub const Model = struct {
         var next = self.allocator.alloc(f32, seq * d) catch return;
         defer self.allocator.free(next);
         for (self.blocks) |*bl| {
-            bl.forward(next, cur, seq, d);
+            bl.forward(next, cur, tokens, seq, d);
             // swap
             const tmp = cur;
             cur = next;
@@ -377,7 +416,7 @@ pub const Model = struct {
             const dX = self.allocator.alloc(f32, seq * d) catch return;
             defer self.allocator.free(dX);
             @memset(dX, 0);
-            self.blocks[bi].backward(dX, dBlocks_attn[bi], dBlocks_mlp[bi], xin, dCur, seq, d);
+            self.blocks[bi].backward(dX, dBlocks_attn[bi], dBlocks_mlp[bi], xin, tokens, dCur, seq, d);
             @memcpy(dCur, dX);
         }
 
@@ -424,7 +463,8 @@ pub const Model = struct {
         const dW_mlp = try allocator.alloc(f32, 8 * 4);
         defer allocator.free(dW_mlp);
         @memset(dW_mlp, 0);
-        blk.backward(&dX, dW_attn, dW_mlp, &x, &dOut, 2, 4);
+        const toks = [_]u32{ 1, 2 };
+        blk.backward(&dX, dW_attn, dW_mlp, &x, &toks, &dOut, 2, 4);
         // finite diff for x[0]
         const eps: f32 = 1e-3;
         var xp = x;
