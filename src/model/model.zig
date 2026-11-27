@@ -651,11 +651,6 @@ pub const Model = struct {
         const seq = tokens.len;
         std.debug.assert(logits.len == seq * v);
 
-        // embedding gather
-        const hidden = self.allocator.alloc(f32, seq * d) catch return;
-        defer self.allocator.free(hidden);
-        cpuEmbeddingGather(hidden, self.embed, tokens, v, d);
-
         const hidden = self.allocator.alloc(f32, seq * d) catch return;
         defer self.allocator.free(hidden);
         self.forwardHidden(hidden, tokens);
