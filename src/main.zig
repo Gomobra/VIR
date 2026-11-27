@@ -96,6 +96,17 @@ pub fn main(init: std.process.Init) void {
             return;
         };
         defer model.deinit();
+        model.opt_embed.lr = 0.001;
+        model.opt_head.lr = 0.001;
+        model.opt_mtp_head.lr = 0.001;
+        for (model.opt_blocks_attn) |*o| o.lr = 0.001;
+        for (model.opt_blocks_mlp) |*o| o.lr = 0.001;
+        for (model.opt_gdn_q) |*o| o.lr = 0.001;
+        for (model.opt_gdn_k) |*o| o.lr = 0.001;
+        for (model.opt_gdn_v) |*o| o.lr = 0.001;
+        for (model.opt_gdn_a) |*o| o.lr = 0.001;
+        for (model.opt_gdn_b) |*o| o.lr = 0.001;
+        model.opt_loop_embed.lr = 0.001;
 
         const base = "/tmp/scratchpad/mnisttrain";
         std.Io.Dir.cwd().deleteTree(io, base) catch {};
@@ -109,7 +120,7 @@ pub fn main(init: std.process.Init) void {
         };
         defer train_mod.freeImageClassificationSamples(allocator, samples);
 
-        const max_steps: usize = 200;
+        const max_steps: usize = 100;
         var step: usize = 0;
         while (step < max_steps) : (step += 1) {
             const s = samples[step % samples.len];

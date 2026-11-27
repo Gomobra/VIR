@@ -855,6 +855,17 @@ pub const Model = struct {
                 while (j < v) : (j += 1) dLogits[pos * v + j] = 0;
             }
         }
+        // gradient clipping for stability
+        _ = optim.clipGradNorm(dLogits, 1.0);
+        _ = optim.clipGradNorm(dEmbed, 1.0);
+        _ = optim.clipGradNorm(dHead, 1.0);
+        for (dBlocks_attn) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_mlp) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_gdn_q) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_gdn_k) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_gdn_v) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_gdn_a) |g| _ = optim.clipGradNorm(g, 1.0);
+        for (dBlocks_gdn_b) |g| _ = optim.clipGradNorm(g, 1.0);
 
         const dEmbed = try allocator.alloc(f32, v * d);
         defer allocator.free(dEmbed);
