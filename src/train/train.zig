@@ -303,6 +303,123 @@ test "runModelTrainingLoopWithScheduler saves checkpoint" {
     try std.testing.expectEqual(@as(?u64, 2), latest);
 }
 
+// --- Model checkpoint save/load (PRD 3.4) ---
+
+fn writeF32Slice(writer: anytype, slice: []const f32) !void {
+    const bytes = std.mem.sliceAsBytes(slice);
+    try writer.writeAll(bytes);
+}
+
+fn readF32Slice(file: std.fs.File, slice: []f32) !void {
+    const bytes = std.mem.sliceAsBytes(slice);
+    const n = try file.readAll(bytes);
+    if (n != bytes.len) return error.UnexpectedEof;
+}
+
+pub fn saveModelCheckpoint(model: *model_mod.Model, dir: []const u8, step: usize) !void {
+    try std.fs.cwd().makePath(dir);
+    var path_buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/model-{d}.bin", .{ dir, step });
+    const file = try std.fs.cwd().createFile(path, .{});
+    defer file.close();
+    const w = file.writer();
+    try w.writeInt(u64, step, .little);
+    try writeF32Slice(w, model.embed);
+    for (model.blocks) |*bl| {
+        try writeF32Slice(w, bl.attn.w);
+        try writeF32Slice(w, bl.mlp.w);
+    }
+    try writeF32Slice(w, model.head.w);
+    try w.writeInt(u64, model.opt_embed.t, .little);
+    try writeF32Slice(w, model.opt_embed.m);
+    try writeF32Slice(w, model.opt_embed.v);
+    for (model.opt_blocks_attn) |*o| try writeF32Slice(w, o.buf);
+    for (model.opt_blocks_mlp) |*o| try writeF32Slice(w, o.buf);
+    try w.writeInt(u64, model.opt_head.t, .little);
+    try writeF32Slice(w, model.opt_head.m);
+    try writeF32Slice(w, model.opt_head.v);
+}
+
+pub fn loadModelCheckpoint(model: *model_mod.Model, dir: []const u8, step: usize) !void {
+    var path_buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/model-{d}.bin", .{ dir, step });
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const r = file.reader();
+    const saved_step = try r.readInt(u64, .little);
+    _ = saved_step;
+    try readF32Slice(file, model.embed);
+    for (model.blocks) |*bl| {
+        try readF32Slice(file, bl.attn.w);
+        try readF32Slice(file, bl.mlp.w);
+    }
+    try readF32Slice(file, model.head.w);
+    const t_embed = try r.readInt(u64, .little);
+    model.opt_embed.t = t_embed;
+    try readF32Slice(file, model.opt_embed.m);
+    try readF32Slice(file, model.opt_embed.v);
+    for (model.opt_blocks_attn) |*o| try readF32Slice(file, o.buf);
+    for (model.opt_blocks_mlp) |*o| try readF32Slice(file, o.buf);
+    const t_head = try r.readInt(u64, .little);
+    model.opt_head.t = t_head;
+    try readF32Slice(file, model.opt_head.m);
+    try readF32Slice(file, model.opt_head.v);
+}
+
+test "Model checkpoint save/load roundtrip" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/modelstateckpt";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    // mutate weights to ensure load overwrites
+    m.embed[0] = 123.0;
+    try saveModelCheckpoint(&m, base, 7);
+    // fresh model
+    var m2 = try model_mod.Model.init(allocator, mcfg);
+    defer m2.deinit();
+    try loadModelCheckpoint(&m2, base, 7);
+    try std.testing.expectApproxEqAbs(@as(f32, 123.0), m2.embed[0], 1e-6);
+}
+
+test "Model checkpoint deterministic resume" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/modelresume";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    const ids = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+
+    // Uninterrupted run: 4 steps.
+    var m_full = try model_mod.Model.init(allocator, mcfg);
+    defer m_full.deinit();
+    var sched_full = LRScheduler.init(.wsd, 0.01, 0.0, 1, 4, 0.2);
+    _ = try runModelTrainingLoopWithScheduler(&m_full, &ids, &targets, &sched_full, base, 4);
+
+    // Resumed run: 2 steps, save, load into fresh model, then 2 steps.
+    var m_part = try model_mod.Model.init(allocator, mcfg);
+    defer m_part.deinit();
+    var sched_part = LRScheduler.init(.wsd, 0.01, 0.0, 1, 2, 0.2);
+    _ = try runModelTrainingLoopWithScheduler(&m_part, &ids, &targets, &sched_part, base, 2);
+    try saveModelCheckpoint(&m_part, base, 2);
+
+    var m_resumed = try model_mod.Model.init(allocator, mcfg);
+    defer m_resumed.deinit();
+    try loadModelCheckpoint(&m_resumed, base, 2);
+    var sched_resume = LRScheduler.init(.wsd, 0.01, 0.0, 1, 4, 0.2);
+    sched_resume.step = 2;
+    _ = try runModelTrainingLoopWithScheduler(&m_resumed, &ids, &targets, &sched_resume, base, 2);
+
+    // Compare a sample of weights.
+    try std.testing.expectApproxEqAbs(m_full.embed[0], m_resumed.embed[0], 1e-5);
+    try std.testing.expectApproxEqAbs(m_full.head.w[0], m_resumed.head.w[0], 1e-5);
+}
+
 test "wsdLr warmup" {
     const cfg = TrainConfig{ .lr = 0.1, .max_steps = 10, .warmup_steps = 2, .decay_fraction = 0.2 };
     // step 0 (first) -> warmup: 0.1 * 1/2 = 0.05
