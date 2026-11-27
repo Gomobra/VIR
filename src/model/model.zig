@@ -536,6 +536,28 @@ test "Model trainStep finite" {
     try std.testing.expect(std.math.isFinite(loss));
 }
 
+test "Model with Engram finite" {
+    const allocator = std.testing.allocator;
+    const orders = [_]u8{ 2, 3 };
+    const cfg = config.ModelConfig{
+        .d_model = 4,
+        .n_groups = 1,
+        .vocab_size = 8,
+        .seq_len = 4,
+        .engram = .{ .enabled = true, .layers = &[_]usize{0}, .orders = &orders, .n_heads = 2, .table_size = 16 },
+    };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+    const loss = try m.trainStep(&tokens, &targets);
+    try std.testing.expect(std.math.isFinite(loss));
+    var logits = try allocator.alloc(f32, tokens.len * 8);
+    defer allocator.free(logits);
+    m.forward(logits, &tokens);
+    for (logits) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
 test "Model training reduces loss" {
     const allocator = std.testing.allocator;
     const cfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
