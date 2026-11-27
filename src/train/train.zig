@@ -897,6 +897,56 @@ test "LRScheduler linear" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), lr_end, 1e-6);
 }
 
+// --- ZeRO-1 communication primitives (CPU reference, PRD 3.8) ---
+
+// Reduce-scatter gradients: each shard receives the sum of its owned slice across all ranks.
+pub fn reduceScatterGrads(all_grads: []const []const f32, n_shards: usize, shard_id: usize, out: []f32) void {
+    if (all_grads.len == 0) return;
+    const n_params = all_grads[0].len;
+    const zs = ZeroShard{ .n_shards = n_shards, .shard_id = shard_id };
+    const r = zs.range(n_params);
+    std.debug.assert(out.len >= r.end - r.start);
+    var i: usize = r.start;
+    while (i < r.end) : (i += 1) {
+        var acc: f32 = 0;
+        for (all_grads) |g| acc += g[i];
+        out[i - r.start] = acc;
+    }
+}
+
+// All-gather sharded weights into a full parameter vector.
+pub fn allGatherWeights(shards: []const []const f32, out: []f32) void {
+    var off: usize = 0;
+    for (shards) |sh| {
+        @memcpy(out[off .. off + sh.len], sh);
+        off += sh.len;
+    }
+}
+
+test "reduceScatterGrads" {
+    const g0 = [_]f32{ 1, 2, 3, 4 };
+    const g1 = [_]f32{ 5, 6, 7, 8 };
+    const all = [_][]const f32{ &g0, &g1 };
+    var out = [_]f32{ 0, 0 };
+    reduceScatterGrads(&all, 2, 0, &out);
+    // shard0 owns params 0..2: sums [6,8]
+    try std.testing.expectApproxEqAbs(@as(f32, 6), out[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), out[1], 1e-6);
+    var out2 = [_]f32{ 0, 0 };
+    reduceScatterGrads(&all, 2, 1, &out2);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), out2[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 12), out2[1], 1e-6);
+}
+
+test "allGatherWeights" {
+    const s0 = [_]f32{ 1, 2 };
+    const s1 = [_]f32{ 3, 4 };
+    const shards = [_][]const f32{ &s0, &s1 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    allGatherWeights(&shards, &out);
+    try std.testing.expectEqualSlices(f32, &[_]f32{ 1, 2, 3, 4 }, &out);
+}
+
 test "ZeroShard range" {
     const zs = ZeroShard{ .n_shards = 2, .shard_id = 0 };
     const r = zs.range(10);
