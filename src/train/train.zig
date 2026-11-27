@@ -699,6 +699,42 @@ test "runMultimodalTier finite" {
     try std.testing.expect(res.eval_accuracy >= 0 and res.eval_accuracy <= 1);
 }
 
+test "image classification memorizes two samples" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/imgclassmem";
+    ioDeleteTree(base);
+    try ioMakePath(base);
+    // Use Io helper? train.zig has ioDeleteTree/ioMakePath? We added. But test uses std.fs.cwd old. CI Zig? Need use helpers.
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 8, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    var ivq = try modality_mod.image_vq.ImageVQ.init(allocator, 2, 2, 1, 1, 4);
+    defer ivq.deinit();
+    const layout = modality_mod.VocabLayout{
+        .text_offset = 0,
+        .text_size = 8,
+        .image_offset = 8,
+        .image_size = 4,
+        .audio_offset = 12,
+        .audio_size = 1,
+        .video_offset = 13,
+        .video_size = 1,
+        .special_offset = 14,
+        .special_size = 2,
+    };
+    var img0 = [_]f32{ 0.1, 0.2, 0.3, 0.4 };
+    var img1 = [_]f32{ 0.4, 0.3, 0.2, 0.1 };
+    const images = [_][]const f32{ &img0, &img1 };
+    const labels = [_]u32{ 0, 1 };
+    const tcfg = TrainConfig{ .max_steps = 200, .warmup_steps = 10 };
+    _ = try runImageClassificationTraining(&m, &images, &labels, &ivq, layout, tcfg, base, 0);
+    const label_tokens = [_]u32{ 0, 1 };
+    const acc = try evalImageClassification(&m, allocator, &images, &labels, &ivq, layout, &label_tokens);
+    std.debug.print("two-sample image classification accuracy: {d:.4}\n", .{acc});
+    try std.testing.expect(acc >= 1.0);
+}
+
 test "image classification training finite" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/imgclasstrain";
