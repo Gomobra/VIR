@@ -588,6 +588,96 @@ pub fn pipelineToShards(allocator: std.mem.Allocator, docs: []const []const u8, 
     return count;
 }
 
+test "runFullPipeline end-to-end" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/fullpipe";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const docs = [_][]const u8{
+        "This is a long enough document that passes the quality filter rules.",
+        "short",
+        "This is a long enough document that passes the quality filter rules.",
+    };
+    const cfg = FullPipelineConfig{
+        .shard = .{ .out_dir = base },
+        .pack_max_len = 1000,
+    };
+    var res = try runFullPipeline(allocator, &docs, cfg);
+    defer {
+        if (res.packed_seq) |*p| p.deinit();
+    }
+    try std.testing.expect(res.shard_count >= 1);
+    try std.testing.expect(res.packed_seq != null);
+}
+
+// --- Full end-to-end data pipeline (PRD 3.6, 4.11): filter -> dedup -> decontam -> FIM -> shard -> packing ---
+
+pub const FullPipelineConfig = struct {
+    pipeline: PipelineConfig = .{},
+    shard: ShardWriteConfig = .{},
+    fim_mode: ?FIMMode = null,
+    fim_prefix_len: usize = 0,
+    fim_middle_len: usize = 0,
+    pack_max_len: usize = 0,
+};
+
+pub const FullPipelineResult = struct {
+    shard_count: usize,
+    packed_seq: ?PackedSequence = null,
+};
+
+pub fn runFullPipeline(allocator: std.mem.Allocator, docs: []const []const u8, cfg: FullPipelineConfig) !FullPipelineResult {
+    const kept = try runPipeline(allocator, docs, cfg.pipeline);
+    defer allocator.free(kept);
+
+    try std.fs.cwd().makePath(cfg.shard.out_dir);
+    var count: usize = 0;
+    var token_docs = std.ArrayList([]u32).init(allocator);
+    defer {
+        for (token_docs.items) |t| allocator.free(t);
+        token_docs.deinit();
+    }
+
+    for (kept) |idx| {
+        const doc = docs[idx];
+        // Optional FIM formatting at text level.
+        var text_buf: []u8 = undefined;
+        var owned_text = false;
+        if (cfg.fim_mode) |mode| {
+            const fim = try fimFormat(allocator, doc, cfg.fim_prefix_len, cfg.fim_middle_len, mode);
+            text_buf = fim;
+            owned_text = true;
+        } else {
+            text_buf = try allocator.dupe(u8, doc);
+            owned_text = true;
+        }
+        defer if (owned_text) allocator.free(text_buf);
+
+        // Tokenize (byte-level) into u32 sequence.
+        var toks = try allocator.alloc(u32, text_buf.len);
+        for (text_buf, 0..) |c, i| toks[i] = @as(u32, c);
+
+        // Write shard.
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/shard_{d}.ztok", .{ cfg.shard.out_dir, count });
+        try writeShard(allocator, path, cfg.shard.dtype, toks, cfg.shard.vocab_size, cfg.shard.tok_hash);
+        count += 1;
+
+        if (cfg.pack_max_len > 0) {
+            const toks_copy = try allocator.dupe(u32, toks);
+            try token_docs.append(toks_copy);
+        }
+    }
+
+    var packed_result: ?PackedSequence = null;
+    if (cfg.pack_max_len > 0 and token_docs.items.len > 0) {
+        const docs_slice = token_docs.items;
+        packed_result = try packSequences(allocator, docs_slice, cfg.pack_max_len);
+    }
+
+    return .{ .shard_count = count, .packed_seq = packed_result };
+}
+
 test "pipelineToShards creates files" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/pipeshards";
