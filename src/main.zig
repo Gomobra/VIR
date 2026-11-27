@@ -334,10 +334,10 @@ pub fn main(init: std.process.Init) void {
         const acc = train_mod.evalImageClassification(&model, allocator, test_images, test_labels, &ivq, layout, &label_tokens) catch 0;
         std.debug.print("MNIST test accuracy after CPU training: {d:.4}\n", .{acc});
 
-        var i: usize = 0;
-        while (i < 5 and i < testdata.n) : (i += 1) {
-            const pred = train_mod.classifyImage(&model, allocator, testdata.images[i], &ivq, layout, &label_tokens) catch 0;
-            std.debug.print("test image {d}: predicted {d}, expected {d}\n", .{ i, pred, testdata.labels[i] });
+        var ii: usize = 0;
+        while (ii < 5 and ii < testdata.n) : (ii += 1) {
+            const pred = train_mod.classifyImage(&model, allocator, testdata.images[ii], &ivq, layout, &label_tokens) catch 0;
+            std.debug.print("test image {d}: predicted {d}, expected {d}\n", .{ ii, pred, testdata.labels[ii] });
         }
         return;
     }
