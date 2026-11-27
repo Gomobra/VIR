@@ -800,6 +800,57 @@ pub const Model = struct {
         return self.blocks.len;
     }
 
+    fn argmaxLocal(logits: []const f32) usize {
+        if (logits.len == 0) return 0;
+        var best: usize = 0;
+        var bestv: f32 = logits[0];
+        for (logits, 0..) |v, i| {
+            if (v > bestv) {
+                bestv = v;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    // MTP-assisted speculative decoding (PRD 3.12): draft with MTP, verify with main model.
+    pub fn speculativeStep(self: *Model, allocator: std.mem.Allocator, tokens: []const u32) ![]u32 {
+        const v = self.cfg.vocab_size;
+        const d = self.cfg.d_model;
+        const seq = tokens.len;
+        var accepted = std.ArrayList(u32).init(allocator);
+        if (seq == 0) return accepted.toOwnedSlice();
+        defer accepted.deinit();
+
+        const logits = try allocator.alloc(f32, seq * v);
+        defer allocator.free(logits);
+        self.forward(logits, tokens);
+        const next = argmaxLocal(logits[(seq - 1) * v .. seq * v]);
+        try accepted.append(next);
+
+        if (!self.mtp_enabled or seq == 0) return accepted.toOwnedSlice();
+
+        const hidden = try allocator.alloc(f32, seq * d);
+        defer allocator.free(hidden);
+        self.forwardHidden(hidden, tokens);
+        const draft_logits = try allocator.alloc(f32, v);
+        defer allocator.free(draft_logits);
+        self.mtp_head.forward(draft_logits, hidden[(seq - 1) * d .. seq * d], 1);
+        const draft = argmaxLocal(draft_logits);
+
+        const tmp_tokens = try allocator.alloc(u32, seq + 1);
+        defer allocator.free(tmp_tokens);
+        @memcpy(tmp_tokens[0..seq], tokens);
+        tmp_tokens[seq] = next;
+        const verify_logits = try allocator.alloc(f32, (seq + 1) * v);
+        defer allocator.free(verify_logits);
+        self.forward(verify_logits, tmp_tokens);
+        const verified = argmaxLocal(verify_logits[seq * v .. (seq + 1) * v]);
+
+        if (verified == draft) try accepted.append(draft);
+        return accepted.toOwnedSlice();
+    }
+
     // Backward: given dLogits (seq x vocab), compute dEmbed (vocab x d) gradient
     // and accumulate into dHead (d x vocab), dBlocks_attn/mlp. Returns via buffers.
     pub fn backward(self: *Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, dBlocks_gdn_q: [][]f32, dBlocks_gdn_k: [][]f32, dBlocks_gdn_v: [][]f32, dBlocks_gdn_a: [][]f32, dBlocks_gdn_b: [][]f32, tokens: []const u32, dLogits: []const f32, dExtraHidden: []const f32) void {
@@ -1085,6 +1136,24 @@ test "Model trainStep finite" {
     const targets = [_]u32{ 2, 3, 4 };
     const loss = try m.trainStep(&tokens, &targets);
     try std.testing.expect(std.math.isFinite(loss));
+}
+
+test "Model speculativeStep finite" {
+    const allocator = std.testing.allocator;
+    const cfg = config.ModelConfig{
+        .d_model = 4,
+        .n_groups = 1,
+        .vocab_size = 8,
+        .seq_len = 4,
+        .mtp = .{ .enabled = true, .loss_weight = 0.3 },
+    };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3 };
+    const out = try m.speculativeStep(allocator, &tokens);
+    defer allocator.free(out);
+    try std.testing.expect(out.len >= 1 and out.len <= 2);
+    for (out) |t| try std.testing.expect(t < 8);
 }
 
 test "Model with MTP finite" {
