@@ -632,7 +632,6 @@ pub const Model = struct {
             runBlock(self, &passes, &cur, &next, tokens, seq, d, bi, false);
         }
         // core repeated
-        var core_idx: usize = prelude_count;
         var rep: usize = 0;
         const repeats = if (self.loop_enabled) self.loop_repeats else 1;
         while (rep < repeats) : (rep += 1) {
@@ -890,9 +889,9 @@ pub const Model = struct {
             if (pass.add_loop) {
                 var t: usize = 0;
                 while (t < seq) : (t += 1) {
-                    var i: usize = 0;
-                    while (i < d) : (i += 1) {
-                        dLoop[i] += dX[t * d + i];
+                    var ii: usize = 0;
+                    while (ii < d) : (ii += 1) {
+                        dLoop[ii] += dX[t * d + ii];
                     }
                 }
             }
@@ -1033,7 +1032,7 @@ test "Model with loop finite" {
     const targets = [_]u32{ 2, 3, 4 };
     const loss = try m.trainStep(&tokens, &targets);
     try std.testing.expect(std.math.isFinite(loss));
-    var logits = try allocator.alloc(f32, tokens.len * 8);
+    const logits = try allocator.alloc(f32, tokens.len * 8);
     defer allocator.free(logits);
     m.forward(logits, &tokens);
     for (logits) |v| try std.testing.expect(std.math.isFinite(v));
