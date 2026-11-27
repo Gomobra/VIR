@@ -244,6 +244,11 @@ pub fn applyModelLr(model: *model_mod.Model, lr: f32) void {
     model.opt_embed.lr = lr;
     for (model.opt_blocks_attn) |*o| o.lr = lr;
     for (model.opt_blocks_mlp) |*o| o.lr = lr;
+    for (model.opt_gdn_q) |*o| o.lr = lr;
+    for (model.opt_gdn_k) |*o| o.lr = lr;
+    for (model.opt_gdn_v) |*o| o.lr = lr;
+    for (model.opt_gdn_a) |*o| o.lr = lr;
+    for (model.opt_gdn_b) |*o| o.lr = lr;
     model.opt_head.lr = lr;
 }
 

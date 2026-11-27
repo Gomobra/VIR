@@ -17,6 +17,11 @@ pub const Model = struct {
     opt_embed: optim.AdamW,
     opt_blocks_attn: []optim.Muon,
     opt_blocks_mlp: []optim.Muon,
+    opt_gdn_q: []optim.Muon,
+    opt_gdn_k: []optim.Muon,
+    opt_gdn_v: []optim.Muon,
+    opt_gdn_a: []optim.AdamW,
+    opt_gdn_b: []optim.AdamW,
     opt_head: optim.AdamW,
     allocator: std.mem.Allocator,
 
@@ -162,7 +167,7 @@ pub const Model = struct {
             }
         }
 
-        pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, x: []const f32, tokens: []const u32, dOut: []const f32, batch: usize, d: usize) void {
+        pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, dW_gdn_q: []f32, dW_gdn_k: []f32, dW_gdn_v: []f32, dW_gdn_a: []f32, dW_gdn_b: []f32, x: []const f32, tokens: []const u32, dOut: []const f32, batch: usize, d: usize) void {
             std.debug.assert(dX.len == batch * d and dOut.len == batch * d);
             std.debug.assert(dW_mlp.len == (d * 2) * d);
             const cpu = @import("../cpu/cpu.zig");
@@ -357,42 +362,28 @@ pub const Model = struct {
                 @memset(dB, 0);
                 self.gdn.backward(dQ, dK, dV, dA, dB, Q, K, Vv, alpha, beta, dR1, batch);
 
-                // backprop projections
-                const dWq = self.allocator.alloc(f32, d * d) catch return;
-                defer self.allocator.free(dWq);
-                @memset(dWq, 0);
-                const dWk = self.allocator.alloc(f32, d * d) catch return;
-                defer self.allocator.free(dWk);
-                @memset(dWk, 0);
-                const dWv = self.allocator.alloc(f32, d * d) catch return;
-                defer self.allocator.free(dWv);
-                @memset(dWv, 0);
-                const dWa = self.allocator.alloc(f32, d) catch return;
-                defer self.allocator.free(dWa);
-                @memset(dWa, 0);
-                const dWb = self.allocator.alloc(f32, d) catch return;
-                defer self.allocator.free(dWb);
-                @memset(dWb, 0);
-                // dWq += xnorm^T dQ; dXnorm += Wq^T dQ
+                // backprop projections into provided grad buffers
+                // dW_gdn_q += xnorm^T dQ; dXnorm += Wq^T dQ
+
                 const dXnorm = self.allocator.alloc(f32, batch * d) catch return;
                 defer self.allocator.free(dXnorm);
                 @memset(dXnorm, 0);
                 for (0..batch) |bb| {
                     for (0..d) |j| {
                         for (0..d) |i| {
-                            dWq[j * d + i] += norm1[bb * d + i] * dQ[bb * d + j];
+                            dW_gdn_q[j * d + i] += norm1[bb * d + i] * dQ[bb * d + j];
                             dXnorm[bb * d + i] += self.wq[j * d + i] * dQ[bb * d + j];
                         }
                     }
                     for (0..d) |j| {
                         for (0..d) |i| {
-                            dWk[j * d + i] += norm1[bb * d + i] * dK[bb * d + j];
+                            dW_gdn_k[j * d + i] += norm1[bb * d + i] * dK[bb * d + j];
                             dXnorm[bb * d + i] += self.wk[j * d + i] * dK[bb * d + j];
                         }
                     }
                     for (0..d) |j| {
                         for (0..d) |i| {
-                            dWv[j * d + i] += norm1[bb * d + i] * dV[bb * d + j];
+                            dW_gdn_v[j * d + i] += norm1[bb * d + i] * dV[bb * d + j];
                             dXnorm[bb * d + i] += self.wv[j * d + i] * dV[bb * d + j];
                         }
                     }
@@ -411,8 +402,8 @@ pub const Model = struct {
                     const ga = dA[bb] * sa;
                     const gb = dB[bb] * sb;
                     for (0..d) |ii| {
-                        dWa[ii] += norm1[bb * d + ii] * ga;
-                        dWb[ii] += norm1[bb * d + ii] * gb;
+                        dW_gdn_a[ii] += norm1[bb * d + ii] * ga;
+                        dW_gdn_b[ii] += norm1[bb * d + ii] * gb;
                         dXnorm[bb * d + ii] += self.wa[ii] * ga + self.wb[ii] * gb;
                     }
                 }
@@ -471,9 +462,19 @@ pub const Model = struct {
         const opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
         const opt_blocks_attn = try allocator.alloc(optim.Muon, n_blocks);
         const opt_blocks_mlp = try allocator.alloc(optim.Muon, n_blocks);
+        const opt_gdn_q = try allocator.alloc(optim.Muon, n_blocks);
+        const opt_gdn_k = try allocator.alloc(optim.Muon, n_blocks);
+        const opt_gdn_v = try allocator.alloc(optim.Muon, n_blocks);
+        const opt_gdn_a = try allocator.alloc(optim.AdamW, n_blocks);
+        const opt_gdn_b = try allocator.alloc(optim.AdamW, n_blocks);
         for (0..n_blocks) |i| {
             opt_blocks_attn[i] = try optim.Muon.init(allocator, d, d, 0.01);
             opt_blocks_mlp[i] = try optim.Muon.init(allocator, d * 2, d, 0.01);
+            opt_gdn_q[i] = try optim.Muon.init(allocator, d, d, 0.01);
+            opt_gdn_k[i] = try optim.Muon.init(allocator, d, d, 0.01);
+            opt_gdn_v[i] = try optim.Muon.init(allocator, d, d, 0.01);
+            opt_gdn_a[i] = try optim.AdamW.init(allocator, d, 0.01);
+            opt_gdn_b[i] = try optim.AdamW.init(allocator, d, 0.01);
         }
         const opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
         return .{
@@ -485,6 +486,11 @@ pub const Model = struct {
             .opt_embed = opt_embed,
             .opt_blocks_attn = opt_blocks_attn,
             .opt_blocks_mlp = opt_blocks_mlp,
+            .opt_gdn_q = opt_gdn_q,
+            .opt_gdn_k = opt_gdn_k,
+            .opt_gdn_v = opt_gdn_v,
+            .opt_gdn_a = opt_gdn_a,
+            .opt_gdn_b = opt_gdn_b,
             .opt_head = opt_head,
             .allocator = allocator,
         };
@@ -500,6 +506,16 @@ pub const Model = struct {
         self.allocator.free(self.opt_blocks_attn);
         for (self.opt_blocks_mlp) |*o| o.deinit();
         self.allocator.free(self.opt_blocks_mlp);
+        for (self.opt_gdn_q) |*o| o.deinit();
+        self.allocator.free(self.opt_gdn_q);
+        for (self.opt_gdn_k) |*o| o.deinit();
+        self.allocator.free(self.opt_gdn_k);
+        for (self.opt_gdn_v) |*o| o.deinit();
+        self.allocator.free(self.opt_gdn_v);
+        for (self.opt_gdn_a) |*o| o.deinit();
+        self.allocator.free(self.opt_gdn_a);
+        for (self.opt_gdn_b) |*o| o.deinit();
+        self.allocator.free(self.opt_gdn_b);
         self.opt_head.deinit();
     }
 
@@ -569,23 +585,56 @@ pub const Model = struct {
         defer allocator.free(dBlocks_attn);
         const dBlocks_mlp = try allocator.alloc([]f32, n);
         defer allocator.free(dBlocks_mlp);
+        const dBlocks_gdn_q = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_q);
+        const dBlocks_gdn_k = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_k);
+        const dBlocks_gdn_v = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_v);
+        const dBlocks_gdn_a = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_a);
+        const dBlocks_gdn_b = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_b);
         for (0..n) |i| {
             dBlocks_attn[i] = try allocator.alloc(f32, d * d);
             dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
+            dBlocks_gdn_q[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_k[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_v[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_a[i] = try allocator.alloc(f32, d);
+            dBlocks_gdn_b[i] = try allocator.alloc(f32, d);
             @memset(dBlocks_attn[i], 0);
             @memset(dBlocks_mlp[i], 0);
+            @memset(dBlocks_gdn_q[i], 0);
+            @memset(dBlocks_gdn_k[i], 0);
+            @memset(dBlocks_gdn_v[i], 0);
+            @memset(dBlocks_gdn_a[i], 0);
+            @memset(dBlocks_gdn_b[i], 0);
         }
         defer for (0..n) |i| {
             allocator.free(dBlocks_attn[i]);
             allocator.free(dBlocks_mlp[i]);
+            allocator.free(dBlocks_gdn_q[i]);
+            allocator.free(dBlocks_gdn_k[i]);
+            allocator.free(dBlocks_gdn_v[i]);
+            allocator.free(dBlocks_gdn_a[i]);
+            allocator.free(dBlocks_gdn_b[i]);
         };
 
-        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, tokens, dLogits);
+        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits);
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
         for (0..n) |i| {
-            self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
+            if (self.blocks[i].is_gdn) {
+                self.opt_gdn_q[i].step(self.blocks[i].wq, dBlocks_gdn_q[i], "original");
+                self.opt_gdn_k[i].step(self.blocks[i].wk, dBlocks_gdn_k[i], "original");
+                self.opt_gdn_v[i].step(self.blocks[i].wv, dBlocks_gdn_v[i], "original");
+                self.opt_gdn_a[i].step(self.blocks[i].wa, dBlocks_gdn_a[i]);
+                self.opt_gdn_b[i].step(self.blocks[i].wb, dBlocks_gdn_b[i]);
+            } else {
+                self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
+            }
             self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
         }
         self.opt_head.step(self.head.w, dHead);
@@ -599,7 +648,7 @@ pub const Model = struct {
 
     // Backward: given dLogits (seq x vocab), compute dEmbed (vocab x d) gradient
     // and accumulate into dHead (d x vocab), dBlocks_attn/mlp. Returns via buffers.
-    pub fn backward(self: *const Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, tokens: []const u32, dLogits: []const f32) void {
+    pub fn backward(self: *const Model, dEmbed: []f32, dHead: []f32, dBlocks_attn: [][]f32, dBlocks_mlp: [][]f32, dBlocks_gdn_q: [][]f32, dBlocks_gdn_k: [][]f32, dBlocks_gdn_v: [][]f32, dBlocks_gdn_a: [][]f32, dBlocks_gdn_b: [][]f32, tokens: []const u32, dLogits: []const f32) void {
         const d = self.cfg.d_model;
         const v = self.cfg.vocab_size;
         const seq = tokens.len;
@@ -683,7 +732,7 @@ pub const Model = struct {
             const dX = self.allocator.alloc(f32, seq * d) catch return;
             defer self.allocator.free(dX);
             @memset(dX, 0);
-            self.blocks[bi].backward(dX, dBlocks_attn[bi], dBlocks_mlp[bi], xin, tokens, dCur, seq, d);
+            self.blocks[bi].backward(dX, dBlocks_attn[bi], dBlocks_mlp[bi], dBlocks_gdn_q[bi], dBlocks_gdn_k[bi], dBlocks_gdn_v[bi], dBlocks_gdn_a[bi], dBlocks_gdn_b[bi], xin, tokens, dCur, seq, d);
             @memcpy(dCur, dX);
         }
 
