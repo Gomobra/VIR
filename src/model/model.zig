@@ -53,18 +53,32 @@ pub const Model = struct {
         allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool, use_bit: bool) !Block {
-            var wq = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
-            var wk = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
-            var wv = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
-            var wa = if (is_gdn) try allocator.alloc(f32, d) else &.{};
-            var wb = if (is_gdn) try allocator.alloc(f32, d) else &.{};
-            if (is_gdn) {
-                for (wq, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
-                for (wk, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
-                for (wv, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
-                for (wa) |*x| x.* = 0.0;
-                for (wb) |*x| x.* = 0.0;
-            }
+            const wq = if (is_gdn) blk: {
+                const s = try allocator.alloc(f32, d * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
+                break :blk s;
+            } else &.{};
+            const wk = if (is_gdn) blk: {
+                const s = try allocator.alloc(f32, d * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
+                break :blk s;
+            } else &.{};
+            const wv = if (is_gdn) blk: {
+                const s = try allocator.alloc(f32, d * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
+                break :blk s;
+            } else &.{};
+            const wa = if (is_gdn) blk: {
+                const s = try allocator.alloc(f32, d);
+                for (s) |*x| x.* = 0.0;
+                break :blk s;
+            } else &.{};
+            const wb = if (is_gdn) blk: {
+                const s = try allocator.alloc(f32, d);
+                for (s) |*x| x.* = 0.0;
+                break :blk s;
+            } else &.{};
+            _ = is_gdn;
             var bit_attn: ?nn.bitlinear.BitLinear = null;
             var bit_mlp: ?nn.bitlinear.BitLinear = null;
             if (use_bit) {
