@@ -703,6 +703,41 @@ test "image classification training finite" {
     try std.testing.expect(acc >= 0 and acc <= 1);
 }
 
+test "image classification training accuracy" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/imgclassacc";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    var ivq = try modality_mod.image_vq.ImageVQ.init(allocator, 2, 2, 1, 1, 4);
+    defer ivq.deinit();
+    const layout = modality_mod.VocabLayout{
+        .text_offset = 0,
+        .text_size = 8,
+        .image_offset = 8,
+        .image_size = 4,
+        .audio_offset = 12,
+        .audio_size = 1,
+        .video_offset = 13,
+        .video_size = 1,
+        .special_offset = 14,
+        .special_size = 2,
+    };
+    var img0 = [_]f32{ 0.1, 0.2, 0.3, 0.4 };
+    var img1 = [_]f32{ 0.4, 0.3, 0.2, 0.1 };
+    const images = [_][]const f32{ &img0, &img1 };
+    const labels = [_]u32{ 0, 1 };
+    const tcfg = TrainConfig{ .max_steps = 100, .warmup_steps = 5 };
+    _ = try runImageClassificationTraining(&m, &images, &labels, &ivq, layout, tcfg, base, 0);
+    const label_tokens = [_]u32{ 0, 1 };
+    const acc = try evalImageClassification(&m, allocator, &images, &labels, &ivq, layout, &label_tokens);
+    std.debug.print("image classification accuracy after training: {d:.4}\n", .{acc});
+    try std.testing.expect(acc >= 0.5);
+}
+
 test "wsdLr warmup" {
     const cfg = TrainConfig{ .lr = 0.1, .max_steps = 10, .warmup_steps = 2, .decay_fraction = 0.2 };
     // step 0 (first) -> warmup: 0.1 * 1/2 = 0.05

@@ -1,0 +1,17 @@
+name: train-cpu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: build
+        run: zig build
+      - name: train
+        run: zig build run
