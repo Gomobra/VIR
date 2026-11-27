@@ -522,7 +522,7 @@ test "runModelTrainingLoopWithScheduler saves checkpoint" {
 
 // --- Model checkpoint save/load (PRD 3.4) ---
 
-fn writeF32Slice(writer: anytype, slice: []const f32) !void {
+fn writeF32Slice(writer: *std.Io.Writer, slice: []const f32) !void {
     const bytes = std.mem.sliceAsBytes(slice);
     try writer.writeAll(bytes);
 }
@@ -545,20 +545,20 @@ pub fn saveModelCheckpoint(model: *model_mod.Model, dir: []const u8, step: usize
     var buf: [4096]u8 = undefined;
     var w = file.writer(io, &buf);
     try w.interface.writeInt(u64, step, .little);
-    try writeF32Slice(w.interface, model.embed);
+    try writeF32Slice(&w.interface, model.embed);
     for (model.blocks) |*bl| {
-        try writeF32Slice(w.interface, bl.attn.w);
-        try writeF32Slice(w.interface, bl.mlp.w);
+        try writeF32Slice(&w.interface, bl.attn.w);
+        try writeF32Slice(&w.interface, bl.mlp.w);
     }
-    try writeF32Slice(w.interface, model.head.w);
+    try writeF32Slice(&w.interface, model.head.w);
     try w.interface.writeInt(u64, model.opt_embed.t, .little);
-    try writeF32Slice(w.interface, model.opt_embed.m);
-    try writeF32Slice(w.interface, model.opt_embed.v);
-    for (model.opt_blocks_attn) |*o| try writeF32Slice(w.interface, o.buf);
-    for (model.opt_blocks_mlp) |*o| try writeF32Slice(w.interface, o.buf);
+    try writeF32Slice(&w.interface, model.opt_embed.m);
+    try writeF32Slice(&w.interface, model.opt_embed.v);
+    for (model.opt_blocks_attn) |*o| try writeF32Slice(&w.interface, o.buf);
+    for (model.opt_blocks_mlp) |*o| try writeF32Slice(&w.interface, o.buf);
     try w.interface.writeInt(u64, model.opt_head.t, .little);
-    try writeF32Slice(w.interface, model.opt_head.m);
-    try writeF32Slice(w.interface, model.opt_head.v);
+    try writeF32Slice(&w.interface, model.opt_head.m);
+    try writeF32Slice(&w.interface, model.opt_head.v);
     try w.flush();
 }
 
