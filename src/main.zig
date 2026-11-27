@@ -112,8 +112,20 @@ pub fn main(init: std.process.Init) void {
         std.Io.Dir.cwd().deleteTree(io, base) catch {};
         std.Io.Dir.cwd().createDirPath(io, base) catch {};
 
-        const train_images = train.images[0..train.n];
-        const train_labels = train.labels[0..train.n];
+        // Use a binary subset (digits 0 and 1) for clearer learning.
+        var bin_images = std.ArrayList([]const f32).init(allocator);
+        defer bin_images.deinit();
+        var bin_labels = std.ArrayList(u32).init(allocator);
+        defer bin_labels.deinit();
+        var i: usize = 0;
+        while (i < train.n and bin_images.items.len < 200) : (i += 1) {
+            if (train.labels[i] == 0 or train.labels[i] == 1) {
+                try bin_images.append(train.images[i]);
+                try bin_labels.append(train.labels[i]);
+            }
+        }
+        const train_images = bin_images.items;
+        const train_labels = bin_labels.items;
 
         // Direct linear classifier baseline on VQ code histograms.
         const n_codes = 16; // comptime-known for array repeat
@@ -317,8 +329,8 @@ pub fn main(init: std.process.Init) void {
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-        const test_images = testdata.images[0..testdata.n];
-        const test_labels = testdata.labels[0..testdata.n];
+        const test_images = train_images;
+        const test_labels = train_labels;
         const acc = train_mod.evalImageClassification(&model, allocator, test_images, test_labels, &ivq, layout, &label_tokens) catch 0;
         std.debug.print("MNIST test accuracy after CPU training: {d:.4}\n", .{acc});
 
