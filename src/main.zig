@@ -130,7 +130,7 @@ pub fn main(init: std.process.Init) void {
                 const codes = allocator.alloc(usize, 49) catch return;
                 defer allocator.free(codes);
                 _ = ivq.encode(train_images[i], codes);
-                var hist = [_]f32{0} * * n_codes;
+                var hist: [16]f32 = @splat(0);
                 var ci: usize = 0;
                 while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
                 // softmax
@@ -179,7 +179,7 @@ pub fn main(init: std.process.Init) void {
             const codes = allocator.alloc(usize, 49) catch return;
             defer allocator.free(codes);
             _ = ivq.encode(testdata.images[ei], codes);
-            var hist = [_]f32{0} * * n_codes;
+            var hist: [16]f32 = @splat(0);
             var ci: usize = 0;
             while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
             var logits = [_]f32{0} * *10;
