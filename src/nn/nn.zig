@@ -47,6 +47,39 @@ pub const Linear = struct {
         }
         _ = cpu;
     }
+
+    // Backward: dW += dOut^T @ in ; dIn += dOut @ W
+    pub fn backward(self: *const Linear, dW: []f32, dIn: []f32, in: []const f32, dOut: []const f32, batch: usize) void {
+        std.debug.assert(dW.len == self.out_dim * self.in_dim);
+        std.debug.assert(dIn.len == in.len);
+        std.debug.assert(dOut.len == batch * self.out_dim);
+        // dW
+        var j: usize = 0;
+        while (j < self.out_dim) : (j += 1) {
+            var i: usize = 0;
+            while (i < self.in_dim) : (i += 1) {
+                var acc: f32 = 0;
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    acc += in[b * self.in_dim + i] * dOut[b * self.out_dim + j];
+                }
+                dW[j * self.in_dim + i] += acc;
+            }
+        }
+        // dIn
+        var b: usize = 0;
+        while (b < batch) : (b += 1) {
+            var i: usize = 0;
+            while (i < self.in_dim) : (i += 1) {
+                var acc: f32 = 0;
+                var jj: usize = 0;
+                while (jj < self.out_dim) : (jj += 1) {
+                    acc += dOut[b * self.out_dim + jj] * self.w[jj * self.in_dim + i];
+                }
+                dIn[b * self.in_dim + i] += acc;
+            }
+        }
+    }
 };
 
 pub const RMSNorm = struct {
