@@ -131,11 +131,11 @@ pub fn main(init: std.process.Init) void {
 
         // Direct linear classifier baseline on VQ code histograms.
         const n_codes = 16; // comptime-known for array repeat
-        const w = allocator.alloc(f32, 10 * n_codes) catch return;
-        defer allocator.free(w);
+        const wcls = allocator.alloc(f32, 10 * n_codes) catch return;
+        defer allocator.free(wcls);
         const bias = allocator.alloc(f32, 10) catch return;
         defer allocator.free(bias);
-        @memset(w, 0);
+        @memset(wcls, 0);
         @memset(bias, 0);
         var e: usize = 0;
         while (e < 10) : (e += 1) {
@@ -153,7 +153,7 @@ pub fn main(init: std.process.Init) void {
                 while (j < 10) : (j += 1) {
                     var acc: f32 = bias[j];
                     var k: usize = 0;
-                    while (k < n_codes) : (k += 1) acc += w[j * n_codes + k] * hist[k];
+                    while (k < n_codes) : (k += 1) acc += wcls[j * n_codes + k] * hist[k];
                     logits[j] = acc;
                 }
                 var mx: f32 = logits[0];
@@ -181,7 +181,7 @@ pub fn main(init: std.process.Init) void {
                     bias[j] -= 0.1 * grads[j];
                     var k: usize = 0;
                     while (k < n_codes) : (k += 1) {
-                        w[j * n_codes + k] -= 0.1 * grads[j] * hist[k];
+                        wcls[j * n_codes + k] -= 0.1 * grads[j] * hist[k];
                     }
                 }
             }
@@ -201,7 +201,7 @@ pub fn main(init: std.process.Init) void {
             while (j < 10) : (j += 1) {
                 var acc: f32 = bias[j];
                 var k: usize = 0;
-                while (k < n_codes) : (k += 1) acc += w[j * n_codes + k] * hist[k];
+                while (k < n_codes) : (k += 1) acc += wcls[j * n_codes + k] * hist[k];
                 logits[j] = acc;
             }
             // argmax
