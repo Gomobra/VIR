@@ -273,6 +273,33 @@ pub fn runModelTrainingLoopWithScheduler(model: *model_mod.Model, ids: []const u
 }
 
 // Resume-aware Model training loop: loads latest checkpoint if present, then continues.
+pub const MultimodalSample = struct {
+    tokens: []const u32,
+    targets: []const u32,
+    mask: []const bool,
+};
+
+// Multimodal training loop: masked loss over packed image/audio+text sequences.
+pub fn runMultimodalTrainingLoop(model: *model_mod.Model, samples: []const MultimodalSample, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    if (samples.len == 0) return 0;
+    var trainer = Trainer.init(cfg);
+    var steps: usize = 0;
+    while (!trainer.done()) {
+        const s = samples[steps % samples.len];
+        const loss = try model.trainStepMasked(s.tokens, s.targets, s.mask);
+        _ = loss;
+        trainer.runStep();
+        steps += 1;
+        if (checkpoint_interval > 0 and steps % checkpoint_interval == 0) {
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+            try saveModelCheckpoint(model, checkpoint_dir, steps);
+        }
+    }
+    return steps;
+}
+
 pub fn runModelTrainingLoopResume(model: *model_mod.Model, ids: []const u32, targets: []const u32, scheduler: *LRScheduler, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
     const total = if (scheduler.total == 0) 1 else scheduler.total;
     if (try checkpoint.loadLatest(model.allocator, checkpoint_dir)) |step| {
@@ -447,6 +474,26 @@ test "Model checkpoint deterministic resume" {
     // Compare a sample of weights.
     try std.testing.expectApproxEqAbs(m_full.embed[0], m_resumed.embed[0], 1e-5);
     try std.testing.expectApproxEqAbs(m_full.head.w[0], m_resumed.head.w[0], 1e-5);
+}
+
+test "runMultimodalTrainingLoop saves checkpoint" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/mmtrainckpt";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    const toks = [_]u32{ 1, 2, 3 };
+    const tgts = [_]u32{ 2, 3, 4 };
+    const mask = [_]bool{ false, true, true };
+    const samples = [_]MultimodalSample{.{ .tokens = &toks, .targets = &tgts, .mask = &mask }};
+    const tcfg = TrainConfig{ .max_steps = 3, .warmup_steps = 1 };
+    const steps = try runMultimodalTrainingLoop(&m, &samples, tcfg, base, 2);
+    try std.testing.expectEqual(@as(usize, 3), steps);
+    const latest = try checkpoint.loadLatest(allocator, base);
+    try std.testing.expect(latest != null);
 }
 
 test "wsdLr warmup" {

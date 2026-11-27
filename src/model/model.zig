@@ -796,6 +796,132 @@ pub const Model = struct {
         return loss + mtp_loss;
     }
 
+    // Masked training step: loss and gradients only on positions where loss_mask is true.
+    pub fn trainStepMasked(self: *Model, tokens: []const u32, targets: []const u32, loss_mask: []const bool) !f32 {
+        const allocator = self.allocator;
+        const d = self.cfg.d_model;
+        const v = self.cfg.vocab_size;
+        const seq = tokens.len;
+        const n = self.blocks.len;
+
+        const logits = try allocator.alloc(f32, seq * v);
+        defer allocator.free(logits);
+        self.forward(logits, tokens);
+
+        // masked CE loss
+        var total_loss: f32 = 0;
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i < seq) : (i += 1) {
+            if (!loss_mask[i]) continue;
+            var mx: f32 = logits[i * v];
+            var j: usize = 1;
+            while (j < v) : (j += 1) {
+                if (logits[i * v + j] > mx) mx = logits[i * v + j];
+            }
+            var sum: f32 = 0;
+            j = 0;
+            while (j < v) : (j += 1) sum += @exp(logits[i * v + j] - mx);
+            const p = @exp(logits[i * v + targets[i]] - mx) / sum;
+            total_loss += -@log(p + 1e-12);
+            count += 1;
+        }
+        const loss = if (count > 0) total_loss / @as(f32, @floatFromInt(count)) else 0;
+
+        // backward
+        const dLogits = try allocator.alloc(f32, seq * v);
+        defer allocator.free(dLogits);
+        @memset(dLogits, 0);
+        autograd.backwardCrossEntropy(dLogits, logits, targets, seq, v);
+        // zero masked-out positions
+        var pos: usize = 0;
+        while (pos < seq) : (pos += 1) {
+            if (!loss_mask[pos]) {
+                var j: usize = 0;
+                while (j < v) : (j += 1) dLogits[pos * v + j] = 0;
+            }
+        }
+
+        const dEmbed = try allocator.alloc(f32, v * d);
+        defer allocator.free(dEmbed);
+        @memset(dEmbed, 0);
+        const dHead = try allocator.alloc(f32, v * d);
+        defer allocator.free(dHead);
+        @memset(dHead, 0);
+        const dBlocks_attn = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_attn);
+        const dBlocks_mlp = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_mlp);
+        const dBlocks_gdn_q = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_q);
+        const dBlocks_gdn_k = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_k);
+        const dBlocks_gdn_v = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_v);
+        const dBlocks_gdn_a = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_a);
+        const dBlocks_gdn_b = try allocator.alloc([]f32, n);
+        defer allocator.free(dBlocks_gdn_b);
+        for (0..n) |i| {
+            dBlocks_attn[i] = try allocator.alloc(f32, d * d);
+            dBlocks_mlp[i] = try allocator.alloc(f32, (d * 2) * d);
+            dBlocks_gdn_q[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_k[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_v[i] = try allocator.alloc(f32, d * d);
+            dBlocks_gdn_a[i] = try allocator.alloc(f32, d);
+            dBlocks_gdn_b[i] = try allocator.alloc(f32, d);
+            @memset(dBlocks_attn[i], 0);
+            @memset(dBlocks_mlp[i], 0);
+            @memset(dBlocks_gdn_q[i], 0);
+            @memset(dBlocks_gdn_k[i], 0);
+            @memset(dBlocks_gdn_v[i], 0);
+            @memset(dBlocks_gdn_a[i], 0);
+            @memset(dBlocks_gdn_b[i], 0);
+        }
+        defer for (0..n) |i| {
+            allocator.free(dBlocks_attn[i]);
+            allocator.free(dBlocks_mlp[i]);
+            allocator.free(dBlocks_gdn_q[i]);
+            allocator.free(dBlocks_gdn_k[i]);
+            allocator.free(dBlocks_gdn_v[i]);
+            allocator.free(dBlocks_gdn_a[i]);
+            allocator.free(dBlocks_gdn_b[i]);
+        };
+
+        const dExtra = try allocator.alloc(f32, seq * d);
+        defer allocator.free(dExtra);
+        @memset(dExtra, 0);
+
+        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
+
+        // update params
+        self.opt_embed.step(self.embed, dEmbed);
+        for (0..n) |i| {
+            if (self.blocks[i].use_bit) {
+                if (self.blocks[i].bit_attn) |_| {
+                    self.opt_blocks_attn[i].step(self.blocks[i].bit_attn.?.w, dBlocks_attn[i], "original");
+                }
+                if (self.blocks[i].bit_mlp) |_| {
+                    self.opt_blocks_mlp[i].step(self.blocks[i].bit_mlp.?.w, dBlocks_mlp[i], "original");
+                }
+            } else if (self.blocks[i].is_gdn) {
+                self.opt_gdn_q[i].step(self.blocks[i].wq, dBlocks_gdn_q[i], "original");
+                self.opt_gdn_k[i].step(self.blocks[i].wk, dBlocks_gdn_k[i], "original");
+                self.opt_gdn_v[i].step(self.blocks[i].wv, dBlocks_gdn_v[i], "original");
+                self.opt_gdn_a[i].step(self.blocks[i].wa, dBlocks_gdn_a[i]);
+                self.opt_gdn_b[i].step(self.blocks[i].wb, dBlocks_gdn_b[i]);
+                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+            } else {
+                self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
+                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
+            }
+        }
+        self.opt_head.step(self.head.w, dHead);
+        // MTP update is intentionally omitted from the masked helper for now.
+
+        return loss;
+    }
+
     pub fn nBlocks(self: *const Model) usize {
         return self.blocks.len;
     }
