@@ -921,7 +921,7 @@ test "Model with BitLinear finite" {
     const targets = [_]u32{ 2, 3, 4 };
     const loss = try m.trainStep(&tokens, &targets);
     try std.testing.expect(std.math.isFinite(loss));
-    var logits = try allocator.alloc(f32, tokens.len * 8);
+    const logits = try allocator.alloc(f32, tokens.len * 8);
     defer allocator.free(logits);
     m.forward(logits, &tokens);
     for (logits) |v| try std.testing.expect(std.math.isFinite(v));
