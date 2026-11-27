@@ -51,10 +51,10 @@ pub const VQ = struct {
         std.debug.assert(xs.len == n * self.dim);
         std.debug.assert(codes.len == n);
         for (codes, 0..) |c, i| {
-            self.ema_count[c] += 1;
+            self.ema_count[c] = self.decay * self.ema_count[c] + 1.0;
             var d: usize = 0;
             while (d < self.dim) : (d += 1) {
-                self.ema_sum[c * self.dim + d] += xs[i * self.dim + d];
+                self.ema_sum[c * self.dim + d] = self.decay * self.ema_sum[c * self.dim + d] + xs[i * self.dim + d];
             }
         }
         var e: usize = 0;
