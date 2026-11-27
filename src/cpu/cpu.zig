@@ -482,6 +482,140 @@ test "conv1d backward finite" {
     for (dW) |v| try std.testing.expect(std.math.isFinite(v));
 }
 
+// 2D convolution (stride 1, 'same' padding for odd kernels): x [Cin,H,W], w [Cout,Cin,Kh,Kw], out [Cout,H,W].
+pub fn conv2dF32(out: []f32, x: []const f32, w: []const f32, cin: usize, cout: usize, kh: usize, kw: usize, h: usize, wd: usize) void {
+    std.debug.assert(out.len == cout * h * wd);
+    std.debug.assert(x.len == cin * h * wd);
+    std.debug.assert(w.len == cout * cin * kh * kw);
+    const pad_h = (kh - 1) / 2;
+    const pad_w = (kw - 1) / 2;
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var y: usize = 0;
+        while (y < h) : (y += 1) {
+            var xidx: usize = 0;
+            while (xidx < wd) : (xidx += 1) {
+                var acc: f32 = 0;
+                var ci: usize = 0;
+                while (ci < cin) : (ci += 1) {
+                    var ky: usize = 0;
+                    while (ky < kh) : (ky += 1) {
+                        var kx: usize = 0;
+                        while (kx < kw) : (kx += 1) {
+                            const iy = @as(isize, @intCast(y)) + @as(isize, @intCast(ky)) - @as(isize, @intCast(pad_h));
+                            const ix = @as(isize, @intCast(xidx)) + @as(isize, @intCast(kx)) - @as(isize, @intCast(pad_w));
+                            if (iy >= 0 and iy < @as(isize, @intCast(h)) and ix >= 0 and ix < @as(isize, @intCast(wd))) {
+                                const xi = ci * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
+                                const wi = (co * cin + ci) * kh * kw + ky * kw + kx;
+                                acc += x[xi] * w[wi];
+                            }
+                        }
+                    }
+                }
+                out[co * h * wd + y * wd + xidx] = acc;
+            }
+        }
+    }
+}
+
+pub fn conv2dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, dOut: []const f32, cin: usize, cout: usize, kh: usize, kw: usize, h: usize, wd: usize) void {
+    std.debug.assert(dX.len == cin * h * wd);
+    std.debug.assert(dW.len == cout * cin * kh * kw);
+    std.debug.assert(dOut.len == cout * h * wd);
+    const pad_h = (kh - 1) / 2;
+    const pad_w = (kw - 1) / 2;
+    // dX
+    var ci: usize = 0;
+    while (ci < cin) : (ci += 1) {
+        var y: usize = 0;
+        while (y < h) : (y += 1) {
+            var xidx: usize = 0;
+            while (xidx < wd) : (xidx += 1) {
+                var acc: f32 = 0;
+                var co: usize = 0;
+                while (co < cout) : (co += 1) {
+                    var ky: usize = 0;
+                    while (ky < kh) : (ky += 1) {
+                        var kx: usize = 0;
+                        while (kx < kw) : (kx += 1) {
+                            const oy = @as(isize, @intCast(y)) - @as(isize, @intCast(ky)) + @as(isize, @intCast(pad_h));
+                            const ox = @as(isize, @intCast(xidx)) - @as(isize, @intCast(kx)) + @as(isize, @intCast(pad_w));
+                            if (oy >= 0 and oy < @as(isize, @intCast(h)) and ox >= 0 and ox < @as(isize, @intCast(wd))) {
+                                const wi = (co * cin + ci) * kh * kw + ky * kw + kx;
+                                acc += dOut[co * h * wd + @as(usize, @intCast(oy)) * wd + @as(usize, @intCast(ox))] * w[wi];
+                            }
+                        }
+                    }
+                }
+                dX[ci * h * wd + y * wd + xidx] += acc;
+            }
+        }
+    }
+    // dW
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci2: usize = 0;
+        while (ci2 < cin) : (ci2 += 1) {
+            var ky: usize = 0;
+            while (ky < kh) : (ky += 1) {
+                var kx: usize = 0;
+                while (kx < kw) : (kx += 1) {
+                    var acc: f32 = 0;
+                    var y: usize = 0;
+                    while (y < h) : (y += 1) {
+                        var xidx: usize = 0;
+                        while (xidx < wd) : (xidx += 1) {
+                            const iy = @as(isize, @intCast(y)) + @as(isize, @intCast(ky)) - @as(isize, @intCast(pad_h));
+                            const ix = @as(isize, @intCast(xidx)) + @as(isize, @intCast(kx)) - @as(isize, @intCast(pad_w));
+                            if (iy >= 0 and iy < @as(isize, @intCast(h)) and ix >= 0 and ix < @as(isize, @intCast(wd))) {
+                                const xi = ci2 * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
+                                acc += x[xi] * dOut[co * h * wd + y * wd + xidx];
+                            }
+                        }
+                    }
+                    dW[(co * cin + ci2) * kh * kw + ky * kw + kx] += acc;
+                }
+            }
+        }
+    }
+}
+
+test "conv2d finite" {
+    const cin = 1;
+    const cout = 1;
+    const kh = 3;
+    const kw = 3;
+    const h = 4;
+    const wdim = 4;
+    var x = [_]f32{0} * *(cin * h * wdim);
+    for (&x) |*v| v.* = 1;
+    var w = [_]f32{0} * *(cout * cin * kh * kw);
+    for (&w) |*v| v.* = 0.1;
+    var out = [_]f32{0} * *(cout * h * wdim);
+    conv2dF32(&out, &x, &w, cin, cout, kh, kw, h, wdim);
+    for (out) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "conv2d backward finite" {
+    const cin = 1;
+    const cout = 1;
+    const kh = 3;
+    const kw = 3;
+    const h = 4;
+    const wdim = 4;
+    var x = [_]f32{0} * *(cin * h * wdim);
+    for (&x) |*v| v.* = 1;
+    var w = [_]f32{0} * *(cout * cin * kh * kw);
+    for (&w) |*v| v.* = 0.1;
+    var dOut = [_]f32{0} * *(cout * h * wdim);
+    for (&dOut) |*v| v.* = 1;
+    var dX = [_]f32{0} * *(cin * h * wdim);
+    var dW = [_]f32{0} * *(cout * cin * kh * kw);
+    conv2dBackwardF32(&dX, &dW, &x, &w, &dOut, cin, cout, kh, kw, h, wdim);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
 test "elementwise new ops finite" {
     var a = [_]f32{ -1, 0, 1, 2 };
     var d = [_]f32{ 0, 0, 0, 0 };
