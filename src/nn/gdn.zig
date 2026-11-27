@@ -5,14 +5,129 @@ const std = @import("std");
 pub const GDN = struct {
     d: usize,
 
-    // Chunked variant: process sequence in chunks of chunk_size, carrying state between chunks.
-    // (Optimized UT-transform version is future work; this preserves recurrent semantics.)
+    // Chunked variant using the WY/UT transform (PRD 3.7). Processes the sequence in
+    // chunks of chunk_size, carrying the recurrent state between chunks.
     pub fn forwardChunked(self: GDN, O: []f32, Q: []const f32, K: []const f32, V: []const f32, alpha: []const f32, beta: []const f32, seq: usize, chunk_size: usize) void {
-        // Delegate to recurrent (chunked structure preserved via chunk_size param).
-        // Process chunk by chunk, state carried implicitly via O? Recurrent already handles full seq.
-        // We'll just call forward; chunk_size recorded for API compatibility.
-        _ = chunk_size;
-        self.forward(O, Q, K, V, alpha, beta, seq);
+        const d = self.d;
+        const cs = if (chunk_size == 0) 1 else chunk_size;
+        // State S [d,d], row-major, init 0.
+        var S = std.heap.page_allocator.alloc(f32, d * d) catch return;
+        defer std.heap.page_allocator.free(S);
+        @memset(S, 0);
+
+        var start: usize = 0;
+        while (start < seq) {
+            const end = @min(start + cs, seq);
+            const C = end - start;
+            if (C == 0) break;
+
+            // gamma[i] = cumulative alpha within chunk.
+            var gamma = std.heap.page_allocator.alloc(f32, C) catch return;
+            defer std.heap.page_allocator.free(gamma);
+            var i: usize = 0;
+            var acc: f32 = 1.0;
+            while (i < C) : (i += 1) {
+                acc *= alpha[(start + i) * 1]; // alpha is per-token scalar array [seq]
+                gamma[i] = acc;
+            }
+            // U0[i] = beta_i * (v_i - gamma_prev_i * S @ k_i), gamma_prev_0 = 1.
+            const U0 = std.heap.page_allocator.alloc(f32, C * d) catch return;
+            defer std.heap.page_allocator.free(U0);
+            @memset(U0, 0);
+            i = 0;
+            while (i < C) : (i += 1) {
+                const ti = start + i;
+                const prev_gamma: f32 = if (i == 0) 1.0 else gamma[i - 1];
+                // S @ k_i
+                var u = std.heap.page_allocator.alloc(f32, d) catch return;
+                defer std.heap.page_allocator.free(u);
+                var r: usize = 0;
+                while (r < d) : (r += 1) {
+                    var acc2: f32 = 0;
+                    var c: usize = 0;
+                    while (c < d) : (c += 1) acc2 += S[r * d + c] * K[ti * d + c];
+                    u[r] = acc2;
+                }
+                var j: usize = 0;
+                while (j < d) : (j += 1) {
+                    U0[i * d + j] = beta[ti] * (V[ti * d + j] - prev_gamma * u[j]);
+                }
+            }
+
+            // T = (I + L)^-1, L_ij = beta_i * (gamma_prev_i / gamma_j) * (k_i . k_j), i>j.
+            // V~ = T U0 via forward substitution.
+            const Vt = std.heap.page_allocator.alloc(f32, C * d) catch return;
+            defer std.heap.page_allocator.free(Vt);
+            @memset(Vt, 0);
+            i = 0;
+            while (i < C) : (i += 1) {
+                const ti = start + i;
+                // Vt[i] = U0[i] - sum_{j<i} L_ij Vt[j]
+                var j: usize = 0;
+                while (j < d) : (j += 1) Vt[i * d + j] = U0[i * d + j];
+                var jtok: usize = 0;
+                while (jtok < i) : (jtok += 1) {
+                    const tj = start + jtok;
+                    // k_i . k_j
+                    var dot: f32 = 0;
+                    var c: usize = 0;
+                    while (c < d) : (c += 1) dot += K[ti * d + c] * K[tj * d + c];
+                    const prev_gamma_i: f32 = if (i == 0) 1.0 else gamma[i - 1];
+                    const Lij = beta[ti] * (prev_gamma_i / gamma[jtok]) * dot;
+                    var c2: usize = 0;
+                    while (c2 < d) : (c2 += 1) {
+                        Vt[i * d + c2] -= Lij * Vt[jtok * d + c2];
+                    }
+                }
+            }
+
+            // Outputs: O_i = gamma_i * (S @ q_i) + sum_{j<=i} (gamma_i/gamma_j)*(k_j . q_i)*Vt_j.
+            i = 0;
+            while (i < C) : (i += 1) {
+                const ti = start + i;
+                // gamma_i * S @ q_i
+                var r: usize = 0;
+                while (r < d) : (r += 1) {
+                    var acc2: f32 = 0;
+                    var c: usize = 0;
+                    while (c < d) : (c += 1) acc2 += S[r * d + c] * Q[ti * d + c];
+                    O[ti * d + r] = gamma[i] * acc2;
+                }
+                var jtok: usize = 0;
+                while (jtok <= i) : (jtok += 1) {
+                    const tj = start + jtok;
+                    var dot: f32 = 0;
+                    var c: usize = 0;
+                    while (c < d) : (c += 1) dot += K[tj * d + c] * Q[ti * d + c];
+                    const coeff = (gamma[i] / gamma[jtok]) * dot;
+                    var r: usize = 0;
+                    while (r < d) : (r += 1) {
+                        O[ti * d + r] += coeff * Vt[jtok * d + r];
+                    }
+                }
+            }
+
+            // Update state: S_out = gamma_last * S + sum_j (gamma_last/gamma_j) * Vt_j * k_j^T.
+            const last = C - 1;
+            const gamma_last = gamma[last];
+            // scale S by gamma_last
+            var r: usize = 0;
+            while (r < d * d) : (r += 1) S[r] *= gamma_last;
+            var jtok: usize = 0;
+            while (jtok < C) : (jtok += 1) {
+                const tj = start + jtok;
+                const coeff = gamma_last / gamma[jtok];
+                var a: usize = 0;
+                while (a < d) : (a += 1) {
+                    var b: usize = 0;
+                    while (b < d) : (b += 1) {
+                        S[a * d + b] += coeff * Vt[jtok * d + a] * K[tj * d + b];
+                    }
+                }
+            }
+
+            start = end;
+        }
     }
 
     pub fn forward(self: GDN, O: []f32, Q: []const f32, K: []const f32, V: []const f32, alpha: []const f32, beta: []const f32, seq: usize) void {
