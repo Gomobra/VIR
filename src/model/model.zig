@@ -27,8 +27,11 @@ pub const Model = struct {
 
     const Block = struct {
         is_gdn: bool = false,
+        use_bit: bool = false,
         attn: nn.Linear,
         mlp: nn.Linear,
+        bit_attn: ?nn.bitlinear.BitLinear = null,
+        bit_mlp: ?nn.bitlinear.BitLinear = null,
         norm1: nn.RMSNorm,
         norm2: nn.RMSNorm,
         // GDN projections (used when is_gdn)
@@ -41,7 +44,7 @@ pub const Model = struct {
         engram: ?nn.engram.Engram = null,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool) !Block {
+        pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool, use_bit: bool) !Block {
             const wq = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
             const wk = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
             const wv = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
@@ -54,10 +57,19 @@ pub const Model = struct {
                 for (wa) |*x| x.* = 0.0;
                 for (wb) |*x| x.* = 0.0;
             }
+            var bit_attn: ?nn.bitlinear.BitLinear = null;
+            var bit_mlp: ?nn.bitlinear.BitLinear = null;
+            if (use_bit) {
+                bit_attn = try nn.bitlinear.BitLinear.init(allocator, d, d);
+                bit_mlp = try nn.bitlinear.BitLinear.init(allocator, d, d * 2);
+            }
             return .{
                 .is_gdn = is_gdn,
+                .use_bit = use_bit,
                 .attn = try nn.Linear.init(allocator, d, d),
                 .mlp = try nn.Linear.init(allocator, d, d * 2),
+                .bit_attn = bit_attn,
+                .bit_mlp = bit_mlp,
                 .norm1 = .{},
                 .norm2 = .{},
                 .wq = wq,
@@ -74,6 +86,8 @@ pub const Model = struct {
         pub fn deinit(self: *Block) void {
             self.attn.deinit();
             self.mlp.deinit();
+            if (self.bit_attn) |*b| b.deinit();
+            if (self.bit_mlp) |*b| b.deinit();
             if (self.wq.len > 0) self.allocator.free(self.wq);
             if (self.wk.len > 0) self.allocator.free(self.wk);
             if (self.wv.len > 0) self.allocator.free(self.wv);
@@ -99,7 +113,12 @@ pub const Model = struct {
             defer self.allocator.free(tmp);
             self.norm1.forward(tmp, xcur);
 
-            if (self.is_gdn) {
+            if (self.use_bit) {
+                if (self.bit_attn) |*ba| {
+                    ba.forward(out, tmp, batch);
+                    for (out, xcur) |*o, v| o.* += v;
+                }
+            } else if (self.is_gdn) {
                 // projections
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
                 defer self.allocator.free(Q);
@@ -159,10 +178,21 @@ pub const Model = struct {
             const tmp2 = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(tmp2);
             self.norm2.forward(tmp, out);
-            self.mlp.forward(tmp2, tmp, batch);
-            for (0..batch) |b| {
-                for (0..d) |i| {
-                    out[b * d + i] += tmp2[b * (d * 2) + i];
+            if (self.use_bit) {
+                if (self.bit_mlp) |*bm| {
+                    bm.forward(tmp2, tmp, batch);
+                    for (0..batch) |b| {
+                        for (0..d) |i| {
+                            out[b * d + i] += tmp2[b * (d * 2) + i];
+                        }
+                    }
+                }
+            } else {
+                self.mlp.forward(tmp2, tmp, batch);
+                for (0..batch) |b| {
+                    for (0..d) |i| {
+                        out[b * d + i] += tmp2[b * (d * 2) + i];
+                    }
                 }
             }
         }
@@ -251,15 +281,21 @@ pub const Model = struct {
             const dNorm2 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dNorm2);
             @memset(dNorm2, 0);
-            for (0..batch) |b| {
-                for (0..d) |i| {
-                    var acc: f32 = 0;
-                    for (0..(d * 2)) |j| acc += dMlp[b * (d * 2) + j] * self.mlp.w[j * d + i];
-                    dNorm2[b * d + i] = acc;
+            if (self.use_bit) {
+                if (self.bit_mlp) |*bm| {
+                    bm.backward(dW_mlp, dNorm2, norm2, dMlp, batch);
                 }
-                for (0..(d * 2)) |j| for (0..d) |i| {
-                    dW_mlp[j * d + i] += norm2[b * d + i] * dMlp[b * (d * 2) + j];
-                };
+            } else {
+                for (0..batch) |b| {
+                    for (0..d) |i| {
+                        var acc: f32 = 0;
+                        for (0..(d * 2)) |j| acc += dMlp[b * (d * 2) + j] * self.mlp.w[j * d + i];
+                        dNorm2[b * d + i] = acc;
+                    }
+                    for (0..(d * 2)) |j| for (0..d) |i| {
+                        dW_mlp[j * d + i] += norm2[b * d + i] * dMlp[b * (d * 2) + j];
+                    };
+                }
             }
             const dR1_mlp = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dR1_mlp);
@@ -282,7 +318,17 @@ pub const Model = struct {
             defer self.allocator.free(dX_attn);
             @memset(dX_attn, 0);
 
-            if (!self.is_gdn) {
+            if (self.use_bit) {
+                if (self.bit_attn) |*ba| {
+                    ba.backward(dW_attn, dNorm1, norm1, dR1, batch);
+                }
+                for (0..batch) |b| {
+                    const slice_x = x[b * d .. (b + 1) * d];
+                    const slice_do = dNorm1[b * d .. (b + 1) * d];
+                    const slice_dx = dX_attn[b * d .. (b + 1) * d];
+                    autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+                }
+            } else if (!self.is_gdn) {
                 for (0..batch) |b| {
                     for (0..d) |i| {
                         var acc: f32 = 0;
@@ -448,7 +494,7 @@ pub const Model = struct {
         const blocks = try allocator.alloc(Block, n_blocks);
         for (blocks, 0..) |*bl, i| {
             const is_gdn = (i % 4 != 3);
-            bl.* = try Block.init(allocator, d, is_gdn);
+            bl.* = try Block.init(allocator, d, is_gdn, cfg.bit.enabled);
         }
         if (cfg.engram.enabled) {
             for (cfg.engram.layers) |li| {
@@ -626,16 +672,24 @@ pub const Model = struct {
         // update params
         self.opt_embed.step(self.embed, dEmbed);
         for (0..n) |i| {
-            if (self.blocks[i].is_gdn) {
+            if (self.blocks[i].use_bit) {
+                if (self.blocks[i].bit_attn) |_| {
+                    self.opt_blocks_attn[i].step(self.blocks[i].bit_attn.?.w, dBlocks_attn[i], "original");
+                }
+                if (self.blocks[i].bit_mlp) |_| {
+                    self.opt_blocks_mlp[i].step(self.blocks[i].bit_mlp.?.w, dBlocks_mlp[i], "original");
+                }
+            } else if (self.blocks[i].is_gdn) {
                 self.opt_gdn_q[i].step(self.blocks[i].wq, dBlocks_gdn_q[i], "original");
                 self.opt_gdn_k[i].step(self.blocks[i].wk, dBlocks_gdn_k[i], "original");
                 self.opt_gdn_v[i].step(self.blocks[i].wv, dBlocks_gdn_v[i], "original");
                 self.opt_gdn_a[i].step(self.blocks[i].wa, dBlocks_gdn_a[i]);
                 self.opt_gdn_b[i].step(self.blocks[i].wb, dBlocks_gdn_b[i]);
+                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
             } else {
                 self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
+                self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
             }
-            self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
         }
         self.opt_head.step(self.head.w, dHead);
 
@@ -765,7 +819,7 @@ pub const Model = struct {
 
     test "Block backward gradcheck" {
         const allocator = std.testing.allocator;
-        var blk = try Model.Block.init(allocator, 4, false);
+        var blk = try Model.Block.init(allocator, 4, false, false);
         defer blk.deinit();
         var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
         var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -850,6 +904,27 @@ test "Model trainStep finite" {
     const targets = [_]u32{ 2, 3, 4 };
     const loss = try m.trainStep(&tokens, &targets);
     try std.testing.expect(std.math.isFinite(loss));
+}
+
+test "Model with BitLinear finite" {
+    const allocator = std.testing.allocator;
+    const cfg = config.ModelConfig{
+        .d_model = 4,
+        .n_groups = 1,
+        .vocab_size = 8,
+        .seq_len = 4,
+        .bit = .{ .enabled = true },
+    };
+    var m = try Model.init(allocator, cfg);
+    defer m.deinit();
+    const tokens = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+    const loss = try m.trainStep(&tokens, &targets);
+    try std.testing.expect(std.math.isFinite(loss));
+    var logits = try allocator.alloc(f32, tokens.len * 8);
+    defer allocator.free(logits);
+    m.forward(logits, &tokens);
+    for (logits) |v| try std.testing.expect(std.math.isFinite(v));
 }
 
 test "Model with Engram finite" {
