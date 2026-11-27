@@ -192,7 +192,13 @@ test "muPLr" {
 // Gradient clipping by global norm (PRD 3.8).
 pub fn clipGradNorm(grads: []f32, max_norm: f32) f32 {
     var ss: f32 = 0;
-    for (grads) |g| ss += g * g;
+    for (grads) |g| {
+        if (!std.math.isFinite(g)) {
+            for (grads) |*gg| gg.* = 0;
+            return std.math.inf(f32);
+        }
+        ss += g * g;
+    }
     const norm = @sqrt(ss);
     if (norm > max_norm and norm > 0) {
         const scale = max_norm / norm;

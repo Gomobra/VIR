@@ -781,7 +781,9 @@ pub const Model = struct {
             self.opt_mtp_head.step(self.mtp_head.w, dW_mtp);
         }
 
-        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
+        if (!overflow) {
+            self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
+        }
 
         // update params
         self.opt_embed.step(self.embed, dEmbed);
@@ -905,31 +907,35 @@ pub const Model = struct {
         defer allocator.free(dExtra);
         @memset(dExtra, 0);
 
-        self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
+        if (!overflow) {
+            self.backward(dEmbed, dHead, dBlocks_attn, dBlocks_mlp, dBlocks_gdn_q, dBlocks_gdn_k, dBlocks_gdn_v, dBlocks_gdn_a, dBlocks_gdn_b, tokens, dLogits, dExtra);
+        }
 
         // update params
-        self.opt_embed.step(self.embed, dEmbed);
-        for (0..n) |bi| {
-            if (self.blocks[bi].use_bit) {
-                if (self.blocks[bi].bit_attn) |_| {
-                    self.opt_blocks_attn[bi].step(self.blocks[bi].bit_attn.?.w, dBlocks_attn[bi], "original");
+        if (!overflow) {
+            self.opt_embed.step(self.embed, dEmbed);
+            for (0..n) |bi| {
+                if (self.blocks[bi].use_bit) {
+                    if (self.blocks[bi].bit_attn) |_| {
+                        self.opt_blocks_attn[bi].step(self.blocks[bi].bit_attn.?.w, dBlocks_attn[bi], "original");
+                    }
+                    if (self.blocks[bi].bit_mlp) |_| {
+                        self.opt_blocks_mlp[bi].step(self.blocks[bi].bit_mlp.?.w, dBlocks_mlp[bi], "original");
+                    }
+                } else if (self.blocks[bi].is_gdn) {
+                    self.opt_gdn_q[bi].step(self.blocks[bi].wq, dBlocks_gdn_q[bi], "original");
+                    self.opt_gdn_k[bi].step(self.blocks[bi].wk, dBlocks_gdn_k[bi], "original");
+                    self.opt_gdn_v[bi].step(self.blocks[bi].wv, dBlocks_gdn_v[bi], "original");
+                    self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
+                    self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
+                    self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
+                } else {
+                    self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
+                    self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
                 }
-                if (self.blocks[bi].bit_mlp) |_| {
-                    self.opt_blocks_mlp[bi].step(self.blocks[bi].bit_mlp.?.w, dBlocks_mlp[bi], "original");
-                }
-            } else if (self.blocks[bi].is_gdn) {
-                self.opt_gdn_q[bi].step(self.blocks[bi].wq, dBlocks_gdn_q[bi], "original");
-                self.opt_gdn_k[bi].step(self.blocks[bi].wk, dBlocks_gdn_k[bi], "original");
-                self.opt_gdn_v[bi].step(self.blocks[bi].wv, dBlocks_gdn_v[bi], "original");
-                self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
-                self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
-                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
-            } else {
-                self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
-                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             }
+            self.opt_head.step(self.head.w, dHead);
         }
-        self.opt_head.step(self.head.w, dHead);
         // MTP update is intentionally omitted from the masked helper for now.
 
         return loss;
@@ -1259,17 +1265,40 @@ test "Model backward finite" {
         allocator.free(dBlocks_gdn_b[i]);
     };
     // gradient clipping for stability
+    var overflow = false;
     const gn_logits = optim.clipGradNorm(dLogits, 1.0);
     const gn_embed = optim.clipGradNorm(dEmbed, 1.0);
-    if (true) std.debug.print("gn {d:.4} {d:.4}\n", .{ gn_logits, gn_embed });
-    _ = optim.clipGradNorm(dHead, 1.0);
-    for (dBlocks_attn) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_mlp) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_gdn_q) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_gdn_k) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_gdn_v) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_gdn_a) |g| _ = optim.clipGradNorm(g, 1.0);
-    for (dBlocks_gdn_b) |g| _ = optim.clipGradNorm(g, 1.0);
+    if (!std.math.isFinite(gn_logits) or !std.math.isFinite(gn_embed)) overflow = true;
+    const gn_head = optim.clipGradNorm(dHead, 1.0);
+    if (!std.math.isFinite(gn_head)) overflow = true;
+    for (dBlocks_attn) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_mlp) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_gdn_q) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_gdn_k) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_gdn_v) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_gdn_a) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
+    for (dBlocks_gdn_b) |g| {
+        const gn = optim.clipGradNorm(g, 1.0);
+        if (!std.math.isFinite(gn)) overflow = true;
+    }
 
     const dExtra = try allocator.alloc(f32, tokens.len * 4);
     defer allocator.free(dExtra);
