@@ -2,7 +2,7 @@
 
 pub fn threadIdX() u32 {
     return asm ("mov.u32 \t%[r], %tid.x;"
-        : [r] "=r" (-> u32)
+        : [r] "=r" (-> u32),
     );
 }
 
