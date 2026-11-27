@@ -1165,3 +1165,129 @@ test "attentionFlashBackward parity with naive" {
     for (dk1, dk2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
     for (dv1, dv2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
 }
+
+// Strided causal 1D convolution: x [Cin, L], w [Cout, Cin, K], stride S, out [Cout, (L-1)/S + 1].
+pub fn conv1dStrideF32(out: []f32, x: []const f32, w: []const f32, bias: []const f32, cin: usize, cout: usize, kernel: usize, stride: usize, len: usize) void {
+    std.debug.assert(stride > 0);
+    const out_len = (len - 1) / stride + 1;
+    std.debug.assert(out.len == cout * out_len);
+    std.debug.assert(x.len == cin * len);
+    std.debug.assert(w.len == cout * cin * kernel);
+    std.debug.assert(bias.len == cout);
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var o: usize = 0;
+        while (o < out_len) : (o += 1) {
+            var acc: f32 = bias[co];
+            var ci: usize = 0;
+            while (ci < cin) : (ci += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const in_idx = @as(isize, @intCast(o * stride)) - @as(isize, @intCast(kernel - 1)) + @as(isize, @intCast(k));
+                    if (in_idx >= 0 and in_idx < @as(isize, @intCast(len))) {
+                        acc += x[ci * len + @as(usize, @intCast(in_idx))] * w[(co * cin + ci) * kernel + k];
+                    }
+                }
+            }
+            out[co * out_len + o] = acc;
+        }
+    }
+}
+
+pub fn conv1dStrideBackwardF32(dX: []f32, dW: []f32, dBias: []f32, x: []const f32, w: []const f32, dOut: []const f32, cin: usize, cout: usize, kernel: usize, stride: usize, len: usize) void {
+    std.debug.assert(stride > 0);
+    const out_len = (len - 1) / stride + 1;
+    std.debug.assert(dX.len == cin * len);
+    std.debug.assert(dW.len == cout * cin * kernel);
+    std.debug.assert(dBias.len == cout);
+    std.debug.assert(dOut.len == cout * out_len);
+    // dX
+    var ci: usize = 0;
+    while (ci < cin) : (ci += 1) {
+        var t: usize = 0;
+        while (t < len) : (t += 1) {
+            var acc: f32 = 0;
+            var co: usize = 0;
+            while (co < cout) : (co += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const o_signed = @as(isize, @intCast(t)) + @as(isize, @intCast(kernel - 1)) - @as(isize, @intCast(k));
+                    if (o_signed >= 0 and o_signed % @as(isize, @intCast(stride)) == 0) {
+                        const o = @as(usize, @intCast(o_signed)) / stride;
+                        if (o < out_len) {
+                            acc += dOut[co * out_len + o] * w[(co * cin + ci) * kernel + k];
+                        }
+                    }
+                }
+            }
+            dX[ci * len + t] += acc;
+        }
+    }
+    // dW
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci2: usize = 0;
+        while (ci2 < cin) : (ci2 += 1) {
+            var k: usize = 0;
+            while (k < kernel) : (k += 1) {
+                var acc: f32 = 0;
+                var o: usize = 0;
+                while (o < out_len) : (o += 1) {
+                    const in_idx = @as(isize, @intCast(o * stride)) - @as(isize, @intCast(kernel - 1)) + @as(isize, @intCast(k));
+                    if (in_idx >= 0 and in_idx < @as(isize, @intCast(len))) {
+                        acc += x[ci2 * len + @as(usize, @intCast(in_idx))] * dOut[co * out_len + o];
+                    }
+                }
+                dW[(co * cin + ci2) * kernel + k] += acc;
+            }
+        }
+    }
+    // dBias
+    var co2: usize = 0;
+    while (co2 < cout) : (co2 += 1) {
+        var acc: f32 = 0;
+        var o: usize = 0;
+        while (o < out_len) : (o += 1) {
+            acc += dOut[co2 * out_len + o];
+        }
+        dBias[co2] += acc;
+    }
+}
+
+test "conv1dStride shape" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 4;
+    const stride = 2;
+    const len = 7;
+    const out_len = (len - 1) / stride + 1;
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7 };
+    var w = [_]f32{ 1, 0, 0, 0 };
+    var b = [_]f32{0};
+    var out = [_]f32{0} * *out_len;
+    conv1dStrideF32(&out, &x, &w, &b, cin, cout, kernel, stride, len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), out[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), out[2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 7), out[3], 1e-6);
+}
+
+test "conv1dStride backward finite" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 3;
+    const stride = 2;
+    const len = 7;
+    const out_len = (len - 1) / stride + 1;
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7 };
+    var w = [_]f32{ 0.5, -0.25, 0.1 };
+    var dOut = [_]f32{0} * *out_len;
+    for (&dOut) |*v| v.* = 1;
+    var dX = [_]f32{0} * *len;
+    var dW = [_]f32{ 0, 0, 0 };
+    var dB = [_]f32{0};
+    conv1dStrideBackwardF32(&dX, &dW, &dB, &x, &w, &dOut, cin, cout, kernel, stride, len);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dB) |v| try std.testing.expect(std.math.isFinite(v));
+}

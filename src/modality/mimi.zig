@@ -53,6 +53,9 @@ pub const MimiCodec = struct {
     enc_conv_b: []f32,
     dec_conv_w: []f32,
     dec_conv_b: []f32,
+    // Strided causal downsampling conv (kernel=stride=frame_size).
+    stride_conv_w: []f32,
+    stride_conv_b: []f32,
     rvq: fsq_mod.RVQ,
     allocator: std.mem.Allocator,
 
@@ -69,6 +72,11 @@ pub const MimiCodec = struct {
         for (dw) |*v| v.* = 0.1;
         const db = try allocator.alloc(f32, 1);
         db[0] = 0.0;
+        const sw = try allocator.alloc(f32, 1 * 1 * 1920);
+        for (sw) |*v| v.* = 0.01;
+        if (sw.len > 0) sw[0] = 1.0;
+        const sb = try allocator.alloc(f32, 1);
+        sb[0] = 0.0;
         return .{
             .n_codebooks = n_codebooks,
             .codebook_size = codebook_size,
@@ -78,6 +86,8 @@ pub const MimiCodec = struct {
             .enc_conv_b = eb,
             .dec_conv_w = dw,
             .dec_conv_b = db,
+            .stride_conv_w = sw,
+            .stride_conv_b = sb,
             .rvq = rvq,
             .allocator = allocator,
         };
@@ -89,6 +99,8 @@ pub const MimiCodec = struct {
         self.allocator.free(self.enc_conv_b);
         self.allocator.free(self.dec_conv_w);
         self.allocator.free(self.dec_conv_b);
+        self.allocator.free(self.stride_conv_w);
+        self.allocator.free(self.stride_conv_b);
         self.rvq.deinit();
     }
 
@@ -120,11 +132,17 @@ pub const MimiCodec = struct {
         const conv_audio = self.allocator.alloc(f32, audio.len) catch return 0;
         defer self.allocator.free(conv_audio);
         causalConvBlockForward(conv_audio, audio, self.enc_conv_w, self.enc_conv_b, 1, 1, 3, 1, audio.len);
+        const stride_feat = self.allocator.alloc(f32, nf) catch return 0;
+        defer self.allocator.free(stride_feat);
+        cpu.conv1dStrideF32(stride_feat, conv_audio, self.stride_conv_w, self.stride_conv_b, 1, 1, 1920, 1920, audio.len);
+        const norm_feat = self.allocator.alloc(f32, nf) catch return 0;
+        defer self.allocator.free(norm_feat);
+        cpu.groupNormF32(norm_feat, stride_feat, 1, 1, 1, nf, 1e-6);
         var f: usize = 0;
         while (f < nf) : (f += 1) {
             const feat = self.allocator.alloc(f32, self.dim) catch return f;
             defer self.allocator.free(feat);
-            self.frameFeature(conv_audio, f, feat);
+            for (feat) |*v| v.* = norm_feat[f];
             const idx = self.allocator.alloc(usize, self.n_codebooks) catch return f;
             defer self.allocator.free(idx);
             self.rvq.quantize(feat, idx);
@@ -159,7 +177,10 @@ pub const MimiCodec = struct {
         const up = self.allocator.alloc(f32, out_len) catch return;
         defer self.allocator.free(up);
         cpu.convTranspose1dF32(up, feat, self.upsample_weight, 1, 1, kernel, stride, feat_len);
-        causalConvBlockForward(out_audio[0..out_len], up, self.dec_conv_w, self.dec_conv_b, 1, 1, 3, 1, out_len);
+        const norm_up = self.allocator.alloc(f32, out_len) catch return;
+        defer self.allocator.free(norm_up);
+        cpu.groupNormF32(norm_up, up, 1, 1, 1, out_len, 1e-6);
+        causalConvBlockForward(out_audio[0..out_len], norm_up, self.dec_conv_w, self.dec_conv_b, 1, 1, 3, 1, out_len);
     }
 };
 
