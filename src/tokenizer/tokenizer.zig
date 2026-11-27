@@ -227,6 +227,98 @@ test "BPETrainer basic" {
     try std.testing.expect(tr.merges.items.len >= 1);
 }
 
+// --- Tokenizer compression map for Engram (PRD 3.7) ---
+// Maps raw token ids to canonical ids by textual equivalence (ASCII lowercasing +
+// whitespace collapsing). This concentrates semantic density for n-gram lookup.
+
+pub const CompressionMap = struct {
+    raw_vocab: usize,
+    map: []u32,
+    keys: std.ArrayList([]u8),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, tokens: []const []const u8) !CompressionMap {
+        var map = try allocator.alloc(u32, tokens.len);
+        var keys = std.ArrayList([]u8).init(allocator);
+        var canonical_ids = std.StringHashMap(u32).init(allocator);
+        defer canonical_ids.deinit();
+        var next_id: u32 = 0;
+        for (tokens, 0..) |tok, raw| {
+            const canon = try canonicalize(allocator, tok);
+            defer allocator.free(canon);
+            if (canonical_ids.get(canon)) |id| {
+                map[raw] = id;
+            } else {
+                const key = try allocator.dupe(u8, canon);
+                try keys.append(key);
+                try canonical_ids.put(key, next_id);
+                map[raw] = next_id;
+                next_id += 1;
+            }
+        }
+        return .{ .raw_vocab = tokens.len, .map = map, .keys = keys, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *CompressionMap) void {
+        for (self.keys.items) |k| self.allocator.free(k);
+        self.keys.deinit();
+        self.allocator.free(self.map);
+    }
+
+    pub fn compress(self: *const CompressionMap, raw_ids: []const u32, out: []u32) void {
+        std.debug.assert(raw_ids.len == out.len);
+        for (raw_ids, 0..) |id, i| {
+            if (id < self.raw_vocab) out[i] = self.map[id] else out[i] = id;
+        }
+    }
+
+    fn canonicalize(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+        var out = std.ArrayList(u8).init(allocator);
+        defer out.deinit();
+        var prev_space = true;
+        for (bytes) |c| {
+            var ch = c;
+            if (ch >= 'A' and ch <= 'Z') ch = ch + 32;
+            const is_space = ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
+            if (is_space) {
+                if (!prev_space and out.items.len > 0) try out.append(' ');
+                prev_space = true;
+            } else {
+                try out.append(ch);
+                prev_space = false;
+            }
+        }
+        if (out.items.len > 0 and out.items[out.items.len - 1] == ' ') {
+            _ = out.pop();
+        }
+        return out.toOwnedSlice();
+    }
+};
+
+test "CompressionMap basic" {
+    const allocator = std.testing.allocator;
+    const toks = [_][]const u8{ "Hello", "hello", "  World  ", "world" };
+    var cm = try CompressionMap.init(allocator, &toks);
+    defer cm.deinit();
+    // Hello and hello canonicalize same
+    try std.testing.expectEqual(cm.map[0], cm.map[1]);
+    // World variants same
+    try std.testing.expectEqual(cm.map[2], cm.map[3]);
+    // different groups
+    try std.testing.expect(cm.map[0] != cm.map[2]);
+}
+
+test "CompressionMap compress" {
+    const allocator = std.testing.allocator;
+    const toks = [_][]const u8{ "A", "a" };
+    var cm = try CompressionMap.init(allocator, &toks);
+    defer cm.deinit();
+    const raw = [_]u32{ 0, 1 };
+    var out = [_]u32{ 0, 0 };
+    cm.compress(&raw, &out);
+    try std.testing.expectEqual(out[0], out[1]);
+}
+
 test "BPE encode/decode roundtrip" {
     const allocator = std.testing.allocator;
     var tr = BPETrainer.init(allocator, 258);
