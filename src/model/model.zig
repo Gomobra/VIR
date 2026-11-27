@@ -402,7 +402,7 @@ pub const Model = struct {
         var m = try Model.init(allocator, cfg);
         defer m.deinit();
         const tokens = [_]u32{ 1, 2, 3, 4 };
-        var logits = [_]f32{0} * *(4 * 8);
+        var logits = [_]f32{0}**(4 * 8);
         m.forward(&logits, &tokens);
         for (logits) |v| try std.testing.expect(std.math.isFinite(v));
         try std.testing.expectEqual(@as(usize, 4), m.nBlocks());

@@ -7,6 +7,7 @@ const autograd = @import("../autograd/autograd.zig");
 const optim = @import("../optim/optim.zig");
 const checkpoint = @import("../checkpoint/checkpoint.zig");
 const infer = @import("../infer/infer.zig");
+const model_mod = @import("../model/model.zig");
 
 pub const TrainConfig = struct {
     lr: f32 = 1e-2,
@@ -218,6 +219,42 @@ pub fn runTrainingLoop(model: *TinyModel, ids: []const u32, targets: []const u32
         }
     }
     return steps;
+}
+
+// Training loop driven by Model (PRD 3.8).
+pub fn runModelTrainingLoop(model: *model_mod.Model, ids: []const u32, targets: []const u32, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    var trainer = Trainer.init(cfg);
+    var steps: usize = 0;
+    while (!trainer.done()) {
+        const loss = try model.trainStep(ids, targets);
+        _ = loss;
+        trainer.runStep();
+        steps += 1;
+        if (checkpoint_interval > 0 and steps % checkpoint_interval == 0) {
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+        }
+    }
+    return steps;
+}
+
+test "runModelTrainingLoop saves checkpoint" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/modelckpt";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    const ids = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+    const tcfg = TrainConfig{ .max_steps = 3, .warmup_steps = 1 };
+    const steps = try runModelTrainingLoop(&m, &ids, &targets, tcfg, base, 2);
+    try std.testing.expectEqual(@as(usize, 3), steps);
+    const latest = try checkpoint.loadLatest(allocator, base);
+    try std.testing.expect(latest != null);
 }
 
 test "wsdLr warmup" {

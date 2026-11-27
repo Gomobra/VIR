@@ -47,9 +47,35 @@ pub const AdamW = struct {
 };
 
 // Muon: Newton-Schulz 5 iterations to orthogonalize a 2D gradient matrix.
+// Handles both orientations by transposing when rows > cols.
 pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
     if (rows == 0 or cols == 0) return;
     std.debug.assert(mat.len == rows * cols);
+
+    // If tall matrix, work on transpose and transpose back at the end.
+    if (rows > cols) {
+        const t = std.heap.page_allocator.alloc(f32, rows * cols) catch return;
+        defer std.heap.page_allocator.free(t);
+        // transpose mat -> t (cols x rows)
+        var i: usize = 0;
+        while (i < rows) : (i += 1) {
+            var j: usize = 0;
+            while (j < cols) : (j += 1) {
+                t[j * rows + i] = mat[i * cols + j];
+            }
+        }
+        newtonSchulz5(t, cols, rows);
+        // transpose back
+        i = 0;
+        while (i < rows) : (i += 1) {
+            var j: usize = 0;
+            while (j < cols) : (j += 1) {
+                mat[i * cols + j] = t[j * rows + i];
+            }
+        }
+        return;
+    }
+
     // Normalize by Frobenius norm.
     var norm: f32 = 0;
     for (mat) |v| norm += v * v;
@@ -62,20 +88,17 @@ pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
     const b: f32 = -4.7750;
     const c: f32 = 2.0315;
 
-    // If rows > cols, work on transpose for efficiency (conceptually).
-    // Implement NS on the matrix directly: X = a X + (b A + c A^2) X, A = X X^T.
-    const m = if (rows <= cols) rows else cols;
-    const n = if (rows <= cols) cols else rows;
-    // We'll assume rows <= cols for simplicity; if not, caller transposes.
-    if (rows > cols) return; // skip non-square-friendly case for minimal impl
+    const m = rows;
+    const n = cols;
 
     // Temp buffers
-    var buf_a = std.heap.page_allocator.alloc(f32, m * m) catch return;
+    const buf_a = std.heap.page_allocator.alloc(f32, m * m) catch return;
     defer std.heap.page_allocator.free(buf_a);
     const buf_x = std.heap.page_allocator.alloc(f32, m * n) catch return;
     defer std.heap.page_allocator.free(buf_x);
+    const buf_a2 = std.heap.page_allocator.alloc(f32, m * m) catch return;
+    defer std.heap.page_allocator.free(buf_a2);
 
-    // copy mat -> buf_x
     @memcpy(buf_x, mat);
 
     var step: usize = 0;
@@ -93,9 +116,6 @@ pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
                 buf_a[i * m + j] = acc;
             }
         }
-        // B = b*A + c*A*A
-        var buf_a2 = std.heap.page_allocator.alloc(f32, m * m) catch return;
-        defer std.heap.page_allocator.free(buf_a2);
         // A*A
         i = 0;
         while (i < m) : (i += 1) {
@@ -123,7 +143,6 @@ pub fn newtonSchulz5(mat: []f32, rows: usize, cols: usize) void {
                 mat[i * n + j] = acc;
             }
         }
-        // update buf_x
         @memcpy(buf_x, mat);
     }
 }
@@ -140,7 +159,7 @@ test "AdamW step reduces param toward gradient" {
 
 test "newtonSchulz5 normalizes" {
     var g = [_]f32{ 3, 4, 0, 0 };
-    newtonSchulz5(&g, 2, 2, 5);
+    newtonSchulz5(&g, 2, 2);
     // Frobenius norm should be ~1
     var n: f32 = 0;
     for (g) |v| n += v * v;
@@ -197,4 +216,72 @@ test "clipGradNorm no clip" {
     const n = clipGradNorm(&g, 5.0);
     try std.testing.expect(n < 5.0);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), g[0], 1e-6);
+}
+
+// Muon optimizer for a single 2D matrix parameter (PRD 3.2).
+pub const Muon = struct {
+    rows: usize,
+    cols: usize,
+    lr: f32,
+    momentum: f32 = 0.95,
+    wd: f32 = 0.1,
+    nesterov: bool = true,
+    ns_steps: usize = 5,
+    buf: []f32,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize, lr: f32) !Muon {
+        const buf = try allocator.alloc(f32, rows * cols);
+        @memset(buf, 0);
+        return .{ .rows = rows, .cols = cols, .lr = lr, .buf = buf, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *Muon) void {
+        self.allocator.free(self.buf);
+    }
+
+    // scaling variant: "original" or "match_rms_adamw"
+    pub fn step(self: *Muon, params: []f32, grads: []const f32, scaling: []const u8) void {
+        std.debug.assert(params.len == self.rows * self.cols);
+        std.debug.assert(grads.len == self.rows * self.cols);
+        const mu = self.momentum;
+        // momentum buffer
+        for (self.buf, grads) |*b, g| b.* = mu * b.* + g;
+        // update matrix G
+        const G = std.heap.page_allocator.alloc(f32, self.rows * self.cols) catch return;
+        defer std.heap.page_allocator.free(G);
+        if (self.nesterov) {
+            for (G, grads, self.buf) |*g, gv, bv| g.* = gv + mu * bv;
+        } else {
+            @memcpy(G, self.buf);
+        }
+        newtonSchulz5(G, self.rows, self.cols);
+
+        // adjust lr
+        var adj: f32 = 1.0;
+        if (std.mem.eql(u8, scaling, "original")) {
+            const ratio = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(self.cols));
+            adj = @sqrt(@max(1.0, ratio));
+        } else if (std.mem.eql(u8, scaling, "match_rms_adamw")) {
+            const mx = if (self.rows > self.cols) self.rows else self.cols;
+            adj = 0.2 * @sqrt(@as(f32, @floatFromInt(mx)));
+        }
+        const lr = self.lr * adj;
+
+        // weight decay + update
+        for (params, G) |*p, g| {
+            p.* = p.* - lr * self.wd * p.*;
+            p.* = p.* - lr * g;
+        }
+    }
+};
+
+test "Muon step finite" {
+    const allocator = std.testing.allocator;
+    var opt = try Muon.init(allocator, 2, 2, 0.01);
+    defer opt.deinit();
+    var params = [_]f32{ 1, 2, 3, 4 };
+    const grads = [_]f32{ 0.1, 0.2, 0.3, 0.4 };
+    opt.step(&params, &grads, "original");
+    for (params) |v| try std.testing.expect(std.math.isFinite(v));
 }
