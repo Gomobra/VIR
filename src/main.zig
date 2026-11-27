@@ -103,12 +103,25 @@ pub fn main(init: std.process.Init) void {
 
         const train_images = train.images[0..train.n];
         const train_labels = train.labels[0..train.n];
-        const tcfg = train_mod.TrainConfig{ .max_steps = 500, .warmup_steps = 25 };
-        const steps = train_mod.runImageClassificationTraining(&model, train_images, train_labels, &ivq, layout, tcfg, base, 0) catch {
-            std.debug.print("training failed\n", .{});
+        const samples = train_mod.buildImageClassificationSamples(allocator, train_images, train_labels, &ivq, layout) catch {
+            std.debug.print("sample build failed\n", .{});
             return;
         };
-        std.debug.print("MNIST training steps: {d}\n", .{steps});
+        defer train_mod.freeImageClassificationSamples(allocator, samples);
+
+        const max_steps: usize = 200;
+        var step: usize = 0;
+        while (step < max_steps) : (step += 1) {
+            const s = samples[step % samples.len];
+            const loss = model.trainStepMasked(s.tokens, s.targets, s.mask) catch {
+                std.debug.print("training step failed\n", .{});
+                return;
+            };
+            if (step % 25 == 0 or step == max_steps - 1) {
+                std.debug.print("step {d}: loss={d:.4}\n", .{ step, loss });
+            }
+        }
+        std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
         const test_images = testdata.images[0..testdata.n];
