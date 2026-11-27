@@ -41,10 +41,10 @@ pub const Rng = struct {
     }
 
     pub fn normal(self: *Rng) f32 {
-        const u1 = @max(self.nextF32(), 1e-7);
-        const u2 = self.nextF32();
-        const r = @sqrt(-2.0 * @log(u1));
-        const theta = 2.0 * std.math.pi * u2;
+        const a = @max(self.nextF32(), 1e-7);
+        const b = self.nextF32();
+        const r = @sqrt(-2.0 * @log(a));
+        const theta = 2.0 * std.math.pi * b;
         return r * @cos(theta);
     }
 
