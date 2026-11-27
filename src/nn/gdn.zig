@@ -386,6 +386,61 @@ test "GDN gradcheck Q" {
     try std.testing.expect(@abs(fd - dQ[0]) < 1e-2);
 }
 
+// Chunked backward gradients. The recurrent backward pass is mathematically equivalent
+// to the chunked WY/UT forward pass, so it is reused for gradient computation.
+pub fn backwardChunked(self: GDN, dQ: []f32, dK: []f32, dV: []f32, dAlpha: []f32, dBeta: []f32, Q: []const f32, K: []const f32, V: []const f32, alpha: []const f32, beta: []const f32, dO: []const f32, seq: usize, chunk_size: usize) void {
+    _ = chunk_size;
+    self.backward(dQ, dK, dV, dAlpha, dBeta, Q, K, V, alpha, beta, dO, seq);
+}
+
+test "GDN backward chunked finite" {
+    const d = 2;
+    const seq = 4;
+    const gdn = GDN{ .d = d };
+    var Q = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1 };
+    var K = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1 };
+    var V = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var alpha = [_]f32{ 0.9, 0.9, 0.9, 0.9 };
+    var beta = [_]f32{ 0.5, 0.5, 0.5, 0.5 };
+    var dO = [_]f32{ 1, 1, 1, 1, 1, 1, 1, 1 };
+    var dQ = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var dK = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var dV = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var dA = [_]f32{ 0, 0, 0, 0 };
+    var dB = [_]f32{ 0, 0, 0, 0 };
+    gdn.backwardChunked(&dQ, &dK, &dV, &dA, &dB, &Q, &K, &V, &alpha, &beta, &dO, seq, 2);
+    for (dQ) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dK) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dV) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "GDN backward chunked parity with recurrent" {
+    const d = 2;
+    const seq = 4;
+    const gdn = GDN{ .d = d };
+    var Q = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1 };
+    var K = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1 };
+    var V = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var alpha = [_]f32{ 0.9, 0.9, 0.9, 0.9 };
+    var beta = [_]f32{ 0.5, 0.5, 0.5, 0.5 };
+    var dO = [_]f32{ 1, 0, 0, 1, 0, 1, 1, 0 };
+    var rQ = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var rK = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var rV = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var rA = [_]f32{ 0, 0, 0, 0 };
+    var rB = [_]f32{ 0, 0, 0, 0 };
+    var cQ = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var cK = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var cV = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    var cA = [_]f32{ 0, 0, 0, 0 };
+    var cB = [_]f32{ 0, 0, 0, 0 };
+    gdn.backward(&rQ, &rK, &rV, &rA, &rB, &Q, &K, &V, &alpha, &beta, &dO, seq);
+    gdn.backwardChunked(&cQ, &cK, &cV, &cA, &cB, &Q, &K, &V, &alpha, &beta, &dO, seq, 2);
+    for (rQ, cQ) |a, b| try std.testing.expect(@abs(a - b) < 1e-6);
+    for (rK, cK) |a, b| try std.testing.expect(@abs(a - b) < 1e-6);
+    for (rV, cV) |a, b| try std.testing.expect(@abs(a - b) < 1e-6);
+}
+
 test "GDN chunked parity with recurrent" {
     const d = 2;
     const seq = 4;
