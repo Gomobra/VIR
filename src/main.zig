@@ -115,6 +115,96 @@ pub fn main(init: std.process.Init) void {
         const train_images = train.images[0..train.n];
         const train_labels = train.labels[0..train.n];
 
+        // Direct linear classifier baseline on VQ code histograms.
+        const n_codes = 16;
+        const w = allocator.alloc(f32, 10 * n_codes) catch return;
+        defer allocator.free(w);
+        const bias = allocator.alloc(f32, 10) catch return;
+        defer allocator.free(bias);
+        @memset(w, 0);
+        @memset(bias, 0);
+        var epoch: usize = 0;
+        while (epoch < 10) : (epoch += 1) {
+            var i: usize = 0;
+            while (i < train.n) : (i += 1) {
+                var codes = allocator.alloc(usize, 49) catch return;
+                defer allocator.free(codes);
+                _ = ivq.encode(train_images[i], codes);
+                var hist = [_]f32{0} * *n_codes;
+                var ci: usize = 0;
+                while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
+                // softmax
+                var logits = [_]f32{0} * *10;
+                var j: usize = 0;
+                while (j < 10) : (j += 1) {
+                    var acc: f32 = bias[j];
+                    var k: usize = 0;
+                    while (k < n_codes) : (k += 1) acc += w[j * n_codes + k] * hist[k];
+                    logits[j] = acc;
+                }
+                var mx: f32 = logits[0];
+                j = 1;
+                while (j < 10) : (j += 1) if (logits[j] > mx) {
+                    mx = logits[j];
+                };
+                var sum: f32 = 0;
+                j = 0;
+                while (j < 10) : (j += 1) {
+                    logits[j] = @exp(logits[j] - mx);
+                    sum += logits[j];
+                }
+                j = 0;
+                while (j < 10) : (j += 1) logits[j] /= sum;
+                const y = train_labels[i];
+                // gradient: dlogit = prob - onehot
+                var grads = [_]f32{0} * *10;
+                j = 0;
+                while (j < 10) : (j += 1) grads[j] = logits[j];
+                grads[y] -= 1;
+                // update
+                j = 0;
+                while (j < 10) : (j += 1) {
+                    bias[j] -= 0.1 * grads[j];
+                    var k: usize = 0;
+                    while (k < n_codes) : (k += 1) {
+                        w[j * n_codes + k] -= 0.1 * grads[j] * hist[k];
+                    }
+                }
+            }
+        }
+        // eval
+        var correct: usize = 0;
+        var ei: usize = 0;
+        while (ei < testdata.n) : (ei += 1) {
+            var codes = allocator.alloc(usize, 49) catch return;
+            defer allocator.free(codes);
+            _ = ivq.encode(testdata.images[ei], codes);
+            var hist = [_]f32{0} * *n_codes;
+            var ci: usize = 0;
+            while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
+            var logits = [_]f32{0} * *10;
+            var j: usize = 0;
+            while (j < 10) : (j += 1) {
+                var acc: f32 = bias[j];
+                var k: usize = 0;
+                while (k < n_codes) : (k += 1) acc += w[j * n_codes + k] * hist[k];
+                logits[j] = acc;
+            }
+            // argmax
+            var best: usize = 0;
+            var bestv: f32 = logits[0];
+            j = 1;
+            while (j < 10) : (j += 1) {
+                if (logits[j] > bestv) {
+                    bestv = logits[j];
+                    best = j;
+                }
+            }
+            if (best == testdata.labels[ei]) correct += 1;
+        }
+        const baseline_acc = @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(testdata.n));
+        std.debug.print("direct VQ-histogram classifier accuracy: {d:.4}\n", .{baseline_acc});
+
         // Train the VQ codebook on MNIST patches (EMA).
         var epoch: usize = 0;
         while (epoch < 3) : (epoch += 1) {
