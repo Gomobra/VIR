@@ -274,4 +274,57 @@ test "KVCache append/get" {
     try std.testing.expectEqual(@as(usize, 1), cache.seq_len);
 }
 
+// GDN recurrent state cache (PRD 3.10): state per layer/head is value_dim x key_dim.
+pub const GDNStateCache = struct {
+    n_layers: usize,
+    n_heads: usize,
+    key_dim: usize,
+    value_dim: usize,
+    state: []f32,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, n_layers: usize, n_heads: usize, key_dim: usize, value_dim: usize) !GDNStateCache {
+        const total = n_layers * n_heads * value_dim * key_dim;
+        const state = try allocator.alloc(f32, total);
+        @memset(state, 0);
+        return .{ .n_layers = n_layers, .n_heads = n_heads, .key_dim = key_dim, .value_dim = value_dim, .state = state, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *GDNStateCache) void {
+        self.allocator.free(self.state);
+    }
+
+    fn offset(self: *const GDNStateCache, layer: usize, head: usize) usize {
+        return (layer * self.n_heads + head) * self.value_dim * self.key_dim;
+    }
+
+    pub fn getState(self: *const GDNStateCache, layer: usize, head: usize) []f32 {
+        const off = self.offset(layer, head);
+        return self.state[off .. off + self.value_dim * self.key_dim];
+    }
+
+    pub fn setState(self: *GDNStateCache, layer: usize, head: usize, src: []const f32) void {
+        const off = self.offset(layer, head);
+        @memcpy(self.state[off .. off + self.value_dim * self.key_dim], src);
+    }
+
+    pub fn reset(self: *GDNStateCache) void {
+        @memset(self.state, 0);
+    }
+};
+
+test "GDNStateCache basic" {
+    const allocator = std.testing.allocator;
+    var cache = try GDNStateCache.init(allocator, 1, 2, 2, 2);
+    defer cache.deinit();
+    const s = cache.getState(0, 1);
+    try std.testing.expectEqual(@as(usize, 4), s.len);
+    var v = [_]f32{ 1, 2, 3, 4 };
+    cache.setState(0, 1, &v);
+    const g = cache.getState(0, 1);
+    try std.testing.expectEqualSlices(f32, &v, g);
+    cache.reset();
+    for (cache.getState(0, 1)) |x| try std.testing.expectEqual(@as(f32, 0), x);
+}
+
 // KV cache for attention (PRD 3.12).
