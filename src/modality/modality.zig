@@ -30,6 +30,7 @@ pub const video_vq = @import("video_vq.zig");
 pub const image_understanding = @import("image_understanding.zig");
 pub const audio_understanding = @import("audio_understanding.zig");
 pub const video_understanding = @import("video_understanding.zig");
+pub const generation = @import("generation.zig");
 
 pub fn defaultLayout() VocabLayout {
     return .{
