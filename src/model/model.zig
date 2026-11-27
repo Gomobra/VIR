@@ -410,10 +410,10 @@ pub const Model = struct {
                     const sb = beta[bb] * (1 - beta[bb]);
                     const ga = dA[bb] * sa;
                     const gb = dB[bb] * sb;
-                    for (0..d) |i| {
-                        dWa[i] += norm1[bb * d + i] * ga;
-                        dWb[i] += norm1[bb * d + i] * gb;
-                        dXnorm[bb * d + i] += self.wa[i] * ga + self.wb[i] * gb;
+                    for (0..d) |ii| {
+                        dWa[ii] += norm1[bb * d + ii] * ga;
+                        dWb[ii] += norm1[bb * d + ii] * gb;
+                        dXnorm[bb * d + ii] += self.wa[ii] * ga + self.wb[ii] * gb;
                     }
                 }
                 // backward through norm1
