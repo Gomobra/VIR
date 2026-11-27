@@ -133,10 +133,10 @@ pub fn main(init: std.process.Init) void {
         const n_codes = 16; // comptime-known for array repeat
         const wcls = allocator.alloc(f32, 10 * n_codes) catch return;
         defer allocator.free(wcls);
-        const bias = allocator.alloc(f32, 10) catch return;
+        const biasc = allocator.alloc(f32, 10) catch return;
         defer allocator.free(bias);
         @memset(wcls, 0);
-        @memset(bias, 0);
+        @memset(biasc, 0);
         var e: usize = 0;
         while (e < 10) : (e += 1) {
             var ii: usize = 0;
@@ -151,7 +151,7 @@ pub fn main(init: std.process.Init) void {
                 var logits: [10]f32 = @splat(0);
                 var j: usize = 0;
                 while (j < 10) : (j += 1) {
-                    var acc: f32 = bias[j];
+                    var acc: f32 = biasc[j];
                     var k: usize = 0;
                     while (k < n_codes) : (k += 1) acc += wcls[j * n_codes + k] * hist[k];
                     logits[j] = acc;
@@ -178,7 +178,7 @@ pub fn main(init: std.process.Init) void {
                 // update
                 j = 0;
                 while (j < 10) : (j += 1) {
-                    bias[j] -= 0.1 * grads[j];
+                    biasc[j] -= 0.1 * grads[j];
                     var k: usize = 0;
                     while (k < n_codes) : (k += 1) {
                         wcls[j * n_codes + k] -= 0.1 * grads[j] * hist[k];
@@ -199,7 +199,7 @@ pub fn main(init: std.process.Init) void {
             var logits: [10]f32 = @splat(0);
             var j: usize = 0;
             while (j < 10) : (j += 1) {
-                var acc: f32 = bias[j];
+                var acc: f32 = biasc[j];
                 var k: usize = 0;
                 while (k < n_codes) : (k += 1) acc += wcls[j * n_codes + k] * hist[k];
                 logits[j] = acc;
