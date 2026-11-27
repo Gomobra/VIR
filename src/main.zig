@@ -208,8 +208,8 @@ pub fn main(init: std.process.Init) void {
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-        const test_images = testdata.images[0..2];
-        const test_labels = testdata.labels[0..2];
+        const test_images = train.images[0..2];
+        const test_labels = train.labels[0..2];
         const acc = train_mod.evalImageClassification(&model, allocator, test_images, test_labels, &ivq, layout, &label_tokens) catch 0;
         std.debug.print("MNIST test accuracy after CPU training: {d:.4}\n", .{acc});
 
