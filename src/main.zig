@@ -133,7 +133,7 @@ pub fn main(init: std.process.Init) void {
             }
         }
         // Debug: print VQ codes for first image.
-        var dbg_codes = [_]usize{0} * *49;
+        var dbg_codes = [_]usize{0}**49;
         const dbg_np = ivq.encode(train.images[0], &dbg_codes);
         std.debug.print("first image VQ codes: ", .{});
         var di: usize = 0;
