@@ -90,7 +90,7 @@ pub fn main(init: std.process.Init) void {
         };
         defer ivq.deinit();
 
-        const mcfg = config.ModelConfig{ .d_model = 32, .n_groups = 1, .vocab_size = 32, .seq_len = 64 };
+        const mcfg = config.ModelConfig{ .d_model = 64, .n_groups = 1, .vocab_size = 32, .seq_len = 64 };
         var model = model_mod.Model.init(allocator, mcfg) catch {
             std.debug.print("model init failed\n", .{});
             return;
@@ -103,7 +103,7 @@ pub fn main(init: std.process.Init) void {
 
         const train_images = train.images[0..train.n];
         const train_labels = train.labels[0..train.n];
-        const tcfg = train_mod.TrainConfig{ .max_steps = 200, .warmup_steps = 10 };
+        const tcfg = train_mod.TrainConfig{ .max_steps = 500, .warmup_steps = 25 };
         const steps = train_mod.runImageClassificationTraining(&model, train_images, train_labels, &ivq, layout, tcfg, base, 0) catch {
             std.debug.print("training failed\n", .{});
             return;
