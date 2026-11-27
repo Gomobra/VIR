@@ -132,6 +132,13 @@ pub fn main(init: std.process.Init) void {
                 std.debug.print("step {d}: loss={d:.4}\n", .{ step, loss });
             }
         }
+        // Debug: print VQ codes for first image.
+        var dbg_codes = [_]usize{0} * *49;
+        const dbg_np = ivq.encode(train.images[0], &dbg_codes);
+        std.debug.print("first image VQ codes: ", .{});
+        var di: usize = 0;
+        while (di < dbg_np) : (di += 1) std.debug.print("{d} ", .{dbg_codes[di]});
+        std.debug.print("\n", .{});
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
