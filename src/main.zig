@@ -213,6 +213,17 @@ pub fn main(init: std.process.Init) void {
             _ = ivq.encode(train.images[k], codes);
             std.debug.print("train image {d} label {d} last_code {d}\n", .{ k, train.labels[k], codes[48] });
         }
+        // Debug: print VQ code sequences for first few images.
+        var di: usize = 0;
+        while (di < 3 and di < train.n) : (di += 1) {
+            const codes = allocator.alloc(usize, 49) catch return;
+            defer allocator.free(codes);
+            _ = ivq.encode(train.images[di], codes);
+            std.debug.print("image {d} label {d} codes:", .{ di, train.labels[di] });
+            var ci: usize = 0;
+            while (ci < 49) : (ci += 1) std.debug.print(" {d}", .{codes[ci]});
+            std.debug.print("\n", .{});
+        }
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
