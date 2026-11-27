@@ -30,36 +30,54 @@ pub fn writeF32Tensor(allocator: std.mem.Allocator, path: []const u8, name: []co
     const header_len = json_buf.items.len;
     const padded = (header_len + 7) & ~@as(usize, 7);
 
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var w = file.writer(io, &buf);
 
     var len_bytes: [8]u8 = undefined;
     std.mem.writeInt(u64, &len_bytes, padded, .little);
-    try file.writeAll(&len_bytes);
+    try w.writeAll(&len_bytes);
 
-    try file.writeAll(json_buf.items);
+    try w.writeAll(json_buf.items);
     var pad: usize = padded - header_len;
-    while (pad > 0) : (pad -= 1) try file.writeAll(" ");
+    while (pad > 0) : (pad -= 1) try w.writeAll(" ");
 
     for (data) |v| {
         var b: [4]u8 = undefined;
         std.mem.writeInt(u32, &b, @bitCast(v), .little);
-        try file.writeAll(&b);
+        try w.writeAll(&b);
     }
+    try w.flush();
 }
 
 // --- Atomic checkpoint protocol (PRD 3.4) ---
 
 pub fn sha256FileHex(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const st = try file.stat();
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    const st = try file.stat(io);
     const buf = try allocator.alloc(u8, st.size);
     defer allocator.free(buf);
-    _ = try file.readAll(buf);
-    var h = std.crypto.hash.sha2.Sha256.init(.{});
-    h.update(buf);
-    const digest = h.finalResult();
+    var rbuf: [4096]u8 = undefined;
+    var r = file.reader(io, &rbuf);
+    _ = try r.readAll(buf);
+    // Use our own SHA-256 instead of std.crypto.
+    const crypto = @import("../crypto/sha256.zig");
+    const digest = crypto.sha256(buf);
+    const hex = try allocator.alloc(u8, 64);
+    const hexchars = "0123456789abcdef";
+    for (digest, 0..) |byte, i| {
+        hex[i * 2] = hexchars[byte >> 4];
+        hex[i * 2 + 1] = hexchars[byte & 0x0f];
+    }
+    return hex;
     const hex = try allocator.alloc(u8, 64);
     const hexchars = "0123456789abcdef";
     for (digest, 0..) |byte, i| {
@@ -82,17 +100,24 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
     const final_path = try std.fs.path.join(allocator, &.{ base_dir, final_name });
     defer allocator.free(final_path);
 
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
     // create tmp dir
-    try std.fs.cwd().makePath(tmp_path);
+    try std.Io.Dir.cwd().createDirPath(io, tmp_path);
 
     // write meta.json
     const meta_path = try std.fs.path.join(allocator, &.{ tmp_path, "meta.json" });
     defer allocator.free(meta_path);
     {
-        const f = try std.fs.cwd().createFile(meta_path, .{});
-        defer f.close();
-        try f.writeAll(meta_json);
-        try f.sync();
+        const f = try std.Io.Dir.cwd().createFile(io, meta_path, .{});
+        defer f.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = f.writer(io, &buf);
+        try w.writeAll(meta_json);
+        try w.flush();
+        try f.sync(io);
     }
 
     // hash meta.json
@@ -103,15 +128,17 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
     const commit_path = try std.fs.path.join(allocator, &.{ tmp_path, "COMMIT" });
     defer allocator.free(commit_path);
     {
-        const f = try std.fs.cwd().createFile(commit_path, .{});
-        defer f.close();
-        try f.writeAll(hash);
-        try f.sync();
+        const f = try std.Io.Dir.cwd().createFile(io, commit_path, .{});
+        defer f.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = f.writer(io, &buf);
+        try w.writeAll(hash);
+        try w.flush();
+        try f.sync(io);
     }
 
-    // fsync dir (best effort)
     // rename tmp -> final
-    try std.fs.cwd().rename(tmp_path, final_path);
+    try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), final_path, io);
 
     // update latest pointer atomically
     const latest_tmp = try std.fs.path.join(allocator, &.{ base_dir, "latest.tmp" });
@@ -119,14 +146,17 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
     const latest_path = try std.fs.path.join(allocator, &.{ base_dir, "latest" });
     defer allocator.free(latest_path);
     {
-        const f = try std.fs.cwd().createFile(latest_tmp, .{});
-        defer f.close();
+        const f = try std.Io.Dir.cwd().createFile(io, latest_tmp, .{});
+        defer f.close(io);
         var buf: [32]u8 = undefined;
         const sl = try std.fmt.bufPrint(&buf, "{d}", .{step});
-        try f.writeAll(sl);
-        try f.sync();
+        var wbuf: [4096]u8 = undefined;
+        var w = f.writer(io, &wbuf);
+        try w.writeAll(sl);
+        try w.flush();
+        try f.sync(io);
     }
-    try std.fs.cwd().rename(latest_tmp, latest_path);
+    try std.Io.Dir.cwd().rename(latest_tmp, std.Io.Dir.cwd(), latest_path, io);
 }
 
 // Verify a checkpoint dir has valid COMMIT matching meta.json sha256.
@@ -139,12 +169,17 @@ pub fn verifyCommit(allocator: std.mem.Allocator, dir: []const u8) !void {
     const hash = try sha256FileHex(allocator, meta_path);
     defer allocator.free(hash);
 
-    const commit_file = try std.fs.cwd().openFile(commit_path, .{});
-    defer commit_file.close();
-    const st = try commit_file.stat();
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const commit_file = try std.Io.Dir.cwd().openFile(io, commit_path, .{});
+    defer commit_file.close(io);
+    const st = try commit_file.stat(io);
     const buf = try allocator.alloc(u8, st.size);
     defer allocator.free(buf);
-    _ = try commit_file.readAll(buf);
+    var rbuf: [4096]u8 = undefined;
+    var r = commit_file.reader(io, &rbuf);
+    _ = try r.readAll(buf);
 
     if (buf.len != hash.len) return error.InvalidCommit;
     if (!std.mem.eql(u8, buf, hash)) return error.InvalidCommit;
@@ -154,12 +189,17 @@ pub fn verifyCommit(allocator: std.mem.Allocator, dir: []const u8) !void {
 pub fn loadLatest(allocator: std.mem.Allocator, base_dir: []const u8) !?u64 {
     const latest_path = try std.fs.path.join(allocator, &.{ base_dir, "latest" });
     defer allocator.free(latest_path);
-    const file = std.fs.cwd().openFile(latest_path, .{}) catch return null;
-    defer file.close();
-    const st = try file.stat();
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const file = std.Io.Dir.cwd().openFile(io, latest_path, .{}) catch return null;
+    defer file.close(io);
+    const st = try file.stat(io);
     const buf = try allocator.alloc(u8, st.size);
     defer allocator.free(buf);
-    _ = try file.readAll(buf);
+    var rbuf: [4096]u8 = undefined;
+    var r = file.reader(io, &rbuf);
+    _ = try r.readAll(buf);
     const step = std.fmt.parseInt(u64, buf, 10) catch return null;
 
     // verify commit
@@ -174,8 +214,11 @@ pub fn loadLatest(allocator: std.mem.Allocator, base_dir: []const u8) !?u64 {
 test "atomicSave + loadLatest roundtrip" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/ckpttest";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().deleteTree(io, base) catch {};
+    try std.Io.Dir.cwd().createDirPath(io, base);
 
     try atomicSave(allocator, base, 42, "{\"step\":42}");
     const step = try loadLatest(allocator, base);
@@ -192,15 +235,21 @@ test "atomicSave + loadLatest roundtrip" {
 test "loadLatest rejects missing commit" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/ckpttest2";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().deleteTree(io, base) catch {};
+    try std.Io.Dir.cwd().createDirPath(io, base);
     // create ckpt dir without COMMIT
-    try std.fs.cwd().makePath(base ++ "/ckpt-7");
+    try std.Io.Dir.cwd().createDirPath(io, base ++ "/ckpt-7");
     // write latest
     {
-        const f = try std.fs.cwd().createFile(base ++ "/latest", .{});
-        defer f.close();
-        try f.writeAll("7");
+        const f = try std.Io.Dir.cwd().createFile(io, base ++ "/latest", .{});
+        defer f.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = f.writer(io, &buf);
+        try w.writeAll("7");
+        try w.flush();
     }
     const step = try loadLatest(allocator, base);
     try std.testing.expectEqual(@as(?u64, null), step);
@@ -209,13 +258,16 @@ test "loadLatest rejects missing commit" {
 test "writeF32Tensor creates file" {
     const allocator = std.testing.allocator;
     const path = "/tmp/scratchpad/test.safetensors";
-    std.fs.cwd().makePath("/tmp/scratchpad") catch {};
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().createDirPath(io, "/tmp/scratchpad") catch {};
     var data = [_]f32{ 1.0, 2.0, 3.0, 4.0 };
     const shape = [_]usize{ 2, 2 };
     try writeF32Tensor(allocator, path, "w", &shape, &data);
-    const f = try std.fs.cwd().openFile(path, .{});
-    defer f.close();
-    const st = try f.stat();
+    const f = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer f.close(io);
+    const st = try f.stat(io);
     try std.testing.expect(st.size > 0);
 }
 
