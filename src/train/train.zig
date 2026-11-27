@@ -8,6 +8,7 @@ const optim = @import("../optim/optim.zig");
 const checkpoint = @import("../checkpoint/checkpoint.zig");
 const infer = @import("../infer/infer.zig");
 const model_mod = @import("../model/model.zig");
+const modality_mod = @import("../modality/modality.zig");
 
 pub const TrainConfig = struct {
     lr: f32 = 1e-2,
@@ -300,6 +301,60 @@ pub fn runMultimodalTrainingLoop(model: *model_mod.Model, samples: []const Multi
     return steps;
 }
 
+// Resume-aware multimodal training loop.
+pub fn runMultimodalTrainingLoopResume(model: *model_mod.Model, samples: []const MultimodalSample, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    if (samples.len == 0) return 0;
+    var trainer = Trainer.init(cfg);
+    var steps: usize = 0;
+    if (try checkpoint.loadLatest(model.allocator, checkpoint_dir)) |step| {
+        try loadModelCheckpoint(model, checkpoint_dir, step);
+        trainer.step = step;
+        steps = step;
+    }
+    while (!trainer.done()) {
+        const s = samples[steps % samples.len];
+        const loss = try model.trainStepMasked(s.tokens, s.targets, s.mask);
+        _ = loss;
+        trainer.runStep();
+        steps += 1;
+        if (checkpoint_interval > 0 and steps % checkpoint_interval == 0) {
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+            try saveModelCheckpoint(model, checkpoint_dir, steps);
+        }
+    }
+    return steps;
+}
+
+pub const MultimodalTierResult = struct {
+    steps: usize,
+    eval_loss: f32,
+    eval_accuracy: f32,
+};
+
+// End-to-end multimodal tier harness: train (with resume) then evaluate masked loss/accuracy.
+pub fn runMultimodalTier(model: *model_mod.Model, train_samples: []const MultimodalSample, eval_samples: []const MultimodalSample, cfg: TrainConfig, checkpoint_dir: []const u8, checkpoint_interval: usize) !MultimodalTierResult {
+    const steps = try runMultimodalTrainingLoopResume(model, train_samples, cfg, checkpoint_dir, checkpoint_interval);
+
+    var total_loss: f32 = 0;
+    var total_acc: f32 = 0;
+    var eval_count: usize = 0;
+    for (eval_samples) |s| {
+        const logits = try model.allocator.alloc(f32, s.tokens.len * model.cfg.vocab_size);
+        defer model.allocator.free(logits);
+        model.forward(logits, s.tokens);
+        const loss = modality_mod.image_understanding.maskedCrossEntropy(logits, s.targets, s.mask, s.tokens.len, model.cfg.vocab_size);
+        const acc = modality_mod.image_understanding.maskedAccuracy(logits, s.targets, s.mask, s.tokens.len, model.cfg.vocab_size);
+        total_loss += loss;
+        total_acc += acc;
+        eval_count += 1;
+    }
+    const eval_loss = if (eval_count > 0) total_loss / @as(f32, @floatFromInt(eval_count)) else 0;
+    const eval_accuracy = if (eval_count > 0) total_acc / @as(f32, @floatFromInt(eval_count)) else 0;
+    return .{ .steps = steps, .eval_loss = eval_loss, .eval_accuracy = eval_accuracy };
+}
+
 pub fn runModelTrainingLoopResume(model: *model_mod.Model, ids: []const u32, targets: []const u32, scheduler: *LRScheduler, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
     const total = if (scheduler.total == 0) 1 else scheduler.total;
     if (try checkpoint.loadLatest(model.allocator, checkpoint_dir)) |step| {
@@ -494,6 +549,27 @@ test "runMultimodalTrainingLoop saves checkpoint" {
     try std.testing.expectEqual(@as(usize, 3), steps);
     const latest = try checkpoint.loadLatest(allocator, base);
     try std.testing.expect(latest != null);
+}
+
+test "runMultimodalTier finite" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/mmtier";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    var m = try model_mod.Model.init(allocator, mcfg);
+    defer m.deinit();
+    const toks = [_]u32{ 1, 2, 3 };
+    const tgts = [_]u32{ 2, 3, 4 };
+    const mask = [_]bool{ false, true, true };
+    const train_samples = [_]MultimodalSample{.{ .tokens = &toks, .targets = &tgts, .mask = &mask }};
+    const eval_samples = [_]MultimodalSample{.{ .tokens = &toks, .targets = &tgts, .mask = &mask }};
+    const tcfg = TrainConfig{ .max_steps = 2, .warmup_steps = 1 };
+    const res = try runMultimodalTier(&m, &train_samples, &eval_samples, tcfg, base, 2);
+    try std.testing.expectEqual(@as(usize, 2), res.steps);
+    try std.testing.expect(std.math.isFinite(res.eval_loss));
+    try std.testing.expect(res.eval_accuracy >= 0 and res.eval_accuracy <= 1);
 }
 
 test "wsdLr warmup" {
