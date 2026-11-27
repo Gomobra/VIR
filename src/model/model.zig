@@ -417,10 +417,10 @@ pub const Model = struct {
                     }
                 }
                 // backward through norm1
-                for (0..batch) |b| {
-                    const slice_x = x[b * d .. (b + 1) * d];
-                    const slice_do = dXnorm[b * d .. (b + 1) * d];
-                    const slice_dx = dX_attn[b * d .. (b + 1) * d];
+                for (0..batch) |bi| {
+                    const slice_x = x[bi * d .. (bi + 1) * d];
+                    const slice_do = dXnorm[bi * d .. (bi + 1) * d];
+                    const slice_dx = dX_attn[bi * d .. (bi + 1) * d];
                     autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
             }
