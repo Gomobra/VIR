@@ -60,7 +60,7 @@ pub fn sha256FileHex(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const buf = try std.Io.Dir.cwd().readFileAlloc(io, allocator, path, .limited(100_000_000));
+    const buf = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(100_000_000));
     defer allocator.free(buf);
     // Use our own SHA-256 instead of std.crypto.
     const crypto = @import("../crypto/sha256.zig");
@@ -159,7 +159,7 @@ pub fn verifyCommit(allocator: std.mem.Allocator, dir: []const u8) !void {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const buf = try std.Io.Dir.cwd().readFileAlloc(io, allocator, commit_path, .limited(100_000_000));
+    const buf = try std.Io.Dir.cwd().readFileAlloc(io, commit_path, allocator, .limited(100_000_000));
     defer allocator.free(buf);
 
     if (buf.len != hash.len) return error.InvalidCommit;
@@ -173,7 +173,7 @@ pub fn loadLatest(allocator: std.mem.Allocator, base_dir: []const u8) !?u64 {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const buf = std.Io.Dir.cwd().readFileAlloc(io, allocator, latest_path, .limited(100_000_000)) catch return null;
+    const buf = std.Io.Dir.cwd().readFileAlloc(io, latest_path, allocator, .limited(100_000_000)) catch return null;
     defer allocator.free(buf);
     const step = std.fmt.parseInt(u64, buf, 10) catch return null;
 
