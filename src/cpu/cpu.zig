@@ -1,4 +1,5 @@
 // Kernel CPU: elementwise ops, matmul, softmax, rmsnorm, embedding (PRD 3.1).
+pub const rng = @import("rng.zig");
 
 const std = @import("std");
 
