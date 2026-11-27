@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const vq_mod = @import("vq.zig");
+const cpu = @import("../cpu/cpu.zig");
 
 pub const ImageVQ = struct {
     height: usize,
@@ -10,6 +11,8 @@ pub const ImageVQ = struct {
     patch_w: usize,
     n_codes: usize,
     dim: usize,
+    conv_w: []f32,
+    conv_b: []f32,
     vq: vq_mod.VQ,
     allocator: std.mem.Allocator,
 
@@ -17,6 +20,10 @@ pub const ImageVQ = struct {
         std.debug.assert(height % patch_h == 0 and width % patch_w == 0);
         const dim = patch_h * patch_w;
         const vq = try vq_mod.VQ.init(allocator, n_codes, dim);
+        const cw = try allocator.alloc(f32, 1 * 1 * 3 * 3);
+        for (cw) |*v| v.* = 0.1;
+        const cb = try allocator.alloc(f32, 1);
+        cb[0] = 0.0;
         return .{
             .height = height,
             .width = width,
@@ -24,12 +31,16 @@ pub const ImageVQ = struct {
             .patch_w = patch_w,
             .n_codes = n_codes,
             .dim = dim,
+            .conv_w = cw,
+            .conv_b = cb,
             .vq = vq,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *ImageVQ) void {
+        self.allocator.free(self.conv_w);
+        self.allocator.free(self.conv_b);
         self.vq.deinit();
     }
 
@@ -40,6 +51,9 @@ pub const ImageVQ = struct {
     // Encode grayscale image [H*W] into patch codes.
     pub fn encode(self: *const ImageVQ, image: []const f32, out_codes: []usize) usize {
         std.debug.assert(image.len == self.height * self.width);
+        const conv_img = self.allocator.alloc(f32, self.height * self.width) catch return 0;
+        defer self.allocator.free(conv_img);
+        cpu.conv2dF32(conv_img, image, self.conv_w, 1, 1, 3, 3, self.height, self.width);
         const nph = self.height / self.patch_h;
         const npw = self.width / self.patch_w;
         const np = nph * npw;
@@ -58,7 +72,7 @@ pub const ImageVQ = struct {
                     while (x < self.patch_w) : (x += 1) {
                         const iy = py * self.patch_h + y;
                         const ix = px * self.patch_w + x;
-                        patch[i] = image[iy * self.width + ix];
+                        patch[i] = conv_img[iy * self.width + ix];
                         i += 1;
                     }
                 }
@@ -96,6 +110,11 @@ pub const ImageVQ = struct {
                 pi += 1;
             }
         }
+        // Apply a conv block for reconstruction smoothing.
+        const conv_img = self.allocator.alloc(f32, self.height * self.width) catch return;
+        defer self.allocator.free(conv_img);
+        cpu.conv2dF32(conv_img, out_image, self.conv_w, 1, 1, 3, 3, self.height, self.width);
+        @memcpy(out_image, conv_img);
     }
 };
 

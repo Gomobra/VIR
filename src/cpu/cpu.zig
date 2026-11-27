@@ -881,3 +881,140 @@ test "conv3d backward finite" {
     for (dX) |v| try std.testing.expect(std.math.isFinite(v));
     for (dW) |v| try std.testing.expect(std.math.isFinite(v));
 }
+
+// GroupNorm: x/out [C, H, W], groups divides C.
+pub fn groupNormF32(out: []f32, x: []const f32, groups: usize, channels: usize, h: usize, w: usize, eps: f32) void {
+    std.debug.assert(out.len == channels * h * w);
+    std.debug.assert(x.len == channels * h * w);
+    std.debug.assert(groups > 0 and channels % groups == 0);
+    const cg = channels / groups;
+    const n = cg * h * w;
+    var g: usize = 0;
+    while (g < groups) : (g += 1) {
+        var mean: f32 = 0;
+        var ci: usize = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    mean += x[ci * h * w + y * w + xi];
+                }
+            }
+        }
+        mean /= @as(f32, @floatFromInt(n));
+        var varv: f32 = 0;
+        ci = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const diff = x[ci * h * w + y * w + xi] - mean;
+                    varv += diff * diff;
+                }
+            }
+        }
+        varv /= @as(f32, @floatFromInt(n));
+        const inv_std = 1.0 / @sqrt(varv + eps);
+        ci = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const idx = ci * h * w + y * w + xi;
+                    out[idx] = (x[idx] - mean) * inv_std;
+                }
+            }
+        }
+    }
+}
+
+pub fn groupNormBackwardF32(dX: []f32, x: []const f32, dOut: []const f32, groups: usize, channels: usize, h: usize, w: usize, eps: f32) void {
+    std.debug.assert(dX.len == channels * h * w);
+    std.debug.assert(x.len == channels * h * w);
+    std.debug.assert(dOut.len == channels * h * w);
+    std.debug.assert(groups > 0 and channels % groups == 0);
+    const cg = channels / groups;
+    const n = cg * h * w;
+    var g: usize = 0;
+    while (g < groups) : (g += 1) {
+        var mean_x: f32 = 0;
+        var mean_do: f32 = 0;
+        var ci: usize = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const idx = ci * h * w + y * w + xi;
+                    mean_x += x[idx];
+                    mean_do += dOut[idx];
+                }
+            }
+        }
+        mean_x /= @as(f32, @floatFromInt(n));
+        mean_do /= @as(f32, @floatFromInt(n));
+        var varv: f32 = 0;
+        ci = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const idx = ci * h * w + y * w + xi;
+                    const diff = x[idx] - mean_x;
+                    varv += diff * diff;
+                }
+            }
+        }
+        varv /= @as(f32, @floatFromInt(n));
+        const inv_std = 1.0 / @sqrt(varv + eps);
+        var sum_do_x: f32 = 0;
+        ci = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const idx = ci * h * w + y * w + xi;
+                    sum_do_x += dOut[idx] * (x[idx] - mean_x);
+                }
+            }
+        }
+        const scale = sum_do_x / (varv + eps) / @as(f32, @floatFromInt(n));
+        ci = g * cg;
+        while (ci < (g + 1) * cg) : (ci += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xi: usize = 0;
+                while (xi < w) : (xi += 1) {
+                    const idx = ci * h * w + y * w + xi;
+                    dX[idx] += inv_std * (dOut[idx] - mean_do - (x[idx] - mean_x) * scale);
+                }
+            }
+        }
+    }
+}
+
+test "groupNorm finite" {
+    const c = 2;
+    const h = 2;
+    const w = 2;
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var out = [_]f32{0} * *(c * h * w);
+    groupNormF32(&out, &x, 1, c, h, w, 1e-6);
+    for (out) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "groupNorm backward finite" {
+    const c = 2;
+    const h = 2;
+    const w = 2;
+    var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var dOut = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 0 };
+    var dX = [_]f32{0} * *(c * h * w);
+    groupNormBackwardF32(&dX, &x, &dOut, 1, c, h, w, 1e-6);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+}
