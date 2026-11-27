@@ -14,7 +14,8 @@ const K = [_]u32{
 };
 
 fn rotr(x: u32, n: u5) u32 {
-    return (x >> n) | (x << (@as(u5, 32) - n));
+    const s: u5 = @intCast(32 - @as(usize, n));
+    return (x >> n) | (x << s);
 }
 
 fn ch(x: u32, y: u32, z: u32) u32 {

@@ -10,6 +10,18 @@ const infer = @import("../infer/infer.zig");
 const model_mod = @import("../model/model.zig");
 const modality_mod = @import("../modality/modality.zig");
 
+fn ioDeleteTree(path: []const u8) void {
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    std.Io.Dir.cwd().deleteTree(threaded.io(), path) catch {};
+}
+
+fn ioMakePath(path: []const u8) !void {
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    try std.Io.Dir.cwd().createDirPath(threaded.io(), path);
+}
+
 pub const TrainConfig = struct {
     lr: f32 = 1e-2,
     batch_tokens: usize = 4,
@@ -474,8 +486,8 @@ pub fn runModelTrainingLoopResume(model: *model_mod.Model, ids: []const u32, tar
 test "runModelTrainingLoop saves checkpoint" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelckpt";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -492,8 +504,8 @@ test "runModelTrainingLoop saves checkpoint" {
 test "runModelTrainingLoopWithScheduler saves checkpoint" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelschedckpt";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -522,60 +534,81 @@ fn readF32Slice(file: std.fs.File, slice: []f32) !void {
 }
 
 pub fn saveModelCheckpoint(model: *model_mod.Model, dir: []const u8, step: usize) !void {
-    try std.fs.cwd().makePath(dir);
+    var threaded = std.Io.Threaded.init(model.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    try std.Io.Dir.cwd().createDirPath(io, dir);
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/model-{d}.bin", .{ dir, step });
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    const w = file.writer();
-    try w.writeInt(u64, step, .little);
-    try writeF32Slice(w, model.embed);
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var w = file.writer(io, &buf);
+    try w.interface.writeInt(u64, step, .little);
+    try writeF32Slice(w.interface, model.embed);
     for (model.blocks) |*bl| {
-        try writeF32Slice(w, bl.attn.w);
-        try writeF32Slice(w, bl.mlp.w);
+        try writeF32Slice(w.interface, bl.attn.w);
+        try writeF32Slice(w.interface, bl.mlp.w);
     }
-    try writeF32Slice(w, model.head.w);
-    try w.writeInt(u64, model.opt_embed.t, .little);
-    try writeF32Slice(w, model.opt_embed.m);
-    try writeF32Slice(w, model.opt_embed.v);
-    for (model.opt_blocks_attn) |*o| try writeF32Slice(w, o.buf);
-    for (model.opt_blocks_mlp) |*o| try writeF32Slice(w, o.buf);
-    try w.writeInt(u64, model.opt_head.t, .little);
-    try writeF32Slice(w, model.opt_head.m);
-    try writeF32Slice(w, model.opt_head.v);
+    try writeF32Slice(w.interface, model.head.w);
+    try w.interface.writeInt(u64, model.opt_embed.t, .little);
+    try writeF32Slice(w.interface, model.opt_embed.m);
+    try writeF32Slice(w.interface, model.opt_embed.v);
+    for (model.opt_blocks_attn) |*o| try writeF32Slice(w.interface, o.buf);
+    for (model.opt_blocks_mlp) |*o| try writeF32Slice(w.interface, o.buf);
+    try w.interface.writeInt(u64, model.opt_head.t, .little);
+    try writeF32Slice(w.interface, model.opt_head.m);
+    try writeF32Slice(w.interface, model.opt_head.v);
+    try w.flush();
 }
 
 pub fn loadModelCheckpoint(model: *model_mod.Model, dir: []const u8, step: usize) !void {
+    var threaded = std.Io.Threaded.init(model.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/model-{d}.bin", .{ dir, step });
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const r = file.reader();
-    const saved_step = try r.readInt(u64, .little);
-    _ = saved_step;
-    try readF32Slice(file, model.embed);
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, model.allocator, .limited(100_000_000));
+    defer model.allocator.free(bytes);
+    var pos: usize = 0;
+    const readU64 = struct {
+        fn call(b: []const u8, p: *usize) u64 {
+            const v = std.mem.readInt(u64, b[p.*..][0..8], .little);
+            p.* += 8;
+            return v;
+        }
+    }.call;
+    const readSlice = struct {
+        fn call(b: []const u8, p: *usize, out: []f32) void {
+            const bytes2 = std.mem.sliceAsBytes(out);
+            @memcpy(bytes2, b[p.* .. p.* + bytes2.len]);
+            p.* += bytes2.len;
+        }
+    }.call;
+    _ = readU64(bytes, &pos);
+    readSlice(bytes, &pos, model.embed);
     for (model.blocks) |*bl| {
-        try readF32Slice(file, bl.attn.w);
-        try readF32Slice(file, bl.mlp.w);
+        readSlice(bytes, &pos, bl.attn.w);
+        readSlice(bytes, &pos, bl.mlp.w);
     }
-    try readF32Slice(file, model.head.w);
-    const t_embed = try r.readInt(u64, .little);
+    readSlice(bytes, &pos, model.head.w);
+    const t_embed = readU64(bytes, &pos);
     model.opt_embed.t = t_embed;
-    try readF32Slice(file, model.opt_embed.m);
-    try readF32Slice(file, model.opt_embed.v);
-    for (model.opt_blocks_attn) |*o| try readF32Slice(file, o.buf);
-    for (model.opt_blocks_mlp) |*o| try readF32Slice(file, o.buf);
-    const t_head = try r.readInt(u64, .little);
+    readSlice(bytes, &pos, model.opt_embed.m);
+    readSlice(bytes, &pos, model.opt_embed.v);
+    for (model.opt_blocks_attn) |*o| readSlice(bytes, &pos, o.buf);
+    for (model.opt_blocks_mlp) |*o| readSlice(bytes, &pos, o.buf);
+    const t_head = readU64(bytes, &pos);
     model.opt_head.t = t_head;
-    try readF32Slice(file, model.opt_head.m);
-    try readF32Slice(file, model.opt_head.v);
+    readSlice(bytes, &pos, model.opt_head.m);
+    readSlice(bytes, &pos, model.opt_head.v);
 }
 
 test "Model checkpoint save/load roundtrip" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelstateckpt";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -593,8 +626,8 @@ test "Model checkpoint save/load roundtrip" {
 test "Model checkpoint deterministic resume" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelresume";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     const ids = [_]u32{ 1, 2, 3 };
@@ -628,8 +661,8 @@ test "Model checkpoint deterministic resume" {
 test "runMultimodalTrainingLoop saves checkpoint" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/mmtrainckpt";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -648,8 +681,8 @@ test "runMultimodalTrainingLoop saves checkpoint" {
 test "runMultimodalTier finite" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/mmtier";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -669,8 +702,11 @@ test "runMultimodalTier finite" {
 test "image classification training finite" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/imgclasstrain";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    std.Io.Dir.cwd().deleteTree(io, base) catch {};
+    try std.Io.Dir.cwd().createDirPath(io, base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -706,8 +742,8 @@ test "image classification training finite" {
 test "image classification training accuracy" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/imgclassacc";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
     var m = try model_mod.Model.init(allocator, mcfg);
@@ -751,8 +787,8 @@ test "wsdLr warmup" {
 test "Model training resume integration" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/modelresumeint";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     const cfg = @import("../config/config.zig");
     const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
     const ids = [_]u32{ 1, 2, 3 };
@@ -778,8 +814,8 @@ test "Model training resume integration" {
 test "runTrainingLoop saves checkpoint" {
     const allocator = std.testing.allocator;
     const base = "/tmp/scratchpad/trainckpt";
-    std.fs.cwd().deleteTree(base) catch {};
-    try std.fs.cwd().makePath(base);
+    ioDeleteTree(base);
+    try ioMakePath(base);
     var model = try TinyModel.init(allocator, 4, 3, 0.1);
     defer model.deinit();
     const ids = [_]u32{ 0, 1, 2, 3 };
