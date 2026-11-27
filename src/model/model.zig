@@ -21,19 +21,46 @@ pub const Model = struct {
     allocator: std.mem.Allocator,
 
     const Block = struct {
+        is_gdn: bool = false,
         attn: nn.Linear,
         mlp: nn.Linear,
         norm1: nn.RMSNorm,
         norm2: nn.RMSNorm,
+        // GDN projections (used when is_gdn)
+        wq: []f32,
+        wk: []f32,
+        wv: []f32,
+        wa: []f32,
+        wb: []f32,
+        gdn: nn.gdn.GDN,
         engram: ?nn.engram.Engram = null,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, d: usize) !Block {
+        pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool) !Block {
+            const wq = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
+            const wk = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
+            const wv = if (is_gdn) try allocator.alloc(f32, d * d) else &.{};
+            const wa = if (is_gdn) try allocator.alloc(f32, d) else &.{};
+            const wb = if (is_gdn) try allocator.alloc(f32, d) else &.{};
+            if (is_gdn) {
+                for (wq, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
+                for (wk, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
+                for (wv, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
+                for (wa) |*x| x.* = 0.0;
+                for (wb) |*x| x.* = 0.0;
+            }
             return .{
+                .is_gdn = is_gdn,
                 .attn = try nn.Linear.init(allocator, d, d),
                 .mlp = try nn.Linear.init(allocator, d, d * 2),
                 .norm1 = .{},
                 .norm2 = .{},
+                .wq = wq,
+                .wk = wk,
+                .wv = wv,
+                .wa = wa,
+                .wb = wb,
+                .gdn = .{ .d = d },
                 .engram = null,
                 .allocator = allocator,
             };
@@ -42,12 +69,16 @@ pub const Model = struct {
         pub fn deinit(self: *Block) void {
             self.attn.deinit();
             self.mlp.deinit();
+            if (self.wq.len > 0) self.allocator.free(self.wq);
+            if (self.wk.len > 0) self.allocator.free(self.wk);
+            if (self.wv.len > 0) self.allocator.free(self.wv);
+            if (self.wa.len > 0) self.allocator.free(self.wa);
+            if (self.wb.len > 0) self.allocator.free(self.wb);
             if (self.engram) |*e| e.deinit();
         }
 
         pub fn forward(self: *const Block, out: []f32, x: []const f32, tokens: []const u32, batch: usize, d: usize) void {
             std.debug.assert(x.len == batch * d and out.len == batch * d);
-            // Optional Engram contribution added to the residual stream.
             const xcur = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(xcur);
             @memcpy(xcur, x);
@@ -58,11 +89,68 @@ pub const Model = struct {
                 eng.forward(contrib, x, tokens, batch);
                 for (xcur, contrib) |*v, c| v.* += c;
             }
+
             const tmp = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(tmp);
             self.norm1.forward(tmp, xcur);
-            self.attn.forward(out, tmp, batch);
-            for (out, xcur) |*o, v| o.* += v;
+
+            if (self.is_gdn) {
+                // projections
+                const Q = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Vv);
+                const alpha = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(alpha);
+                const beta = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(beta);
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    const xrow = tmp[b * d .. (b + 1) * d];
+                    // Q
+                    var j: usize = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wq[j * d + i];
+                        Q[b * d + j] = acc;
+                    }
+                    // K
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wk[j * d + i];
+                        K[b * d + j] = acc;
+                    }
+                    // V
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wv[j * d + i];
+                        Vv[b * d + j] = acc;
+                    }
+                    // alpha, beta (sigmoid of dot product with wa/wb)
+                    var aacc: f32 = 0;
+                    var bacc: f32 = 0;
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        aacc += xrow[i] * self.wa[i];
+                        bacc += xrow[i] * self.wb[i];
+                    }
+                    alpha[b] = 1.0 / (1.0 + @exp(-aacc));
+                    beta[b] = 1.0 / (1.0 + @exp(-bacc));
+                }
+                self.gdn.forward(out, Q, K, Vv, alpha, beta, batch);
+                for (out, xcur) |*o, v| o.* += v;
+            } else {
+                self.attn.forward(out, tmp, batch);
+                for (out, xcur) |*o, v| o.* += v;
+            }
+
             const tmp2 = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(tmp2);
             self.norm2.forward(tmp, out);
@@ -76,37 +164,85 @@ pub const Model = struct {
 
         pub fn backward(self: *const Block, dX: []f32, dW_attn: []f32, dW_mlp: []f32, x: []const f32, tokens: []const u32, dOut: []const f32, batch: usize, d: usize) void {
             std.debug.assert(dX.len == batch * d and dOut.len == batch * d);
-            std.debug.assert(dW_attn.len == d * d);
             std.debug.assert(dW_mlp.len == (d * 2) * d);
             const cpu = @import("../cpu/cpu.zig");
             // recompute intermediates
             const norm1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(norm1);
             self.norm1.forward(norm1, x);
-            const attn_out = self.allocator.alloc(f32, batch * d) catch return;
-            defer self.allocator.free(attn_out);
-            self.attn.forward(attn_out, norm1, batch);
-            // residual1 = x + attn_out
             const r1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(r1);
-            for (r1, x, attn_out) |*o, xv, av| o.* = xv + av;
             const norm2 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(norm2);
-            self.norm2.forward(norm2, r1);
             const mlp_out = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(mlp_out);
+
+            // Attention path intermediates (only if not GDN).
+            const attn_out = if (!self.is_gdn) self.allocator.alloc(f32, batch * d) catch return else null;
+            defer if (attn_out) |a| self.allocator.free(a);
+
+            if (!self.is_gdn) {
+                self.attn.forward(attn_out.?, norm1, batch);
+                for (r1, x, attn_out.?) |*o, xv, av| o.* = xv + av;
+            } else {
+                // GDN forward to recompute r1
+                const Q = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Vv);
+                const alpha = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(alpha);
+                const beta = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(beta);
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    const xrow = norm1[b * d .. (b + 1) * d];
+                    var j: usize = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wq[j * d + i];
+                        Q[b * d + j] = acc;
+                    }
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wk[j * d + i];
+                        K[b * d + j] = acc;
+                    }
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wv[j * d + i];
+                        Vv[b * d + j] = acc;
+                    }
+                    var aacc: f32 = 0;
+                    var bacc: f32 = 0;
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        aacc += xrow[i] * self.wa[i];
+                        bacc += xrow[i] * self.wb[i];
+                    }
+                    alpha[b] = 1.0 / (1.0 + @exp(-aacc));
+                    beta[b] = 1.0 / (1.0 + @exp(-bacc));
+                }
+                self.gdn.forward(r1, Q, K, Vv, alpha, beta, batch);
+                for (r1, x) |*o, xv| o.* += xv;
+            }
+            self.norm2.forward(norm2, r1);
             self.mlp.forward(mlp_out, norm2, batch);
 
             // dOut -> dR1 (residual) + dMlp
-            // dMlpOutput (first d) = dOut; rest 0
             const dMlp = self.allocator.alloc(f32, batch * (d * 2)) catch return;
             defer self.allocator.free(dMlp);
             @memset(dMlp, 0);
             for (0..batch) |b| {
                 for (0..d) |i| dMlp[b * (d * 2) + i] = dOut[b * d + i];
             }
-            // dNorm2 = dMlp @ W_mlp^T (first d rows) -> [batch, d]
-            // dW_mlp += norm2^T @ dMlp (full 2d x d)
             const dNorm2 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dNorm2);
             @memset(dNorm2, 0);
@@ -116,12 +252,10 @@ pub const Model = struct {
                     for (0..(d * 2)) |j| acc += dMlp[b * (d * 2) + j] * self.mlp.w[j * d + i];
                     dNorm2[b * d + i] = acc;
                 }
-                // dW_mlp
                 for (0..(d * 2)) |j| for (0..d) |i| {
                     dW_mlp[j * d + i] += norm2[b * d + i] * dMlp[b * (d * 2) + j];
                 };
             }
-            // backward through norm2: dR1_mlp = backwardRMSNorm(r1, dNorm2)
             const dR1_mlp = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dR1_mlp);
             @memset(dR1_mlp, 0);
@@ -131,36 +265,166 @@ pub const Model = struct {
                 const slice_dx = dR1_mlp[b * d .. (b + 1) * d];
                 autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
             }
-            // dR1 = dOut (residual) + dR1_mlp
             const dR1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dR1);
             for (dR1, dOut, dR1_mlp) |*o, a, bb| o.* = a + bb;
-            // dAttnOut = dR1 (from attn residual)
-            // dNorm1 = dR1 @ W_attn^T
+
+            // Mixer backward
             const dNorm1 = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dNorm1);
             @memset(dNorm1, 0);
-            for (0..batch) |b| {
-                for (0..d) |i| {
-                    var acc: f32 = 0;
-                    for (0..d) |j| acc += dR1[b * d + j] * self.attn.w[j * d + i];
-                    dNorm1[b * d + i] = acc;
-                }
-                for (0..d) |j| for (0..d) |i| {
-                    dW_attn[j * d + i] += norm1[b * d + i] * dR1[b * d + j];
-                };
-            }
-            // backward through norm1: dX_attn = backwardRMSNorm(x, dNorm1)
             const dX_attn = self.allocator.alloc(f32, batch * d) catch return;
             defer self.allocator.free(dX_attn);
             @memset(dX_attn, 0);
-            for (0..batch) |b| {
-                const slice_x = x[b * d .. (b + 1) * d];
-                const slice_do = dNorm1[b * d .. (b + 1) * d];
-                const slice_dx = dX_attn[b * d .. (b + 1) * d];
-                autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+
+            if (!self.is_gdn) {
+                for (0..batch) |b| {
+                    for (0..d) |i| {
+                        var acc: f32 = 0;
+                        for (0..d) |j| acc += dR1[b * d + j] * self.attn.w[j * d + i];
+                        dNorm1[b * d + i] = acc;
+                    }
+                    for (0..d) |j| for (0..d) |i| {
+                        dW_attn[j * d + i] += norm1[b * d + i] * dR1[b * d + j];
+                    };
+                }
+                for (0..batch) |b| {
+                    const slice_x = x[b * d .. (b + 1) * d];
+                    const slice_do = dNorm1[b * d .. (b + 1) * d];
+                    const slice_dx = dX_attn[b * d .. (b + 1) * d];
+                    autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+                }
+            } else {
+                // Recompute Q,K,V,alpha,beta
+                const Q = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Vv);
+                const alpha = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(alpha);
+                const beta = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(beta);
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    const xrow = norm1[b * d .. (b + 1) * d];
+                    var j: usize = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wq[j * d + i];
+                        Q[b * d + j] = acc;
+                    }
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wk[j * d + i];
+                        K[b * d + j] = acc;
+                    }
+                    j = 0;
+                    while (j < d) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wv[j * d + i];
+                        Vv[b * d + j] = acc;
+                    }
+                    var aacc: f32 = 0;
+                    var bacc: f32 = 0;
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        aacc += xrow[i] * self.wa[i];
+                        bacc += xrow[i] * self.wb[i];
+                    }
+                    alpha[b] = 1.0 / (1.0 + @exp(-aacc));
+                    beta[b] = 1.0 / (1.0 + @exp(-bacc));
+                }
+                const dQ = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dQ);
+                @memset(dQ, 0);
+                const dK = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dK);
+                @memset(dK, 0);
+                const dV = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dV);
+                @memset(dV, 0);
+                const dA = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(dA);
+                @memset(dA, 0);
+                const dB = self.allocator.alloc(f32, batch) catch return;
+                defer self.allocator.free(dB);
+                @memset(dB, 0);
+                self.gdn.backward(dQ, dK, dV, dA, dB, Q, K, Vv, alpha, beta, dR1, batch);
+
+                // backprop projections
+                const dWq = self.allocator.alloc(f32, d * d) catch return;
+                defer self.allocator.free(dWq);
+                @memset(dWq, 0);
+                const dWk = self.allocator.alloc(f32, d * d) catch return;
+                defer self.allocator.free(dWk);
+                @memset(dWk, 0);
+                const dWv = self.allocator.alloc(f32, d * d) catch return;
+                defer self.allocator.free(dWv);
+                @memset(dWv, 0);
+                const dWa = self.allocator.alloc(f32, d) catch return;
+                defer self.allocator.free(dWa);
+                @memset(dWa, 0);
+                const dWb = self.allocator.alloc(f32, d) catch return;
+                defer self.allocator.free(dWb);
+                @memset(dWb, 0);
+                // dWq += xnorm^T dQ; dXnorm += Wq^T dQ
+                const dXnorm = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dXnorm);
+                @memset(dXnorm, 0);
+                for (0..batch) |bb| {
+                    for (0..d) |j| {
+                        for (0..d) |i| {
+                            dWq[j * d + i] += norm1[bb * d + i] * dQ[bb * d + j];
+                            dXnorm[bb * d + i] += self.wq[j * d + i] * dQ[bb * d + j];
+                        }
+                    }
+                    for (0..d) |j| {
+                        for (0..d) |i| {
+                            dWk[j * d + i] += norm1[bb * d + i] * dK[bb * d + j];
+                            dXnorm[bb * d + i] += self.wk[j * d + i] * dK[bb * d + j];
+                        }
+                    }
+                    for (0..d) |j| {
+                        for (0..d) |i| {
+                            dWv[j * d + i] += norm1[bb * d + i] * dV[bb * d + j];
+                            dXnorm[bb * d + i] += self.wv[j * d + i] * dV[bb * d + j];
+                        }
+                    }
+                }
+                // alpha/beta gradients
+                for (0..batch) |bb| {
+                    var aacc: f32 = 0;
+                    var bacc: f32 = 0;
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        aacc += norm1[bb * d + i] * self.wa[i];
+                        bacc += norm1[bb * d + i] * self.wb[i];
+                    }
+                    const sa = alpha[bb] * (1 - alpha[bb]);
+                    const sb = beta[bb] * (1 - beta[bb]);
+                    const ga = dA[bb] * sa;
+                    const gb = dB[bb] * sb;
+                    for (0..d) |i| {
+                        dWa[i] += norm1[bb * d + i] * ga;
+                        dWb[i] += norm1[bb * d + i] * gb;
+                        dXnorm[bb * d + i] += self.wa[i] * ga + self.wb[i] * gb;
+                    }
+                }
+                // backward through norm1
+                for (0..batch) |b| {
+                    const slice_x = x[b * d .. (b + 1) * d];
+                    const slice_do = dXnorm[b * d .. (b + 1) * d];
+                    const slice_dx = dX_attn[b * d .. (b + 1) * d];
+                    autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+                }
             }
-            // dX = dR1 (residual from first) + dX_attn
+
             for (dX, dR1, dX_attn) |*o, a, bb| o.* = a + bb;
             // Optional Engram backward contribution.
             if (self.engram) |*eng| {
@@ -191,7 +455,10 @@ pub const Model = struct {
         const embed = try allocator.alloc(f32, v * d);
         for (embed, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.12;
         const blocks = try allocator.alloc(Block, n_blocks);
-        for (blocks) |*bl| bl.* = try Block.init(allocator, d);
+        for (blocks, 0..) |*bl, i| {
+            const is_gdn = (i % 4 != 3);
+            bl.* = try Block.init(allocator, d, is_gdn);
+        }
         if (cfg.engram.enabled) {
             for (cfg.engram.layers) |li| {
                 if (li < n_blocks) {
@@ -449,7 +716,7 @@ pub const Model = struct {
 
     test "Block backward gradcheck" {
         const allocator = std.testing.allocator;
-        var blk = try Model.Block.init(allocator, 4);
+        var blk = try Model.Block.init(allocator, 4, false);
         defer blk.deinit();
         var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
         var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
