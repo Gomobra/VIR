@@ -610,7 +610,7 @@ pub const Model = struct {
         const coda_count: usize = if (self.blocks.len >= 3) 1 else 0;
         const core_count: usize = if (self.blocks.len > prelude_count + coda_count) self.blocks.len - prelude_count - coda_count else self.blocks.len;
 
-        var runBlock = struct {
+        const runBlock = struct {
             fn call(self2: *const Model, passes2: *std.ArrayList(Pass), cur2: *[]f32, next2: *[]f32, tokens2: []const u32, seq2: usize, d2: usize, idx: usize, add_loop: bool) void {
                 const input_copy = self2.allocator.alloc(f32, seq2 * d2) catch return;
                 @memcpy(input_copy, cur2.*);
