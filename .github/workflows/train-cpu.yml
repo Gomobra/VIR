@@ -11,7 +11,18 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+      - name: download MNIST
+        run: |
+          mkdir -p /tmp/mnist
+          cd /tmp/mnist
+          curl -fsSL http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz -o train-images-idx3-ubyte.gz
+          curl -fsSL http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz -o train-labels-idx1-ubyte.gz
+          curl -fsSL http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz -o t10k-images-idx3-ubyte.gz
+          curl -fsSL http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz -o t10k-labels-idx1-ubyte.gz
+          gunzip -f *.gz
       - name: build
         run: zig build
       - name: train
+        env:
+          MNIST_DIR: /tmp/mnist
         run: zig build run

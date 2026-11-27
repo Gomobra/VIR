@@ -5,10 +5,134 @@ const train_mod = @import("train/train.zig");
 const modality = @import("modality/modality.zig");
 const config = @import("config/config.zig");
 
+const MnistData = struct {
+    images: [][]f32,
+    labels: []u32,
+    n: usize,
+    rows: usize,
+    cols: usize,
+};
+
+fn readWholeFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const st = try file.stat();
+    const buf = try allocator.alloc(u8, st.size);
+    const n = try file.readAll(buf);
+    if (n != st.size) return error.ShortRead;
+    return buf;
+}
+
+fn loadMnist(allocator: std.mem.Allocator, dir: []const u8, image_name: []const u8, label_name: []const u8, max_n: usize) !MnistData {
+    var img_buf: [512]u8 = undefined;
+    var lbl_buf: [512]u8 = undefined;
+    const img_path = try std.fmt.bufPrint(&img_buf, "{s}/{s}", .{ dir, image_name });
+    const lbl_path = try std.fmt.bufPrint(&lbl_buf, "{s}/{s}", .{ dir, label_name });
+
+    const img_bytes = try readWholeFile(allocator, img_path);
+    defer allocator.free(img_bytes);
+    const lbl_bytes = try readWholeFile(allocator, lbl_path);
+    defer allocator.free(lbl_bytes);
+
+    if (img_bytes.len < 16) return error.BadImageHeader;
+    const magic = std.mem.readInt(u32, img_bytes[0..4], .big);
+    if (magic != 0x00000803) return error.BadImageMagic;
+    const n_images = std.mem.readInt(u32, img_bytes[4..8], .big);
+    const rows = std.mem.readInt(u32, img_bytes[8..12], .big);
+    const cols = std.mem.readInt(u32, img_bytes[12..16], .big);
+    if (lbl_bytes.len < 8) return error.BadLabelHeader;
+    const lbl_magic = std.mem.readInt(u32, lbl_bytes[0..4], .big);
+    if (lbl_magic != 0x00000801) return error.BadLabelMagic;
+    const n_labels = std.mem.readInt(u32, lbl_bytes[4..8], .big);
+
+    const n = @min(max_n, @min(n_images, n_labels));
+    const pixels = rows * cols;
+    const images = try allocator.alloc([]f32, n);
+    const labels = try allocator.alloc(u32, n);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const img = try allocator.alloc(f32, pixels);
+        var j: usize = 0;
+        while (j < pixels) : (j += 1) {
+            const off = 16 + i * pixels + j;
+            img[j] = @as(f32, @floatFromInt(img_bytes[off])) / 255.0;
+        }
+        images[i] = img;
+        labels[i] = lbl_bytes[8 + i];
+    }
+    return .{ .images = images, .labels = labels, .n = n, .rows = rows, .cols = cols };
+}
+
 pub fn main() void {
     std.debug.print("vir {s}\n", .{root.version});
     const allocator = std.heap.page_allocator;
 
+    const mnist_dir = std.posix.getenv("MNIST_DIR");
+    if (mnist_dir) |dir| {
+        std.debug.print("loading MNIST from {s}\n", .{dir});
+        var train = loadMnist(allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
+            std.debug.print("MNIST load failed: {s}\n", .{@errorName(err)});
+            return;
+        };
+        var testdata = loadMnist(allocator, dir, "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 100) catch |err| {
+            std.debug.print("MNIST test load failed: {s}\n", .{@errorName(err)});
+            return;
+        };
+
+        const layout = modality.VocabLayout{
+            .text_offset = 0,
+            .text_size = 10,
+            .image_offset = 10,
+            .image_size = 16,
+            .audio_offset = 26,
+            .audio_size = 1,
+            .video_offset = 27,
+            .video_size = 1,
+            .special_offset = 28,
+            .special_size = 4,
+        };
+
+        var ivq = modality.image_vq.ImageVQ.init(allocator, 28, 28, 4, 4, 16) catch {
+            std.debug.print("ivq init failed\n", .{});
+            return;
+        };
+        defer ivq.deinit();
+
+        const mcfg = config.ModelConfig{ .d_model = 32, .n_groups = 1, .vocab_size = 32, .seq_len = 64 };
+        var model = model_mod.Model.init(allocator, mcfg) catch {
+            std.debug.print("model init failed\n", .{});
+            return;
+        };
+        defer model.deinit();
+
+        const base = "/tmp/scratchpad/mnisttrain";
+        std.fs.cwd().deleteTree(base) catch {};
+        std.fs.cwd().makePath(base) catch {};
+
+        const train_images = train.images[0..train.n];
+        const train_labels = train.labels[0..train.n];
+        const tcfg = train_mod.TrainConfig{ .max_steps = 200, .warmup_steps = 10 };
+        const steps = train_mod.runImageClassificationTraining(&model, train_images, train_labels, &ivq, layout, tcfg, base, 0) catch {
+            std.debug.print("training failed\n", .{});
+            return;
+        };
+        std.debug.print("MNIST training steps: {d}\n", .{steps});
+
+        const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        const test_images = testdata.images[0..testdata.n];
+        const test_labels = testdata.labels[0..testdata.n];
+        const acc = train_mod.evalImageClassification(&model, allocator, test_images, test_labels, &ivq, layout, &label_tokens) catch 0;
+        std.debug.print("MNIST test accuracy after CPU training: {d:.4}\n", .{acc});
+
+        var i: usize = 0;
+        while (i < 5 and i < testdata.n) : (i += 1) {
+            const pred = train_mod.classifyImage(&model, allocator, testdata.images[i], &ivq, layout, &label_tokens) catch 0;
+            std.debug.print("test image {d}: predicted {d}, expected {d}\n", .{ i, pred, testdata.labels[i] });
+        }
+        return;
+    }
+
+    // Synthetic fallback demo.
     const mcfg = config.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 16, .seq_len = 4 };
     var model = model_mod.Model.init(allocator, mcfg) catch {
         std.debug.print("model init failed\n", .{});
