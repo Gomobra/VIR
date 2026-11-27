@@ -20,6 +20,7 @@ pub const config = @import("config/config.zig");
 pub const checkpoint = @import("checkpoint/checkpoint.zig");
 pub const gpu = @import("gpu/gpu.zig");
 pub const kernels = @import("kernels/kernels.zig");
+pub const crypto = @import("crypto/sha256.zig");
 
 test "smoke" {
     const std = @import("std");
