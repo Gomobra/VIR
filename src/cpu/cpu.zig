@@ -1158,7 +1158,8 @@ test "attentionFlashBackward parity with naive" {
     var dq2 = [_]f32{0} * *(seq * d);
     var dk2 = [_]f32{0} * *(seq * d);
     var dv2 = [_]f32{0} * *(seq * d);
-    backwardAttention(&dq1, &dk1, &dv1, &q, &k, &v, &dout, seq, d);
+    const autograd = @import("../autograd/autograd.zig");
+    autograd.backwardAttention(&dq1, &dk1, &dv1, &q, &k, &v, &dout, seq, d);
     attentionFlashBackwardF32(&dq2, &dk2, &dv2, &q, &k, &v, &dout, seq, d);
     for (dq1, dq2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
     for (dk1, dk2) |a, b| try std.testing.expect(@abs(a - b) < 1e-4);
