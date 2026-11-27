@@ -15,8 +15,8 @@ pub const Model = struct {
     head: nn.Linear, // d -> vocab (separate; could tie)
     // optimizers
     opt_embed: optim.AdamW,
-    opt_blocks_attn: []optim.AdamW,
-    opt_blocks_mlp: []optim.AdamW,
+    opt_blocks_attn: []optim.Muon,
+    opt_blocks_mlp: []optim.Muon,
     opt_head: optim.AdamW,
     allocator: std.mem.Allocator,
 
@@ -163,11 +163,11 @@ pub const Model = struct {
         const head = try nn.Linear.init(allocator, d, v);
         // optimizers
         const opt_embed = try optim.AdamW.init(allocator, v * d, 0.01);
-        const opt_blocks_attn = try allocator.alloc(optim.AdamW, n_blocks);
-        const opt_blocks_mlp = try allocator.alloc(optim.AdamW, n_blocks);
+        const opt_blocks_attn = try allocator.alloc(optim.Muon, n_blocks);
+        const opt_blocks_mlp = try allocator.alloc(optim.Muon, n_blocks);
         for (0..n_blocks) |i| {
-            opt_blocks_attn[i] = try optim.AdamW.init(allocator, d * d, 0.01);
-            opt_blocks_mlp[i] = try optim.AdamW.init(allocator, (d * 2) * d, 0.01);
+            opt_blocks_attn[i] = try optim.Muon.init(allocator, d, d, 0.01);
+            opt_blocks_mlp[i] = try optim.Muon.init(allocator, d * 2, d, 0.01);
         }
         const opt_head = try optim.AdamW.init(allocator, d * v, 0.01);
         return .{
@@ -279,8 +279,8 @@ pub const Model = struct {
         // update params
         self.opt_embed.step(self.embed, dEmbed);
         for (0..n) |i| {
-            self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i]);
-            self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i]);
+            self.opt_blocks_attn[i].step(self.blocks[i].attn.w, dBlocks_attn[i], "original");
+            self.opt_blocks_mlp[i].step(self.blocks[i].mlp.w, dBlocks_mlp[i], "original");
         }
         self.opt_head.step(self.head.w, dHead);
 
