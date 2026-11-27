@@ -510,9 +510,6 @@ pub const LRScheduler = struct {
     pub fn at(self: *const LRScheduler, step: usize) f32 {
         switch (self.kind) {
             .wsd => {
-                var cfg = TrainConfig{ .lr = self.peak, .max_steps = if (self.total == 0) 1 else self.total, .warmup_steps = if (self.warmup == 0) 1 else self.warmup, .decay_fraction = self.decay_fraction };
-                _ = cfg;
-                // reuse wsdLr with temp config
                 const tcfg = TrainConfig{ .lr = self.peak, .max_steps = if (self.total == 0) 1 else self.total, .warmup_steps = if (self.warmup == 0) 1 else self.warmup, .decay_fraction = self.decay_fraction };
                 return wsdLr(step, tcfg);
             },
@@ -526,7 +523,7 @@ pub const LRScheduler = struct {
         }
     }
 
-    pub fn step(self: *LRScheduler) f32 {
+    pub fn advance(self: *LRScheduler) f32 {
         const lr = self.current();
         self.step += 1;
         return lr;
@@ -539,9 +536,9 @@ pub const LRScheduler = struct {
 
 test "LRScheduler wsd" {
     var sched = LRScheduler.init(.wsd, 0.1, 0.0, 2, 10, 0.2);
-    const lr0 = sched.step();
+    const lr0 = sched.advance();
     try std.testing.expect(lr0 < 0.1);
-    try std.testing.expect(sched.step() <= 0.1);
+    try std.testing.expect(sched.advance() <= 0.1);
 }
 
 test "LRScheduler cosine" {
