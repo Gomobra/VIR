@@ -114,6 +114,76 @@ pub fn main(init: std.process.Init) void {
 
         const train_images = train.images[0..train.n];
         const train_labels = train.labels[0..train.n];
+
+        // Train the VQ codebook on MNIST patches (EMA).
+        var epoch: usize = 0;
+        while (epoch < 3) : (epoch += 1) {
+            // reset EMA accumulators
+            @memset(ivq.vq.ema_count, 0);
+            @memset(ivq.vq.ema_sum, 0);
+            for (train_images) |img| {
+                const n_patches = 7 * 7;
+                const xs = allocator.alloc(f32, n_patches * ivq.vq.dim) catch return;
+                defer allocator.free(xs);
+                const codes = allocator.alloc(usize, n_patches) catch return;
+                defer allocator.free(codes);
+                var pi: usize = 0;
+                var py: usize = 0;
+                while (py < 7) : (py += 1) {
+                    var px: usize = 0;
+                    while (px < 7) : (px += 1) {
+                        var i: usize = 0;
+                        var y: usize = 0;
+                        while (y < 4) : (y += 1) {
+                            var x: usize = 0;
+                            while (x < 4) : (x += 1) {
+                                const iy = py * 4 + y;
+                                const ix = px * 4 + x;
+                                xs[pi * ivq.vq.dim + i] = img[iy * 28 + ix];
+                                i += 1;
+                            }
+                        }
+                        codes[pi] = ivq.vq.quantize(xs[pi * ivq.vq.dim .. (pi + 1) * ivq.vq.dim]);
+                        pi += 1;
+                    }
+                }
+                ivq.vq.emaUpdate(xs, codes, n_patches);
+            }
+            // restart dead codes using first image patches
+            var data_buf = allocator.alloc(f32, 49 * 16) catch return;
+            defer allocator.free(data_buf);
+            var pi: usize = 0;
+            var py: usize = 0;
+            while (py < 7) : (py += 1) {
+                var px: usize = 0;
+                while (px < 7) : (px += 1) {
+                    var i: usize = 0;
+                    var y: usize = 0;
+                    while (y < 4) : (y += 1) {
+                        var x: usize = 0;
+                        while (x < 4) : (x += 1) {
+                            const iy = py * 4 + y;
+                            const ix = px * 4 + x;
+                            data_buf[pi * 16 + i] = train_images[0][iy * 28 + ix];
+                            i += 1;
+                        }
+                    }
+                    pi += 1;
+                }
+            }
+            ivq.vq.restartDead(data_buf, 49);
+            std.debug.print("VQ epoch {d} done\n", .{epoch});
+        }
+
+        // Debug: print VQ codes for first image.
+        var dbg_codes = allocator.alloc(usize, 49) catch return;
+        defer allocator.free(dbg_codes);
+        const dbg_np = ivq.encode(train.images[0], dbg_codes);
+        std.debug.print("first image VQ codes: ", .{});
+        var di: usize = 0;
+        while (di < dbg_np) : (di += 1) std.debug.print("{d} ", .{dbg_codes[di]});
+        std.debug.print("\n", .{});
+
         const samples = train_mod.buildImageClassificationSamples(allocator, train_images, train_labels, &ivq, layout) catch {
             std.debug.print("sample build failed\n", .{});
             return;
