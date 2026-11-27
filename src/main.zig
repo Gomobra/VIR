@@ -134,7 +134,7 @@ pub fn main(init: std.process.Init) void {
                 var ci: usize = 0;
                 while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
                 // softmax
-                var logits = [_]f32{0} * *10;
+                var logits = [_]f32{0} * * 10;
                 var j: usize = 0;
                 while (j < 10) : (j += 1) {
                     var acc: f32 = bias[j];
@@ -157,7 +157,7 @@ pub fn main(init: std.process.Init) void {
                 while (j < 10) : (j += 1) logits[j] /= sum;
                 const y = train_labels[i];
                 // gradient: dlogit = prob - onehot
-                var grads = [_]f32{0} * *10;
+                var grads = [_]f32{0} * * 10;
                 j = 0;
                 while (j < 10) : (j += 1) grads[j] = logits[j];
                 grads[y] -= 1;
@@ -182,7 +182,7 @@ pub fn main(init: std.process.Init) void {
             var hist: [16]f32 = @splat(0);
             var ci: usize = 0;
             while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
-            var logits = [_]f32{0} * *10;
+            var logits = [_]f32{0} * * 10;
             var j: usize = 0;
             while (j < 10) : (j += 1) {
                 var acc: f32 = bias[j];
