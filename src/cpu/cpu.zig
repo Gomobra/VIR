@@ -720,3 +720,164 @@ test "convTranspose1d backward finite" {
     for (dX) |v| try std.testing.expect(std.math.isFinite(v));
     for (dW) |v| try std.testing.expect(std.math.isFinite(v));
 }
+
+// 3D convolution (stride 1, 'same' padding): x [Cin,T,H,W], w [Cout,Cin,Kt,Kh,Kw], out [Cout,T,H,W].
+pub fn conv3dF32(out: []f32, x: []const f32, w: []const f32, cin: usize, cout: usize, kt: usize, kh: usize, kw: usize, t: usize, h: usize, wd: usize) void {
+    std.debug.assert(out.len == cout * t * h * wd);
+    std.debug.assert(x.len == cin * t * h * wd);
+    std.debug.assert(w.len == cout * cin * kt * kh * kw);
+    const pad_t = (kt - 1) / 2;
+    const pad_h = (kh - 1) / 2;
+    const pad_w = (kw - 1) / 2;
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var tt: usize = 0;
+        while (tt < t) : (tt += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xidx: usize = 0;
+                while (xidx < wd) : (xidx += 1) {
+                    var acc: f32 = 0;
+                    var ci: usize = 0;
+                    while (ci < cin) : (ci += 1) {
+                        var kti: usize = 0;
+                        while (kti < kt) : (kti += 1) {
+                            var khi: usize = 0;
+                            while (khi < kh) : (khi += 1) {
+                                var kwi: usize = 0;
+                                while (kwi < kw) : (kwi += 1) {
+                                    const it = @as(isize, @intCast(tt)) + @as(isize, @intCast(kti)) - @as(isize, @intCast(pad_t));
+                                    const iy = @as(isize, @intCast(y)) + @as(isize, @intCast(khi)) - @as(isize, @intCast(pad_h));
+                                    const ix = @as(isize, @intCast(xidx)) + @as(isize, @intCast(kwi)) - @as(isize, @intCast(pad_w));
+                                    if (it >= 0 and it < @as(isize, @intCast(t)) and iy >= 0 and iy < @as(isize, @intCast(h)) and ix >= 0 and ix < @as(isize, @intCast(wd))) {
+                                        const xi = ci * t * h * wd + @as(usize, @intCast(it)) * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
+                                        const wi = (co * cin + ci) * kt * kh * kw + kti * kh * kw + khi * kw + kwi;
+                                        acc += x[xi] * w[wi];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    out[co * t * h * wd + tt * h * wd + y * wd + xidx] = acc;
+                }
+            }
+        }
+    }
+}
+
+pub fn conv3dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, dOut: []const f32, cin: usize, cout: usize, kt: usize, kh: usize, kw: usize, t: usize, h: usize, wd: usize) void {
+    std.debug.assert(dX.len == cin * t * h * wd);
+    std.debug.assert(dW.len == cout * cin * kt * kh * kw);
+    std.debug.assert(dOut.len == cout * t * h * wd);
+    const pad_t = (kt - 1) / 2;
+    const pad_h = (kh - 1) / 2;
+    const pad_w = (kw - 1) / 2;
+    // dX
+    var ci: usize = 0;
+    while (ci < cin) : (ci += 1) {
+        var tt: usize = 0;
+        while (tt < t) : (tt += 1) {
+            var y: usize = 0;
+            while (y < h) : (y += 1) {
+                var xidx: usize = 0;
+                while (xidx < wd) : (xidx += 1) {
+                    var acc: f32 = 0;
+                    var co: usize = 0;
+                    while (co < cout) : (co += 1) {
+                        var kti: usize = 0;
+                        while (kti < kt) : (kti += 1) {
+                            var khi: usize = 0;
+                            while (khi < kh) : (khi += 1) {
+                                var kwi: usize = 0;
+                                while (kwi < kw) : (kwi += 1) {
+                                    const ot = @as(isize, @intCast(tt)) - @as(isize, @intCast(kti)) + @as(isize, @intCast(pad_t));
+                                    const oy = @as(isize, @intCast(y)) - @as(isize, @intCast(khi)) + @as(isize, @intCast(pad_h));
+                                    const ox = @as(isize, @intCast(xidx)) - @as(isize, @intCast(kwi)) + @as(isize, @intCast(pad_w));
+                                    if (ot >= 0 and ot < @as(isize, @intCast(t)) and oy >= 0 and oy < @as(isize, @intCast(h)) and ox >= 0 and ox < @as(isize, @intCast(wd))) {
+                                        const wi = (co * cin + ci) * kt * kh * kw + kti * kh * kw + khi * kw + kwi;
+                                        acc += dOut[co * t * h * wd + @as(usize, @intCast(ot)) * h * wd + @as(usize, @intCast(oy)) * wd + @as(usize, @intCast(ox))] * w[wi];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    dX[ci * t * h * wd + tt * h * wd + y * wd + xidx] += acc;
+                }
+            }
+        }
+    }
+    // dW
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci: usize = 0;
+        while (ci < cin) : (ci += 1) {
+            var kti: usize = 0;
+            while (kti < kt) : (kti += 1) {
+                var khi: usize = 0;
+                while (khi < kh) : (khi += 1) {
+                    var kwi: usize = 0;
+                    while (kwi < kw) : (kwi += 1) {
+                        var acc: f32 = 0;
+                        var tt: usize = 0;
+                        while (tt < t) : (tt += 1) {
+                            var y: usize = 0;
+                            while (y < h) : (y += 1) {
+                                var xidx: usize = 0;
+                                while (xidx < wd) : (xidx += 1) {
+                                    const it = @as(isize, @intCast(tt)) + @as(isize, @intCast(kti)) - @as(isize, @intCast(pad_t));
+                                    const iy = @as(isize, @intCast(y)) + @as(isize, @intCast(khi)) - @as(isize, @intCast(pad_h));
+                                    const ix = @as(isize, @intCast(xidx)) + @as(isize, @intCast(kwi)) - @as(isize, @intCast(pad_w));
+                                    if (it >= 0 and it < @as(isize, @intCast(t)) and iy >= 0 and iy < @as(isize, @intCast(h)) and ix >= 0 and ix < @as(isize, @intCast(wd))) {
+                                        const xi = ci * t * h * wd + @as(usize, @intCast(it)) * h * wd + @as(usize, @intCast(iy)) * wd + @as(usize, @intCast(ix));
+                                        acc += x[xi] * dOut[co * t * h * wd + tt * h * wd + y * wd + xidx];
+                                    }
+                                }
+                            }
+                        }
+                        dW[(co * cin + ci) * kt * kh * kw + kti * kh * kw + khi * kw + kwi] += acc;
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "conv3d finite" {
+    const cin = 1;
+    const cout = 1;
+    const kt = 3;
+    const kh = 3;
+    const kw = 3;
+    const t = 2;
+    const h = 3;
+    const wd = 3;
+    var x = [_]f32{0} * *(cin * t * h * wd);
+    for (&x) |*v| v.* = 1;
+    var w = [_]f32{0} * *(cout * cin * kt * kh * kw);
+    for (&w) |*v| v.* = 0.1;
+    var out = [_]f32{0} * *(cout * t * h * wd);
+    conv3dF32(&out, &x, &w, cin, cout, kt, kh, kw, t, h, wd);
+    for (out) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
+test "conv3d backward finite" {
+    const cin = 1;
+    const cout = 1;
+    const kt = 3;
+    const kh = 3;
+    const kw = 3;
+    const t = 2;
+    const h = 3;
+    const wd = 3;
+    var x = [_]f32{0} * *(cin * t * h * wd);
+    for (&x) |*v| v.* = 1;
+    var w = [_]f32{0} * *(cout * cin * kt * kh * kw);
+    for (&w) |*v| v.* = 0.1;
+    var dOut = [_]f32{0} * *(cout * t * h * wd);
+    for (&dOut) |*v| v.* = 1;
+    var dX = [_]f32{0} * *(cin * t * h * wd);
+    var dW = [_]f32{0} * *(cout * cin * kt * kh * kw);
+    conv3dBackwardF32(&dX, &dW, &x, &w, &dOut, cin, cout, kt, kh, kw, t, h, wd);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+}
