@@ -98,8 +98,8 @@ pub fn main(init: std.process.Init) void {
         defer model.deinit();
 
         const base = "/tmp/scratchpad/mnisttrain";
-        std.fs.cwd().deleteTree(base) catch {};
-        std.fs.cwd().makePath(base) catch {};
+        std.Io.Dir.cwd().deleteTree(io, base) catch {};
+        std.Io.Dir.cwd().createDirPath(io, base) catch {};
 
         const train_images = train.images[0..train.n];
         const train_labels = train.labels[0..train.n];
