@@ -208,7 +208,7 @@ pub fn main(init: std.process.Init) void {
         // Debug: print last-patch VQ code per digit for first 10 training images.
         var k: usize = 0;
         while (k < 10 and k < train.n) : (k += 1) {
-            var codes = allocator.alloc(usize, 49) catch return;
+            const codes = allocator.alloc(usize, 49) catch return;
             defer allocator.free(codes);
             _ = ivq.encode(train.images[k], codes);
             std.debug.print("train image {d} label {d} last_code {d}\n", .{ k, train.labels[k], codes[48] });
