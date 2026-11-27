@@ -30,6 +30,31 @@ pub fn relu2F32(dst: []f32, a: []const f32) void {
     }
 }
 
+pub fn sigmoidF32(dst: []f32, a: []const f32) void {
+    std.debug.assert(dst.len == a.len);
+    for (dst, a) |*d, x| d.* = 1.0 / (1.0 + @exp(-x));
+}
+
+pub fn siluF32(dst: []f32, a: []const f32) void {
+    std.debug.assert(dst.len == a.len);
+    for (dst, a) |*d, x| d.* = x / (1.0 + @exp(-x));
+}
+
+pub fn softplusF32(dst: []f32, a: []const f32) void {
+    std.debug.assert(dst.len == a.len);
+    for (dst, a) |*d, x| d.* = @log(1.0 + @exp(x));
+}
+
+pub fn expF32(dst: []f32, a: []const f32) void {
+    std.debug.assert(dst.len == a.len);
+    for (dst, a) |*d, x| d.* = @exp(x);
+}
+
+pub fn logF32(dst: []f32, a: []const f32) void {
+    std.debug.assert(dst.len == a.len);
+    for (dst, a) |*d, x| d.* = @log(x);
+}
+
 pub fn matmulNaifF32(C: []f32, A: []const f32, B: []const f32, m: usize, n: usize, k: usize) void {
     std.debug.assert(C.len == m * n);
     std.debug.assert(A.len == m * k);
@@ -352,4 +377,19 @@ test "crossEntropyF32" {
     var targets = [_]u32{0};
     const ce = crossEntropyF32(&logits, &targets, 1, 2);
     try std.testing.expect(@abs(ce - 0.6931) < 1e-3);
+}
+
+test "elementwise new ops finite" {
+    var a = [_]f32{ -1, 0, 1, 2 };
+    var d = [_]f32{ 0, 0, 0, 0 };
+    sigmoidF32(&d, &a);
+    for (d) |v| try std.testing.expect(v >= 0 and v <= 1);
+    siluF32(&d, &a);
+    for (d) |v| try std.testing.expect(std.math.isFinite(v));
+    softplusF32(&d, &a);
+    for (d) |v| try std.testing.expect(std.math.isFinite(v));
+    var p = [_]f32{ 1, 2, 3, 4 };
+    expF32(&d, &p);
+    logF32(&d, &d);
+    for (d, p) |v, x| try std.testing.expectApproxEqAbs(x, v, 1e-5);
 }
