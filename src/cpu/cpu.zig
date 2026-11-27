@@ -379,6 +379,109 @@ test "crossEntropyF32" {
     try std.testing.expect(@abs(ce - 0.6931) < 1e-3);
 }
 
+// Causal 1D convolution: x [Cin, L], w [Cout, Cin, K], out [Cout, L].
+// Padding: K-1 zeros on the left (causal).
+pub fn conv1dF32(out: []f32, x: []const f32, w: []const f32, cin: usize, cout: usize, kernel: usize, len: usize) void {
+    std.debug.assert(out.len == cout * len);
+    std.debug.assert(x.len == cin * len);
+    std.debug.assert(w.len == cout * cin * kernel);
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var t: usize = 0;
+        while (t < len) : (t += 1) {
+            var acc: f32 = 0;
+            var ci: usize = 0;
+            while (ci < cin) : (ci += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const ti = @as(isize, @intCast(t)) - @as(isize, @intCast(kernel - 1)) + @as(isize, @intCast(k));
+                    if (ti >= 0) {
+                        const xidx = ci * len + @as(usize, @intCast(ti));
+                        acc += x[xidx] * w[(co * cin + ci) * kernel + k];
+                    }
+                }
+            }
+            out[co * len + t] = acc;
+        }
+    }
+}
+
+// Backward for causal conv1d. Accumulates dX and dW.
+pub fn conv1dBackwardF32(dX: []f32, dW: []f32, x: []const f32, w: []const f32, dOut: []const f32, cin: usize, cout: usize, kernel: usize, len: usize) void {
+    std.debug.assert(dX.len == cin * len);
+    std.debug.assert(dW.len == cout * cin * kernel);
+    std.debug.assert(dOut.len == cout * len);
+    // dX
+    var ci: usize = 0;
+    while (ci < cin) : (ci += 1) {
+        var t: usize = 0;
+        while (t < len) : (t += 1) {
+            var acc: f32 = 0;
+            var co: usize = 0;
+            while (co < cout) : (co += 1) {
+                var k: usize = 0;
+                while (k < kernel) : (k += 1) {
+                    const to = @as(isize, @intCast(t)) + @as(isize, @intCast(kernel - 1)) - @as(isize, @intCast(k));
+                    if (to >= 0 and to < @as(isize, @intCast(len))) {
+                        acc += dOut[co * len + @as(usize, @intCast(to))] * w[(co * cin + ci) * kernel + k];
+                    }
+                }
+            }
+            dX[ci * len + t] += acc;
+        }
+    }
+    // dW
+    var co: usize = 0;
+    while (co < cout) : (co += 1) {
+        var ci2: usize = 0;
+        while (ci2 < cin) : (ci2 += 1) {
+            var k: usize = 0;
+            while (k < kernel) : (k += 1) {
+                var acc: f32 = 0;
+                var t: usize = 0;
+                while (t < len) : (t += 1) {
+                    const ti = @as(isize, @intCast(t)) - @as(isize, @intCast(kernel - 1)) + @as(isize, @intCast(k));
+                    if (ti >= 0) {
+                        acc += x[ci2 * len + @as(usize, @intCast(ti))] * dOut[co * len + t];
+                    }
+                }
+                dW[(co * cin + ci2) * kernel + k] += acc;
+            }
+        }
+    }
+}
+
+test "conv1d causal finite" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 2;
+    const len = 4;
+    var x = [_]f32{ 1, 2, 3, 4 };
+    var w = [_]f32{ 1, -1 };
+    var out = [_]f32{ 0, 0, 0, 0 };
+    conv1dF32(&out, &x, &w, cin, cout, kernel, len);
+    // y[t] = x[t] - x[t-1] (causal), y[0]=x[0]
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), out[3], 1e-6);
+}
+
+test "conv1d backward finite" {
+    const cin = 1;
+    const cout = 1;
+    const kernel = 2;
+    const len = 4;
+    var x = [_]f32{ 1, 2, 3, 4 };
+    var w = [_]f32{ 1, -1 };
+    var dOut = [_]f32{ 1, 1, 1, 1 };
+    var dX = [_]f32{ 0, 0, 0, 0 };
+    var dW = [_]f32{ 0, 0 };
+    conv1dBackwardF32(&dX, &dW, &x, &w, &dOut, cin, cout, kernel, len);
+    for (dX) |v| try std.testing.expect(std.math.isFinite(v));
+    for (dW) |v| try std.testing.expect(std.math.isFinite(v));
+}
+
 test "elementwise new ops finite" {
     var a = [_]f32{ -1, 0, 1, 2 };
     var d = [_]f32{ 0, 0, 0, 0 };
