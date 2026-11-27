@@ -66,7 +66,7 @@ pub fn main(init: std.process.Init) void {
             std.debug.print("MNIST load failed: {s}\n", .{@errorName(err)});
             return;
         };
-        var testdata = loadMnist(io, allocator, dir, "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 100) catch |err| {
+        const testdata = loadMnist(io, allocator, dir, "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 100) catch |err| {
             std.debug.print("MNIST test load failed: {s}\n", .{@errorName(err)});
             return;
         };
