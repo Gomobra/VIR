@@ -123,11 +123,11 @@ pub fn main(init: std.process.Init) void {
         defer allocator.free(bias);
         @memset(w, 0);
         @memset(bias, 0);
-        var epoch: usize = 0;
-        while (epoch < 10) : (epoch += 1) {
+        var e: usize = 0;
+        while (e < 10) : (e += 1) {
             var i: usize = 0;
             while (i < train.n) : (i += 1) {
-                var codes = allocator.alloc(usize, 49) catch return;
+                const codes = allocator.alloc(usize, 49) catch return;
                 defer allocator.free(codes);
                 _ = ivq.encode(train_images[i], codes);
                 var hist = [_]f32{0} * *n_codes;
@@ -176,7 +176,7 @@ pub fn main(init: std.process.Init) void {
         var correct: usize = 0;
         var ei: usize = 0;
         while (ei < testdata.n) : (ei += 1) {
-            var codes = allocator.alloc(usize, 49) catch return;
+            const codes = allocator.alloc(usize, 49) catch return;
             defer allocator.free(codes);
             _ = ivq.encode(testdata.images[ei], codes);
             var hist = [_]f32{0} * *n_codes;
