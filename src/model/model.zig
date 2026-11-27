@@ -1005,10 +1005,10 @@ pub const Model = struct {
         cpuEmbeddingGather(hidden0, self.embed, tokens, v, d);
 
         const Pass = struct { block_idx: usize, input: []f32, add_loop: bool };
-        var passes = std.ArrayList(Pass).init(self.allocator);
+        var passes = std.ArrayList(Pass).empty;
         defer {
             for (passes.items) |p| self.allocator.free(p.input);
-            passes.deinit();
+            passes.deinit(self.allocator);
         }
 
         const prelude_count: usize = if (n >= 3) 1 else 0;
@@ -1026,7 +1026,7 @@ pub const Model = struct {
             fn call(self2: *const Model, passes2: *std.ArrayList(Pass), cur2: *[]f32, next2: *[]f32, tokens2: []const u32, seq2: usize, d2: usize, idx: usize, add_loop: bool) void {
                 const input_copy = self2.allocator.alloc(f32, seq2 * d2) catch return;
                 @memcpy(input_copy, cur2.*);
-                passes2.append(.{ .block_idx = idx, .input = input_copy, .add_loop = add_loop }) catch {
+                passes2.append(self2.allocator, .{ .block_idx = idx, .input = input_copy, .add_loop = add_loop }) catch {
                     self2.allocator.free(input_copy);
                     return;
                 };

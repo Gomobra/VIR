@@ -40,16 +40,16 @@ pub fn writeF32Tensor(allocator: std.mem.Allocator, path: []const u8, name: []co
 
     var len_bytes: [8]u8 = undefined;
     std.mem.writeInt(u64, &len_bytes, padded, .little);
-    try w.writeAll(&len_bytes);
+    try w.interface.writeAll(&len_bytes);
 
-    try w.writeAll(json_buf.items);
+    try w.interface.writeAll(json_buf.items);
     var pad: usize = padded - header_len;
-    while (pad > 0) : (pad -= 1) try w.writeAll(" ");
+    while (pad > 0) : (pad -= 1) try w.interface.writeAll(" ");
 
     for (data) |v| {
         var b: [4]u8 = undefined;
         std.mem.writeInt(u32, &b, @bitCast(v), .little);
-        try w.writeAll(&b);
+        try w.interface.writeAll(&b);
     }
     try w.flush();
 }
@@ -60,14 +60,8 @@ pub fn sha256FileHex(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
-    defer file.close(io);
-    const st = try file.stat(io);
-    const buf = try allocator.alloc(u8, st.size);
+    const buf = try std.Io.Dir.cwd().readFileAlloc(io, allocator, path, .limited(100_000_000));
     defer allocator.free(buf);
-    var rbuf: [4096]u8 = undefined;
-    var r = file.reader(io, &rbuf);
-    _ = try r.readAll(buf);
     // Use our own SHA-256 instead of std.crypto.
     const crypto = @import("../crypto/sha256.zig");
     const digest = crypto.sha256(buf);
@@ -115,7 +109,7 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
         defer f.close(io);
         var buf: [4096]u8 = undefined;
         var w = f.writer(io, &buf);
-        try w.writeAll(meta_json);
+        try w.interface.writeAll(meta_json);
         try w.flush();
         try f.sync(io);
     }
@@ -132,7 +126,7 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
         defer f.close(io);
         var buf: [4096]u8 = undefined;
         var w = f.writer(io, &buf);
-        try w.writeAll(hash);
+        try w.interface.writeAll(hash);
         try w.flush();
         try f.sync(io);
     }
@@ -152,7 +146,7 @@ pub fn atomicSave(allocator: std.mem.Allocator, base_dir: []const u8, step: u64,
         const sl = try std.fmt.bufPrint(&buf, "{d}", .{step});
         var wbuf: [4096]u8 = undefined;
         var w = f.writer(io, &wbuf);
-        try w.writeAll(sl);
+        try w.interface.writeAll(sl);
         try w.flush();
         try f.sync(io);
     }
@@ -172,14 +166,8 @@ pub fn verifyCommit(allocator: std.mem.Allocator, dir: []const u8) !void {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const commit_file = try std.Io.Dir.cwd().openFile(io, commit_path, .{});
-    defer commit_file.close(io);
-    const st = try commit_file.stat(io);
-    const buf = try allocator.alloc(u8, st.size);
+    const buf = try std.Io.Dir.cwd().readFileAlloc(io, allocator, commit_path, .limited(100_000_000));
     defer allocator.free(buf);
-    var rbuf: [4096]u8 = undefined;
-    var r = commit_file.reader(io, &rbuf);
-    _ = try r.readAll(buf);
 
     if (buf.len != hash.len) return error.InvalidCommit;
     if (!std.mem.eql(u8, buf, hash)) return error.InvalidCommit;
@@ -192,14 +180,8 @@ pub fn loadLatest(allocator: std.mem.Allocator, base_dir: []const u8) !?u64 {
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
-    const file = std.Io.Dir.cwd().openFile(io, latest_path, .{}) catch return null;
-    defer file.close(io);
-    const st = try file.stat(io);
-    const buf = try allocator.alloc(u8, st.size);
+    const buf = std.Io.Dir.cwd().readFileAlloc(io, allocator, latest_path, .limited(100_000_000)) catch return null;
     defer allocator.free(buf);
-    var rbuf: [4096]u8 = undefined;
-    var r = file.reader(io, &rbuf);
-    _ = try r.readAll(buf);
     const step = std.fmt.parseInt(u64, buf, 10) catch return null;
 
     // verify commit
@@ -248,7 +230,7 @@ test "loadLatest rejects missing commit" {
         defer f.close(io);
         var buf: [4096]u8 = undefined;
         var w = f.writer(io, &buf);
-        try w.writeAll("7");
+        try w.interface.writeAll("7");
         try w.flush();
     }
     const step = try loadLatest(allocator, base);
