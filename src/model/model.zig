@@ -381,7 +381,6 @@ pub const Model = struct {
                 defer self.allocator.free(dV);
                 @memset(dV, 0);
 
-                const autograd = @import("../autograd/autograd.zig");
                 autograd.backwardAttention(dQ, dK, dV, Q, K, Vv, dR1, batch, d);
 
                 // dNorm1 = dQ@dW^T + dK@dW^T + dV@dW^T ; dW += norm1^T@(dQ+dK+dV)
