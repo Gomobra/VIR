@@ -372,6 +372,63 @@ pub fn crossEntropyF32(logits: []const f32, targets: []const u32, rows: usize, v
     return total;
 }
 
+// Flash-style attention (online softmax), causal, single head.
+pub fn attentionFlashF32(out: []f32, q: []const f32, k: []const f32, v: []const f32, seq: usize, d: usize) void {
+    std.debug.assert(out.len == seq * d);
+    std.debug.assert(q.len == seq * d and k.len == seq * d and v.len == seq * d);
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(d)));
+    var i: usize = 0;
+    while (i < seq) : (i += 1) {
+        var m: f32 = -std.math.inf(f32);
+        var l: f32 = 0;
+        // o accumulator
+        var o = std.heap.page_allocator.alloc(f32, d) catch return;
+        defer std.heap.page_allocator.free(o);
+        @memset(o, 0);
+        var j: usize = 0;
+        while (j <= i) : (j += 1) {
+            var score: f32 = 0;
+            var t: usize = 0;
+            while (t < d) : (t += 1) score += q[i * d + t] * k[j * d + t];
+            score *= scale;
+            if (score > m) {
+                const new_m = score;
+                const scale_old = @exp(m - new_m);
+                l *= scale_old;
+                var t2: usize = 0;
+                while (t2 < d) : (t2 += 1) o[t2] *= scale_old;
+                const w = @exp(score - new_m);
+                l += w;
+                t2 = 0;
+                while (t2 < d) : (t2 += 1) o[t2] += w * v[j * d + t2];
+                m = new_m;
+            } else {
+                const w = @exp(score - m);
+                l += w;
+                var t2: usize = 0;
+                while (t2 < d) : (t2 += 1) o[t2] += w * v[j * d + t2];
+            }
+        }
+        var t: usize = 0;
+        while (t < d) : (t += 1) {
+            if (l > 0) out[i * d + t] = o[t] / l else out[i * d + t] = 0;
+        }
+    }
+}
+
+test "attentionFlash parity with naive" {
+    const seq = 4;
+    const d = 3;
+    var q = [_]f32{ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2 };
+    var k = [_]f32{ 0.2, 0.1, 0.0, 0.3, 0.2, 0.1, 0.4, 0.3, 0.2, 0.5, 0.4, 0.3 };
+    var v = [_]f32{ 1.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.5, 0.0, 1.0, 1.0, 1.0, 1.0 };
+    var a = [_]f32{0} * *(seq * d);
+    var f = [_]f32{0} * *(seq * d);
+    attentionNaiveF32(&a, &q, &k, &v, seq, d);
+    attentionFlashF32(&f, &q, &k, &v, seq, d);
+    for (a, f) |x, y| try std.testing.expect(@abs(x - y) < 1e-4);
+}
+
 test "crossEntropyF32" {
     // logits: row0 = [0,0], target 0 -> -log(0.5)=0.693
     var logits = [_]f32{ 0, 0 };
