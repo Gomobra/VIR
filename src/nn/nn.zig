@@ -87,6 +87,10 @@ pub const RMSNorm = struct {
     pub fn forward(self: *const RMSNorm, out: []f32, x: []const f32) void {
         cpu.rmsnormF32(out, x, self.eps);
     }
+    pub fn backward(self: *const RMSNorm, dX: []f32, x: []const f32, dOut: []const f32) void {
+        const autograd = @import("../autograd/autograd.zig");
+        autograd.backwardRMSNorm(dX, x, dOut, self.eps);
+    }
 };
 
 pub const RoPE = struct {
