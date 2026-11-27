@@ -190,6 +190,7 @@ pub fn main(init: std.process.Init) void {
         };
         defer train_mod.freeImageClassificationSamples(allocator, samples);
 
+        const w_before = model.embed[0];
         const max_steps: usize = 100;
         var step: usize = 0;
         while (step < max_steps) : (step += 1) {
@@ -203,6 +204,7 @@ pub fn main(init: std.process.Init) void {
             }
         }
 
+        std.debug.print("embed[0] before/after: {d:.6} -> {d:.6}\n", .{ w_before, model.embed[0] });
         std.debug.print("MNIST training steps: {d}\n", .{max_steps});
 
         const label_tokens = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
