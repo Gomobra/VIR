@@ -261,9 +261,33 @@ pub fn runModelTrainingLoopWithScheduler(model: *model_mod.Model, ids: []const u
             var meta_buf: [128]u8 = undefined;
             const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{steps});
             try checkpoint.atomicSave(model.allocator, checkpoint_dir, steps, meta);
+            try saveModelCheckpoint(model, checkpoint_dir, steps);
         }
     }
     return steps;
+}
+
+// Resume-aware Model training loop: loads latest checkpoint if present, then continues.
+pub fn runModelTrainingLoopResume(model: *model_mod.Model, ids: []const u32, targets: []const u32, scheduler: *LRScheduler, checkpoint_dir: []const u8, checkpoint_interval: usize) !usize {
+    const total = if (scheduler.total == 0) 1 else scheduler.total;
+    if (try checkpoint.loadLatest(model.allocator, checkpoint_dir)) |step| {
+        try loadModelCheckpoint(model, checkpoint_dir, step);
+        scheduler.step = step;
+    }
+    while (scheduler.step < total) {
+        const lr = scheduler.advance();
+        applyModelLr(model, lr);
+        const loss = try model.trainStep(ids, targets);
+        _ = loss;
+        const step = scheduler.step;
+        if (checkpoint_interval > 0 and step % checkpoint_interval == 0) {
+            var meta_buf: [128]u8 = undefined;
+            const meta = try std.fmt.bufPrint(&meta_buf, "{{\"step\":{d}}}", .{step});
+            try checkpoint.atomicSave(model.allocator, checkpoint_dir, step, meta);
+            try saveModelCheckpoint(model, checkpoint_dir, step);
+        }
+    }
+    return scheduler.step;
 }
 
 test "runModelTrainingLoop saves checkpoint" {
@@ -428,6 +452,33 @@ test "wsdLr warmup" {
     // stable
     const lr3 = wsdLr(3, cfg);
     try std.testing.expectApproxEqAbs(@as(f32, 0.1), lr3, 1e-5);
+}
+
+test "Model training resume integration" {
+    const allocator = std.testing.allocator;
+    const base = "/tmp/scratchpad/modelresumeint";
+    std.fs.cwd().deleteTree(base) catch {};
+    try std.fs.cwd().makePath(base);
+    const cfg = @import("../config/config.zig");
+    const mcfg = cfg.ModelConfig{ .d_model = 4, .n_groups = 1, .vocab_size = 8, .seq_len = 4 };
+    const ids = [_]u32{ 1, 2, 3 };
+    const targets = [_]u32{ 2, 3, 4 };
+
+    // First phase: 2 steps, writes checkpoint.
+    var m1 = try model_mod.Model.init(allocator, mcfg);
+    defer m1.deinit();
+    var sched1 = LRScheduler.init(.wsd, 0.01, 0.0, 1, 4, 0.2);
+    sched1.total = 2;
+    _ = try runModelTrainingLoopResume(&m1, &ids, &targets, &sched1, base, 2);
+
+    // Resume phase: continue to 4.
+    var m2 = try model_mod.Model.init(allocator, mcfg);
+    defer m2.deinit();
+    var sched2 = LRScheduler.init(.wsd, 0.01, 0.0, 1, 4, 0.2);
+    const steps = try runModelTrainingLoopResume(&m2, &ids, &targets, &sched2, base, 2);
+    try std.testing.expectEqual(@as(usize, 4), steps);
+    const latest = try checkpoint.loadLatest(allocator, base);
+    try std.testing.expectEqual(@as(?u64, 4), latest);
 }
 
 test "runTrainingLoop saves checkpoint" {
