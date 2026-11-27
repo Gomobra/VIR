@@ -137,11 +137,11 @@ pub fn main(init: std.process.Init) void {
         @memset(bias, 0);
         var e: usize = 0;
         while (e < 10) : (e += 1) {
-            var i: usize = 0;
-            while (i < train.n) : (i += 1) {
+            var ii: usize = 0;
+            while (ii < train.n) : (ii += 1) {
                 const codes = allocator.alloc(usize, 49) catch return;
                 defer allocator.free(codes);
-                _ = ivq.encode(train_images[i], codes);
+                _ = ivq.encode(train_images[ii], codes);
                 var hist: [16]f32 = @splat(0);
                 var ci: usize = 0;
                 while (ci < 49) : (ci += 1) hist[codes[ci]] += 1;
@@ -167,7 +167,7 @@ pub fn main(init: std.process.Init) void {
                 }
                 j = 0;
                 while (j < 10) : (j += 1) logits[j] /= sum;
-                const y = train_labels[i];
+                const y = train_labels[ii];
                 // gradient: dlogit = prob - onehot
                 var grads: [10]f32 = @splat(0);
                 j = 0;
