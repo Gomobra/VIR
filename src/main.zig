@@ -259,15 +259,15 @@ pub fn main(init: std.process.Init) void {
             while (py < 7) : (py += 1) {
                 var px: usize = 0;
                 while (px < 7) : (px += 1) {
-                    var i: usize = 0;
+                    var ii: usize = 0;
                     var y: usize = 0;
                     while (y < 4) : (y += 1) {
                         var x: usize = 0;
                         while (x < 4) : (x += 1) {
                             const iy = py * 4 + y;
                             const ix = px * 4 + x;
-                            data_buf[pi * 16 + i] = train_images[0][iy * 28 + ix];
-                            i += 1;
+                            data_buf[pi * 16 + ii] = train_images[0][iy * 28 + ix];
+                            ii += 1;
                         }
                     }
                     pi += 1;
