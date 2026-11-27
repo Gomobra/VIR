@@ -24,6 +24,7 @@ pub const VocabLayout = struct {
 pub const fsq = @import("fsq.zig");
 pub const vq = @import("vq.zig");
 pub const connector = @import("connector.zig");
+pub const mimi = @import("mimi.zig");
 
 pub fn defaultLayout() VocabLayout {
     return .{
