@@ -193,7 +193,17 @@ pub const Model = struct {
                 self.gdn.forward(out, Q, K, Vv, alpha, beta, batch);
                 for (out, xcur) |*o, v| o.* += v;
             } else {
-                self.attn.forward(out, tmp, batch);
+                const Q = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Vv);
+                self.attn.forward(Q, tmp, batch);
+                @memcpy(K, Q);
+                @memcpy(Vv, Q);
+                const cpu = @import("../cpu/cpu.zig");
+                cpu.attentionNaiveF32(out, Q, K, Vv, batch, d);
                 for (out, xcur) |*o, v| o.* += v;
             }
 
@@ -351,14 +361,42 @@ pub const Model = struct {
                     autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
             } else if (!self.is_gdn) {
+                const Q = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(Vv);
+                self.attn.forward(Q, norm1, batch);
+                @memcpy(K, Q);
+                @memcpy(Vv, Q);
+
+                const dQ = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dQ);
+                @memset(dQ, 0);
+                const dK = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dK);
+                @memset(dK, 0);
+                const dV = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dV);
+                @memset(dV, 0);
+
+                const autograd = @import("../autograd/autograd.zig");
+                autograd.backwardAttention(dQ, dK, dV, Q, K, Vv, dR1, batch, d);
+
+                // dNorm1 = dQ@dW^T + dK@dW^T + dV@dW^T ; dW += norm1^T@(dQ+dK+dV)
                 for (0..batch) |b| {
                     for (0..d) |i| {
                         var acc: f32 = 0;
-                        for (0..d) |j| acc += dR1[b * d + j] * self.attn.w[j * d + i];
+                        for (0..d) |j| {
+                            acc += dQ[b * d + j] * self.attn.w[j * d + i];
+                            acc += dK[b * d + j] * self.attn.w[j * d + i];
+                            acc += dV[b * d + j] * self.attn.w[j * d + i];
+                        }
                         dNorm1[b * d + i] = acc;
                     }
                     for (0..d) |j| for (0..d) |i| {
-                        dW_attn[j * d + i] += norm1[b * d + i] * dR1[b * d + j];
+                        dW_attn[j * d + i] += norm1[b * d + i] * (dQ[b * d + j] + dK[b * d + j] + dV[b * d + j]);
                     };
                 }
                 for (0..batch) |b| {
