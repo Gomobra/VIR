@@ -901,6 +901,42 @@ pub const Model = struct {
             allocator.free(dBlocks_gdn_b[bi]);
         };
 
+        // gradient clipping for stability
+        var overflow = false;
+        const gn_logits = optim.clipGradNorm(dLogits, 1.0);
+        const gn_embed = optim.clipGradNorm(dEmbed, 1.0);
+        if (!std.math.isFinite(gn_logits) or !std.math.isFinite(gn_embed)) overflow = true;
+        const gn_head = optim.clipGradNorm(dHead, 1.0);
+        if (!std.math.isFinite(gn_head)) overflow = true;
+        for (dBlocks_attn) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_mlp) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_gdn_q) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_gdn_k) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_gdn_v) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_gdn_a) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+        for (dBlocks_gdn_b) |g| {
+            const gn = optim.clipGradNorm(g, 1.0);
+            if (!std.math.isFinite(gn)) overflow = true;
+        }
+
         const dExtra = try allocator.alloc(f32, seq * d);
         defer allocator.free(dExtra);
         @memset(dExtra, 0);
