@@ -72,13 +72,6 @@ pub fn sha256FileHex(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
         hex[i * 2 + 1] = hexchars[byte & 0x0f];
     }
     return hex;
-    const hex = try allocator.alloc(u8, 64);
-    const hexchars = "0123456789abcdef";
-    for (digest, 0..) |byte, i| {
-        hex[i * 2] = hexchars[byte >> 4];
-        hex[i * 2 + 1] = hexchars[byte & 0x0f];
-    }
-    return hex;
 }
 
 // Atomic save: write meta.json to tmp dir, fsync, write COMMIT with sha256, rename to final, update latest.

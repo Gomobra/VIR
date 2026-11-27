@@ -271,10 +271,10 @@ pub const GDN = struct {
                     }
                 }
                 var term2: f32 = 0;
-                i2 = 0;
+                iidx = 0;
                 while (iidx < d) : (iidx += 1) term2 += dS[iidx * d + r] * u[iidx];
                 var term3: f32 = 0;
-                i2 = 0;
+                iidx = 0;
                 while (iidx < d) : (iidx += 1) term3 += dS[iidx * d + r] * V[t * d + iidx];
                 dK[t * d + r] += -a * b * (term1 + term2) + b * term3;
             }
