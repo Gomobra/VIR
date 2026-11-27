@@ -1259,8 +1259,9 @@ test "Model backward finite" {
         allocator.free(dBlocks_gdn_b[i]);
     };
     // gradient clipping for stability
-    _ = optim.clipGradNorm(dLogits, 1.0);
-    _ = optim.clipGradNorm(dEmbed, 1.0);
+    const gn_logits = optim.clipGradNorm(dLogits, 1.0);
+    const gn_embed = optim.clipGradNorm(dEmbed, 1.0);
+    if (true) std.debug.print("gn {d:.4} {d:.4}\n", .{ gn_logits, gn_embed });
     _ = optim.clipGradNorm(dHead, 1.0);
     for (dBlocks_attn) |g| _ = optim.clipGradNorm(g, 1.0);
     for (dBlocks_mlp) |g| _ = optim.clipGradNorm(g, 1.0);
