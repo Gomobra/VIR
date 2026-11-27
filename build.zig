@@ -71,5 +71,4 @@ pub fn build(b: *std.Build) void {
     ptx_step.dependOn(&elem_kernel.step);
     ptx_step.dependOn(&matmul_kernel.step);
 
-    _ = lib_mod;
 }
