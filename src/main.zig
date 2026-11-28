@@ -285,9 +285,9 @@ pub fn main(init: std.process.Init) void {
 
         var epochm: usize = 0;
         while (epochm < 20) : (epochm += 1) {
-            var i: usize = 0;
-            while (i < n_train) : (i += 1) {
-                const x = train.images[i];
+            var ii: usize = 0;
+            while (ii < n_train) : (ii += 1) {
+                const x = train.images[ii];
                 // forward
                 var h = allocator.alloc(f32, mlp_hidden) catch return;
                 defer allocator.free(h);
@@ -324,7 +324,7 @@ pub fn main(init: std.process.Init) void {
                 }
                 j = 0;
                 while (j < n_classes) : (j += 1) logitsm[j] /= sum;
-                const y = train.labels[i];
+                const y = train.labels[ii];
                 // backward
                 var dlogits = allocator.alloc(f32, n_classes) catch return;
                 defer allocator.free(dlogits);
