@@ -65,8 +65,9 @@ pub const ModelConfig = struct {
         const embed = self.vocab_size * self.d_model;
         const gdn_params = 3 * (self.gdn.n_key_heads * self.gdn.key_dim * self.d_model +
             self.gdn.n_value_heads * self.gdn.value_dim * self.d_model);
-        const attn_params = self.attn.n_heads * self.attn.head_dim * self.d_model +
-            self.attn.n_kv_heads * self.attn.head_dim * self.d_model * 2;
+        const attn_params = self.attn.n_heads * self.attn.head_dim * self.d_model +  // wq
+            self.attn.n_kv_heads * self.attn.head_dim * self.d_model * 2 +  // wk, wv
+            self.d_model * (self.attn.n_heads * self.attn.head_dim);  // wo
         const mlp_params = self.d_model * self.mlp.hidden * 2;
         const group_params = gdn_params + attn_params + mlp_params;
         const total_groups = self.n_groups;
