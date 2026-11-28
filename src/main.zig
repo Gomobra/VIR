@@ -189,53 +189,28 @@ pub fn main(init: std.process.Init) void {
             std.debug.print("VQ epoch {d} done\n", .{epoch});
         }
 
-        // Real CPU MLP classifier on raw MNIST pixels.
-        const n_train = @min(train.n, 2000);
+        // Real CPU softmax regression on raw MNIST pixels.
+        const n_train = @min(train.n, 5000);
         const n_test = @min(testdata.n, 1000);
         const in_dim = 28 * 28;
-        const hidden_dim = 128;
         const n_classes = 10;
-        const w1 = allocator.alloc(f32, hidden_dim * in_dim) catch return;
-        defer allocator.free(w1);
-        const b1 = allocator.alloc(f32, hidden_dim) catch return;
-        defer allocator.free(b1);
-        const w2 = allocator.alloc(f32, n_classes * hidden_dim) catch return;
-        defer allocator.free(w2);
-        const b2 = allocator.alloc(f32, n_classes) catch return;
-        defer allocator.free(b2);
-        @memset(w1, 0);
-        @memset(b1, 0);
-        @memset(w2, 0);
-        @memset(b2, 0);
-        var wi: usize = 0;
-        while (wi < w1.len) : (wi += 1) w1[wi] = 0.01 * @as(f32, @floatFromInt(wi % 7)) - 0.03;
-        wi = 0;
-        while (wi < w2.len) : (wi += 1) w2[wi] = 0.01 * @as(f32, @floatFromInt(wi % 11)) - 0.03;
-
-        var epoch2: usize = 0;
-        while (epoch2 < 5) : (epoch2 += 1) {
-            var ii: usize = 0;
-            while (ii < n_train) : (ii += 1) {
-                const x = train.images[ii];
-                var h = allocator.alloc(f32, hidden_dim) catch return;
-                defer allocator.free(h);
-                var z1 = allocator.alloc(f32, hidden_dim) catch return;
-                defer allocator.free(z1);
+        const w = allocator.alloc(f32, n_classes * in_dim) catch return;
+        defer allocator.free(w);
+        const b = allocator.alloc(f32, n_classes) catch return;
+        defer allocator.free(b);
+        @memset(w, 0);
+        @memset(b, 0);
+        var epoch: usize = 0;
+        while (epoch < 20) : (epoch += 1) {
+            var i: usize = 0;
+            while (i < n_train) : (i += 1) {
+                const x = train.images[i];
+                var logits: [10]f32 = @splat(0);
                 var j: usize = 0;
-                while (j < hidden_dim) : (j += 1) {
-                    var acc: f32 = b1[j];
-                    var k: usize = 0;
-                    while (k < in_dim) : (k += 1) acc += w1[j * in_dim + k] * x[k];
-                    z1[j] = acc;
-                    h[j] = if (acc > 0) acc else 0;
-                }
-                var logits = allocator.alloc(f32, n_classes) catch return;
-                defer allocator.free(logits);
-                j = 0;
                 while (j < n_classes) : (j += 1) {
-                    var acc: f32 = b2[j];
+                    var acc: f32 = b[j];
                     var k: usize = 0;
-                    while (k < hidden_dim) : (k += 1) acc += w2[j * hidden_dim + k] * h[k];
+                    while (k < in_dim) : (k += 1) acc += w[j * in_dim + k] * x[k];
                     logits[j] = acc;
                 }
                 var mx: f32 = logits[0];
@@ -251,90 +226,28 @@ pub fn main(init: std.process.Init) void {
                 }
                 j = 0;
                 while (j < n_classes) : (j += 1) logits[j] /= sum;
-                const y = train.labels[ii];
-                var dlogits = allocator.alloc(f32, n_classes) catch return;
-                defer allocator.free(dlogits);
-                j = 0;
-                while (j < n_classes) : (j += 1) dlogits[j] = logits[j];
-                dlogits[y] -= 1;
-                var dw2 = allocator.alloc(f32, n_classes * hidden_dim) catch return;
-                defer allocator.free(dw2);
-                @memset(dw2, 0);
-                var db2 = allocator.alloc(f32, n_classes) catch return;
-                defer allocator.free(db2);
-                @memset(db2, 0);
+                const y = train.labels[i];
                 j = 0;
                 while (j < n_classes) : (j += 1) {
-                    db2[j] = dlogits[j];
+                    const grad = logits[j] - (if (j == y) @as(f32, 1) else @as(f32, 0));
+                    b[j] -= 0.1 * grad;
                     var k: usize = 0;
-                    while (k < hidden_dim) : (k += 1) {
-                        dw2[j * hidden_dim + k] = dlogits[j] * h[k];
+                    while (k < in_dim) : (k += 1) {
+                        w[j * in_dim + k] -= 0.1 * grad * x[k];
                     }
                 }
-                var dh = allocator.alloc(f32, hidden_dim) catch return;
-                defer allocator.free(dh);
-                @memset(dh, 0);
-                var k: usize = 0;
-                while (k < hidden_dim) : (k += 1) {
-                    var acc: f32 = 0;
-                    var j2: usize = 0;
-                    while (j2 < n_classes) : (j2 += 1) {
-                        acc += dlogits[j2] * w2[j2 * hidden_dim + k];
-                    }
-                    dh[k] = acc;
-                }
-                var dz1 = allocator.alloc(f32, hidden_dim) catch return;
-                defer allocator.free(dz1);
-                k = 0;
-                while (k < hidden_dim) : (k += 1) {
-                    dz1[k] = if (z1[k] > 0) dh[k] else 0;
-                }
-                var db1 = allocator.alloc(f32, hidden_dim) catch return;
-                defer allocator.free(db1);
-                @memset(db1, 0);
-                var dw1 = allocator.alloc(f32, hidden_dim * in_dim) catch return;
-                defer allocator.free(dw1);
-                @memset(dw1, 0);
-                k = 0;
-                while (k < hidden_dim) : (k += 1) {
-                    db1[k] = dz1[k];
-                    var kk: usize = 0;
-                    while (kk < in_dim) : (kk += 1) {
-                        dw1[k * in_dim + kk] = dz1[k] * x[kk];
-                    }
-                }
-                const lr: f32 = 0.1;
-                k = 0;
-                while (k < hidden_dim * in_dim) : (k += 1) w1[k] -= lr * dw1[k];
-                k = 0;
-                while (k < hidden_dim) : (k += 1) b1[k] -= lr * db1[k];
-                k = 0;
-                while (k < n_classes * hidden_dim) : (k += 1) w2[k] -= lr * dw2[k];
-                k = 0;
-                while (k < n_classes) : (k += 1) b2[k] -= lr * db2[k];
             }
         }
-        // eval
-        var ncorrect2: usize = 0;
+        var ncorrect: usize = 0;
         var ei: usize = 0;
         while (ei < n_test) : (ei += 1) {
             const x = testdata.images[ei];
-            var h = allocator.alloc(f32, hidden_dim) catch return;
-            defer allocator.free(h);
+            var logits: [10]f32 = @splat(0);
             var j: usize = 0;
-            while (j < hidden_dim) : (j += 1) {
-                var acc: f32 = b1[j];
-                var k: usize = 0;
-                while (k < in_dim) : (k += 1) acc += w1[j * in_dim + k] * x[k];
-                h[j] = if (acc > 0) acc else 0;
-            }
-            var logits = allocator.alloc(f32, n_classes) catch return;
-            defer allocator.free(logits);
-            j = 0;
             while (j < n_classes) : (j += 1) {
-                var acc: f32 = b2[j];
+                var acc: f32 = b[j];
                 var k: usize = 0;
-                while (k < hidden_dim) : (k += 1) acc += w2[j * hidden_dim + k] * h[k];
+                while (k < in_dim) : (k += 1) acc += w[j * in_dim + k] * x[k];
                 logits[j] = acc;
             }
             var best: usize = 0;
@@ -346,10 +259,10 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) ncorrect2 += 1;
+            if (best == testdata.labels[ei]) ncorrect += 1;
         }
-        const mlp_acc = @as(f32, @floatFromInt(ncorrect2)) / @as(f32, @floatFromInt(n_test));
-        std.debug.print("raw-pixel MLP classifier accuracy: {d:.4}\n", .{mlp_acc});
+        const raw_acc = @as(f32, @floatFromInt(ncorrect)) / @as(f32, @floatFromInt(n_test));
+        std.debug.print("raw-pixel softmax classifier accuracy: {d:.4}\n", .{raw_acc});
 
         // Debug: print VQ codes for first image.
         const dbg_codes = allocator.alloc(usize, 49) catch return;
