@@ -440,7 +440,7 @@ pub fn main(init: std.process.Init) void {
         };
         defer train_mod.freeImageClassificationSamples(allocator, samples);
 
-        const w_before = model.embed[0];
+        const w_before = model.blocks[3].attn.w[0];
         const max_steps: usize = 300;
         var step: usize = 0;
         while (step < max_steps) : (step += 1) {
@@ -454,7 +454,7 @@ pub fn main(init: std.process.Init) void {
             }
         }
 
-        std.debug.print("embed[0] before/after: {d:.6} -> {d:.6}\n", .{ w_before, model.embed[0] });
+        std.debug.print("attn.w[0] before/after: {d:.6} -> {d:.6}\n", .{ w_before, model.blocks[3].attn.w[0] });
         // Debug: print last-patch VQ code per digit for first 10 training images.
         var k: usize = 0;
         while (k < 10 and k < train.n) : (k += 1) {
