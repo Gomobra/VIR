@@ -335,7 +335,6 @@ pub fn attentionNaiveF32(out: []f32, q: []const f32, k: []const f32, v: []const 
     }
 }
 
-
 // Causal scaled dot-product attention with grouped-query attention (GQA).
 // q: [seq, n_heads*head_dim], k/v: [seq, n_kv_heads*head_dim], out: [seq, n_heads*head_dim].
 pub fn attentionGQAF32(out: []f32, q: []const f32, k: []const f32, v: []const f32, seq: usize, n_heads: usize, n_kv_heads: usize, head_dim: usize) void {
@@ -394,7 +393,6 @@ pub fn attentionGQAF32(out: []f32, q: []const f32, k: []const f32, v: []const f3
     }
 }
 
-
 test "attentionGQAF32 finite and single-head parity" {
     const seq = 3;
     const n_heads = 2;
@@ -419,7 +417,6 @@ test "attentionGQAF32 finite and single-head parity" {
     attentionGQAF32(&out_gqa, &q2, &k2, &v2, seq2, 1, 1, hd);
     for (out_naive, out_gqa) |a, b| try std.testing.expectApproxEqAbs(a, b, 1e-5);
 }
-
 
 test "attentionNaiveF32 finite" {
     const seq = 2;
