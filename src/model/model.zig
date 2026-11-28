@@ -165,9 +165,6 @@ pub const Model = struct {
                 .bit_mlp = bit_mlp,
                 .norm1 = .{},
                 .norm2 = .{},
-                .wq = wq,
-                .wk = wk,
-                .wv = wv,
                 .wa = wa,
                 .wb = wb,
                 .gdn = .{ .d = d },
@@ -316,8 +313,8 @@ pub const Model = struct {
                     var h: usize = 0;
                     while (h < n_heads) : (h += 1) {
                         const qs = Q[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeForward(qs, qs, b, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeForward(qs, qs, b, head_dim, self.attn_rope_base);
                         const cpu = @import("../cpu/cpu.zig");
                         cpu.rmsnormF32(qs, qs, 1e-6);
                     }
@@ -569,9 +566,9 @@ pub const Model = struct {
                 const kv_dim = n_kv_heads * head_dim;
 
                 // Recompute forward intermediates
-                const norm1 = self.allocator.alloc(f32, batch * d) catch return;
-                defer self.allocator.free(norm1);
-                self.norm1.forward(norm1, x);
+                const norm1r = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(norm1r);
+                self.norm1.forward(norm1r, x);
                 const Q = self.allocator.alloc(f32, batch * q_dim) catch return;
                 defer self.allocator.free(Q);
                 const K = self.allocator.alloc(f32, batch * kv_dim) catch return;
@@ -591,7 +588,7 @@ pub const Model = struct {
 
                 var b: usize = 0;
                 while (b < batch) : (b += 1) {
-                    const xrow = norm1[b * d .. (b + 1) * d];
+                    const xrow = norm1r[b * d .. (b + 1) * d];
                     var j: usize = 0;
                     while (j < q_dim) : (j += 1) {
                         var acc: f32 = 0;
@@ -621,8 +618,8 @@ pub const Model = struct {
                         const qs = Q[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
                         const qrs = Qr[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
                         const qns = Qn[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeForward(qrs, qs, b, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeForward(qrs, qs, b, head_dim, self.attn_rope_base);
                         const cpu = @import("../cpu/cpu.zig");
                         cpu.rmsnormF32(qns, qrs, 1e-6);
                     }
@@ -631,8 +628,8 @@ pub const Model = struct {
                         const ks = K[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
                         const krs = Kr[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
                         const kns = Kn[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeForward(krs, ks, b, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeForward(krs, ks, b, head_dim, self.attn_rope_base);
                         const cpu = @import("../cpu/cpu.zig");
                         cpu.rmsnormF32(kns, krs, 1e-6);
                     }
@@ -691,16 +688,16 @@ pub const Model = struct {
                         const sl_x = Qr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
                         const sl_do = dQn[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
                         const sl_dx = dQr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
                     }
                     h = 0;
                     while (h < n_kv_heads) : (h += 1) {
                         const sl_x = Kr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
                         const sl_do = dKn[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
                         const sl_dx = dKr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
                     }
                 }
 
@@ -717,15 +714,15 @@ pub const Model = struct {
                     while (h < n_heads) : (h += 1) {
                         const sl_out = dQr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
                         const sl_dx = dQ[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
                     }
                     h = 0;
                     while (h < n_kv_heads) : (h += 1) {
                         const sl_out = dKr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
                         const sl_dx = dK[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
                     }
                 }
 
@@ -736,7 +733,7 @@ pub const Model = struct {
                     while (i < d) : (i += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dQ[bb2 * q_dim + j];
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dQ[bb2 * q_dim + j];
                         self.grad_wq[j * d + i] += acc;
                     }
                 }
@@ -746,7 +743,7 @@ pub const Model = struct {
                     while (i < d) : (i += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dK[bb2 * kv_dim + j];
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dK[bb2 * kv_dim + j];
                         self.grad_wk[j * d + i] += acc;
                     }
                 }
@@ -756,7 +753,7 @@ pub const Model = struct {
                     while (i < d) : (i += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dV[bb2 * kv_dim + j];
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dV[bb2 * kv_dim + j];
                         self.grad_wv[j * d + i] += acc;
                     }
                 }
@@ -782,8 +779,8 @@ pub const Model = struct {
                     const slice_x = x[bb2 * d .. (bb2 + 1) * d];
                     const slice_do = dNorm1[bb2 * d .. (bb2 + 1) * d];
                     const slice_dx = dX_attn[bb2 * d .. (bb2 + 1) * d];
-                    const autograd = @import("../autograd/autograd.zig");
-                    autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+                    const ag = @import("../autograd/autograd.zig");
+                    ag.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
                 for (dX, dX_attn) |*a, b| a.* += b;
             } else {
