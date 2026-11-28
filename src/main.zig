@@ -214,9 +214,9 @@ pub fn main(init: std.process.Init) void {
 
         var epoch2: usize = 0;
         while (epoch2 < 5) : (epoch2 += 1) {
-            var i: usize = 0;
-            while (i < n_train) : (i += 1) {
-                const x = train.images[i];
+            var ii: usize = 0;
+            while (ii < n_train) : (ii += 1) {
+                const x = train.images[ii];
                 var h = allocator.alloc(f32, hidden_dim) catch return;
                 defer allocator.free(h);
                 var z1 = allocator.alloc(f32, hidden_dim) catch return;
@@ -251,7 +251,7 @@ pub fn main(init: std.process.Init) void {
                 }
                 j = 0;
                 while (j < n_classes) : (j += 1) logits[j] /= sum;
-                const y = train.labels[i];
+                const y = train.labels[ii];
                 var dlogits = allocator.alloc(f32, n_classes) catch return;
                 defer allocator.free(dlogits);
                 j = 0;
