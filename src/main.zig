@@ -187,7 +187,7 @@ pub fn main(init: std.process.Init) void {
             }
         }
         // eval
-        var correct: usize = 0;
+        var ncorrect: usize = 0;
         var ei: usize = 0;
         while (ei < testdata.n) : (ei += 1) {
             const codes = allocator.alloc(usize, 49) catch return;
@@ -214,9 +214,9 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) correct += 1;
+            if (best == testdata.labels[ei]) ncorrect += 1;
         }
-        const baseline_acc = @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(testdata.n));
+        const baseline_acc = @as(f32, @floatFromInt(ncorrect)) / @as(f32, @floatFromInt(testdata.n));
         std.debug.print("direct VQ-histogram classifier accuracy: {d:.4}\n", .{baseline_acc});
 
         // Train the VQ codebook on MNIST patches (EMA).
@@ -328,7 +328,7 @@ pub fn main(init: std.process.Init) void {
                 }
             }
         }
-        var correct: usize = 0;
+        var ncorrect: usize = 0;
         var ei: usize = 0;
         while (ei < n_test) : (ei += 1) {
             const x = testdata.images[ei];
@@ -349,9 +349,9 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) correct += 1;
+            if (best == testdata.labels[ei]) ncorrect += 1;
         }
-        const raw_acc = @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(n_test));
+        const raw_acc = @as(f32, @floatFromInt(ncorrect)) / @as(f32, @floatFromInt(n_test));
         std.debug.print("raw-pixel softmax classifier accuracy: {d:.4}\n", .{raw_acc});
 
         // Debug: print VQ codes for first image.
