@@ -212,8 +212,8 @@ pub fn main(init: std.process.Init) void {
         wi = 0;
         while (wi < w2.len) : (wi += 1) w2[wi] = 0.01 * @as(f32, @floatFromInt(wi % 11)) - 0.03;
 
-        var epoch: usize = 0;
-        while (epoch < 5) : (epoch += 1) {
+        var epoch2: usize = 0;
+        while (epoch2 < 5) : (epoch2 += 1) {
             var i: usize = 0;
             while (i < n_train) : (i += 1) {
                 const x = train.images[i];
