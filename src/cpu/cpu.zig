@@ -393,6 +393,108 @@ pub fn attentionGQAF32(out: []f32, q: []const f32, k: []const f32, v: []const f3
     }
 }
 
+// Backward for causal GQA attention. Accumulates into dQ/dK/dV.
+pub fn backwardAttentionGQAF32(dQ: []f32, dK: []f32, dV: []f32, Q: []const f32, K: []const f32, V: []const f32, dOut: []const f32, seq: usize, n_heads: usize, n_kv_heads: usize, head_dim: usize) void {
+    std.debug.assert(n_kv_heads > 0 and n_heads % n_kv_heads == 0);
+    const q_dim = n_heads * head_dim;
+    const kv_dim = n_kv_heads * head_dim;
+    std.debug.assert(Q.len == seq * q_dim and K.len == seq * kv_dim and V.len == seq * kv_dim);
+    std.debug.assert(dOut.len == seq * q_dim and dQ.len == seq * q_dim and dK.len == seq * kv_dim and dV.len == seq * kv_dim);
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim)));
+    const heads_per_kv = n_heads / n_kv_heads;
+    const allocator = std.heap.page_allocator;
+
+    var hi: usize = 0;
+    while (hi < n_heads) : (hi += 1) {
+        const kv_hi = hi / heads_per_kv;
+        const dS = allocator.alloc(f32, seq * seq) catch return;
+        defer allocator.free(dS);
+        @memset(dS, 0);
+
+        // dV and dS
+        var i: usize = 0;
+        while (i < seq) : (i += 1) {
+            // scores + softmax for row i
+            var maxs: f32 = -std.math.inf(f32);
+            var j: usize = 0;
+            while (j <= i) : (j += 1) {
+                var acc: f32 = 0;
+                var t: usize = 0;
+                while (t < head_dim) : (t += 1) {
+                    acc += Q[i * q_dim + hi * head_dim + t] * K[j * kv_dim + kv_hi * head_dim + t];
+                }
+                acc *= scale;
+                dS[i * seq + j] = acc;
+                if (acc > maxs) maxs = acc;
+            }
+            var sum: f32 = 0;
+            j = 0;
+            while (j <= i) : (j += 1) {
+                const e = @exp(dS[i * seq + j] - maxs);
+                dS[i * seq + j] = e;
+                sum += e;
+            }
+            j = 0;
+            while (j <= i) : (j += 1) dS[i * seq + j] /= sum;
+
+            // dV[kv_hi] += w_ij * dOut[i,h]
+            j = 0;
+            while (j <= i) : (j += 1) {
+                var t: usize = 0;
+                while (t < head_dim) : (t += 1) {
+                    dV[j * kv_dim + kv_hi * head_dim + t] += dS[i * seq + j] * dOut[i * q_dim + hi * head_dim + t];
+                }
+            }
+
+            // dS_ij = w_ij * (dO_i·V_j - sum_l w_il dO_i·V_l)
+            // compute row dot products D_j = dO_i·V_j
+            var dots = allocator.alloc(f32, i + 1) catch return;
+            defer allocator.free(dots);
+            var lsum: f32 = 0;
+            j = 0;
+            while (j <= i) : (j += 1) {
+                var acc: f32 = 0;
+                var t: usize = 0;
+                while (t < head_dim) : (t += 1) {
+                    acc += dOut[i * q_dim + hi * head_dim + t] * V[j * kv_dim + kv_hi * head_dim + t];
+                }
+                dots[j] = acc;
+                lsum += dS[i * seq + j] * acc;
+            }
+            j = 0;
+            while (j <= i) : (j += 1) {
+                dS[i * seq + j] *= (dots[j] - lsum);
+            }
+        }
+
+        // dQ and dK
+        i = 0;
+        while (i < seq) : (i += 1) {
+            var t: usize = 0;
+            while (t < head_dim) : (t += 1) {
+                var acc: f32 = 0;
+                var j: usize = 0;
+                while (j <= i) : (j += 1) {
+                    acc += dS[i * seq + j] * K[j * kv_dim + kv_hi * head_dim + t];
+                }
+                dQ[i * q_dim + hi * head_dim + t] += acc * scale;
+            }
+        }
+        var j: usize = 0;
+        while (j < seq) : (j += 1) {
+            var t: usize = 0;
+            while (t < head_dim) : (t += 1) {
+                var acc: f32 = 0;
+                var iidx: usize = j;
+                while (iidx < seq) : (iidx += 1) {
+                    acc += dS[iidx * seq + j] * Q[iidx * q_dim + hi * head_dim + t];
+                }
+                dK[j * kv_dim + kv_hi * head_dim + t] += acc * scale;
+            }
+        }
+    }
+}
+
 test "attentionGQAF32 finite and single-head parity" {
     const seq = 3;
     const n_heads = 2;
@@ -416,6 +518,24 @@ test "attentionGQAF32 finite and single-head parity" {
     attentionNaiveF32(&out_naive, &q2, &k2, &v2, seq2, hd);
     attentionGQAF32(&out_gqa, &q2, &k2, &v2, seq2, 1, 1, hd);
     for (out_naive, out_gqa) |a, b| try std.testing.expectApproxEqAbs(a, b, 1e-5);
+}
+
+test "backwardAttentionGQAF32 finite" {
+    const seq = 3;
+    const n_heads = 2;
+    const n_kv_heads = 1;
+    const head_dim = 2;
+    var q = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1 };
+    var k = [_]f32{ 1, 0, 0, 1, 1, 1 };
+    var v = [_]f32{ 1, 2, 3, 4, 5, 6 };
+    var dout = [_]f32{ 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0 };
+    var dq = [_]f32{0} * *12;
+    var dk = [_]f32{0} * *6;
+    var dv = [_]f32{0} * *6;
+    backwardAttentionGQAF32(&dq, &dk, &dv, &q, &k, &v, &dout, seq, n_heads, n_kv_heads, head_dim);
+    for (dq) |x| try std.testing.expect(std.math.isFinite(x));
+    for (dk) |x| try std.testing.expect(std.math.isFinite(x));
+    for (dv) |x| try std.testing.expect(std.math.isFinite(x));
 }
 
 test "attentionNaiveF32 finite" {
