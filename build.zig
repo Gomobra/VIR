@@ -85,6 +85,9 @@ pub fn build(b: *std.Build) void {
             }),
         });
         smoke.root_module.addAnonymousImport("elementwise_ptx", .{ .root_source_file = elem_ptx });
+        // Kaggle exposes libcuda under the NVIDIA driver directory.
+        smoke.root_module.addLibraryPath(b.path("/usr/local/nvidia/lib64"));
+        smoke.root_module.addLibraryPath(b.path("/usr/local/cuda/lib64"));
         smoke.root_module.linkSystemLibrary("cuda", .{});
         b.installArtifact(smoke);
 
