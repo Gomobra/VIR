@@ -424,11 +424,6 @@ pub fn main(init: std.process.Init) void {
         }
         const mlp_acc = @as(f32, @floatFromInt(ncorrect3)) / @as(f32, @floatFromInt(n_test));
         std.debug.print("raw-pixel MLP classifier accuracy: {d:.4}\\n", .{mlp_acc});
-'''
-s=s[:start]+block+s[end:]
-open(p,'w').write(s)
-print('done')
-PY
 
         // Debug: print VQ codes for first image.
         const dbg_codes = allocator.alloc(usize, 49) catch return;
