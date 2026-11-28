@@ -545,6 +545,96 @@ pub fn runPipeline(allocator: std.mem.Allocator, docs: []const []const u8, cfg: 
     return result;
 }
 
+
+// --- JSONL streaming parser (PRD 3.6, T3.6-01) ---
+
+pub const JsonlRecord = struct {
+    text: []const u8,
+    source: []const u8,
+    license: []const u8,
+};
+
+pub fn freeJsonlRecord(allocator: std.mem.Allocator, rec: JsonlRecord) void {
+    allocator.free(rec.text);
+    allocator.free(rec.source);
+    allocator.free(rec.license);
+}
+
+pub fn freeJsonlRecords(allocator: std.mem.Allocator, records: []JsonlRecord) void {
+    for (records) |rec| freeJsonlRecord(allocator, rec);
+    allocator.free(records);
+}
+
+pub fn parseJsonlLine(allocator: std.mem.Allocator, line: []const u8) !JsonlRecord {
+    const Raw = struct {
+        text: []const u8 = "",
+        source: []const u8 = "",
+        license: []const u8 = "",
+    };
+    var parsed = try std.json.parseFromSlice(Raw, allocator, line, .{
+        .ignore_unknown_fields = true,
+    });
+    defer parsed.deinit();
+    if (parsed.value.text.len == 0) return error.MissingText;
+    return .{
+        .text = try allocator.dupe(u8, parsed.value.text),
+        .source = try allocator.dupe(u8, parsed.value.source),
+        .license = try allocator.dupe(u8, parsed.value.license),
+    };
+}
+
+pub fn parseJsonl(allocator: std.mem.Allocator, data: []const u8) ![]JsonlRecord {
+    var records = std.ArrayList(JsonlRecord).empty;
+    defer records.deinit(allocator);
+    var lines = std.mem.splitScalar(u8, data, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0) continue;
+        const rec = try parseJsonlLine(allocator, line);
+        try records.append(allocator, rec);
+    }
+    return records.toOwnedSlice(allocator);
+}
+
+pub fn readJsonlFile(allocator: std.mem.Allocator, path: []const u8) ![]JsonlRecord {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const st = try file.stat();
+    const buf = try allocator.alloc(u8, st.size);
+    defer allocator.free(buf);
+    _ = try file.readAll(buf);
+    return parseJsonl(allocator, buf);
+}
+
+
+
+test "parseJsonlLine basic" {
+    const allocator = std.testing.allocator;
+    const rec = try parseJsonlLine(allocator, "{\"text\":\"hello world\",\"source\":\"web\",\"license\":\"cc-by\"}");
+    defer freeJsonlRecord(allocator, rec);
+    try std.testing.expectEqualStrings("hello world", rec.text);
+    try std.testing.expectEqualStrings("web", rec.source);
+    try std.testing.expectEqualStrings("cc-by", rec.license);
+}
+
+test "parseJsonlLine missing text" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.MissingText, parseJsonlLine(allocator, "{\"source\":\"web\"}"));
+}
+
+test "parseJsonl skips blanks" {
+    const allocator = std.testing.allocator;
+    const data =
+        "{\"text\":\"a\"}\n\n{\"text\":\"b\",\"source\":\"s\"}\n";
+    const recs = try parseJsonl(allocator, data);
+    defer freeJsonlRecords(allocator, recs);
+    try std.testing.expectEqual(@as(usize, 2), recs.len);
+    try std.testing.expectEqualStrings("a", recs[0].text);
+    try std.testing.expectEqualStrings("b", recs[1].text);
+    try std.testing.expectEqualStrings("s", recs[1].source);
+}
+
+
 test "runPipeline end-to-end" {
     const allocator = std.testing.allocator;
     const docs = [_][]const u8{
