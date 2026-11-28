@@ -620,8 +620,8 @@ pub const Model = struct {
                         const qns = Qn[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
                         const ag = @import("../autograd/autograd.zig");
                         ag.ropeForward(qrs, qs, b, head_dim, self.attn_rope_base);
-                        const cpu = @import("../cpu/cpu.zig");
-                        cpu.rmsnormF32(qns, qrs, 1e-6);
+                        const cp = @import("../cpu/cpu.zig");
+                        cp.rmsnormF32(qns, qrs, 1e-6);
                     }
                     h = 0;
                     while (h < n_kv_heads) : (h += 1) {
@@ -630,12 +630,12 @@ pub const Model = struct {
                         const kns = Kn[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
                         const ag = @import("../autograd/autograd.zig");
                         ag.ropeForward(krs, ks, b, head_dim, self.attn_rope_base);
-                        const cpu = @import("../cpu/cpu.zig");
-                        cpu.rmsnormF32(kns, krs, 1e-6);
+                        const cp = @import("../cpu/cpu.zig");
+                        cp.rmsnormF32(kns, krs, 1e-6);
                     }
                 }
-                const cpu = @import("../cpu/cpu.zig");
-                cpu.attentionGQAF32(gqa_attn_out, Qn, Kn, Vv, batch, n_heads, n_kv_heads, head_dim);
+                const cp = @import("../cpu/cpu.zig");
+                cp.attentionGQAF32(gqa_attn_out, Qn, Kn, Vv, batch, n_heads, n_kv_heads, head_dim);
 
                 // dAttn_out = dR1 @ Wo^T
                 const dAttn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
