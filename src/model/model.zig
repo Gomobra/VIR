@@ -919,7 +919,6 @@ pub const Model = struct {
                 eng.backward(dEng, dWk, dWv, dTables, x, tokens, dOut, batch);
                 for (dX, dEng) |*o, e| o.* += e;
             }
-            _ = cpu;
         }
     };
 
