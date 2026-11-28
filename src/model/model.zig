@@ -729,32 +729,32 @@ pub const Model = struct {
                 // projection gradients
                 var j: usize = 0;
                 while (j < q_dim) : (j += 1) {
-                    var i: usize = 0;
-                    while (i < d) : (i += 1) {
+                    var ii: usize = 0;
+                    while (ii < d) : (ii += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dQ[bb2 * q_dim + j];
-                        self.grad_wq[j * d + i] += acc;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + ii] * dQ[bb2 * q_dim + j];
+                        self.grad_wq[j * d + ii] += acc;
                     }
                 }
                 j = 0;
                 while (j < kv_dim) : (j += 1) {
-                    var i: usize = 0;
-                    while (i < d) : (i += 1) {
+                    var ii: usize = 0;
+                    while (ii < d) : (ii += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dK[bb2 * kv_dim + j];
-                        self.grad_wk[j * d + i] += acc;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + ii] * dK[bb2 * kv_dim + j];
+                        self.grad_wk[j * d + ii] += acc;
                     }
                 }
                 j = 0;
                 while (j < kv_dim) : (j += 1) {
-                    var i: usize = 0;
-                    while (i < d) : (i += 1) {
+                    var ii: usize = 0;
+                    while (ii < d) : (ii += 1) {
                         var acc: f32 = 0;
                         var bb2: usize = 0;
-                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + i] * dV[bb2 * kv_dim + j];
-                        self.grad_wv[j * d + i] += acc;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1r[bb2 * d + ii] * dV[bb2 * kv_dim + j];
+                        self.grad_wv[j * d + ii] += acc;
                     }
                 }
 
