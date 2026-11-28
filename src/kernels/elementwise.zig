@@ -6,10 +6,23 @@ pub fn threadIdX() u32 {
     );
 }
 
+pub fn blockDimX() u32 {
+    return asm ("mov.u32 \t%[r], %blockDim.x;"
+        : [r] "=r" (-> u32),
+    );
+}
+
+pub fn gridDimX() u32 {
+    return asm ("mov.u32 \t%[r], %gridDim.x;"
+        : [r] "=r" (-> u32),
+    );
+}
+
 export fn vecadd(a: [*]const f32, b: [*]const f32, c: [*]f32, n: u32) callconv(.kernel) void {
-    const i = threadIdX();
-    if (i < n) {
-        c[i] = a[i] + b[i];
+    var idx = threadIdX();
+    const stride = blockDimX() * gridDimX();
+    while (idx < n) : (idx += stride) {
+        c[idx] = a[idx] + b[idx];
     }
 }
 

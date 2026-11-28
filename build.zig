@@ -72,4 +72,24 @@ pub fn build(b: *std.Build) void {
     ptx_step.dependOn(&elem_kernel.step);
     ptx_step.dependOn(&matmul_kernel.step);
 
+    // Optional GPU smoke test (requires libcuda; run on Kaggle, not GitHub Actions).
+    const gpu_opt = b.option(bool, "gpu", "Build and run GPU smoke test") orelse false;
+    if (gpu_opt) {
+        const smoke = b.addExecutable(.{
+            .name = "gpu_smoke",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/gpu/smoke.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        smoke.root_module.addAnonymousImport("elementwise_ptx", .{ .root_source_file = elem_ptx });
+        smoke.root_module.linkSystemLibrary("cuda", .{});
+        b.installArtifact(smoke);
+
+        const run_smoke = b.addRunArtifact(smoke);
+        const gpu_step = b.step("gpu-smoke", "Build and run GPU smoke test");
+        gpu_step.dependOn(&run_smoke.step);
+    }
 }
