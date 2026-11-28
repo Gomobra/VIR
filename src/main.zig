@@ -201,7 +201,7 @@ pub fn main(init: std.process.Init) void {
         @memset(w, 0);
         @memset(b, 0);
         var epoch2: usize = 0;
-        while (epoch2 < 20) : (epoch2 += 1) {
+        while (epoch2 < 30) : (epoch2 += 1) {
             var ii: usize = 0;
             while (ii < n_train) : (ii += 1) {
                 const x = train.images[ii];
