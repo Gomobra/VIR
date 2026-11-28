@@ -782,7 +782,7 @@ pub const Model = struct {
                     const ag = @import("../autograd/autograd.zig");
                     ag.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
-                for (dX, dX_attn2) |*a, b| a.* += b;
+                for (dX, dX_attn2) |*aa, bb| aa.* += bb;
             } else {
                 // Recompute Q,K,V,alpha,beta
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
