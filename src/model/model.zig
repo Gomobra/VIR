@@ -772,17 +772,17 @@ pub const Model = struct {
                         dNorm1[bb2 * d + ii] = acc;
                     }
                 }
-                const dX_attn = self.allocator.alloc(f32, batch * d) catch return;
-                defer self.allocator.free(dX_attn);
-                @memset(dX_attn, 0);
+                const dX_attn2 = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dX_attn2);
+                @memset(dX_attn2, 0);
                 for (0..batch) |bb2| {
                     const slice_x = x[bb2 * d .. (bb2 + 1) * d];
                     const slice_do = dNorm1[bb2 * d .. (bb2 + 1) * d];
-                    const slice_dx = dX_attn[bb2 * d .. (bb2 + 1) * d];
+                    const slice_dx = dX_attn2[bb2 * d .. (bb2 + 1) * d];
                     const ag = @import("../autograd/autograd.zig");
                     ag.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
-                for (dX, dX_attn) |*a, b| a.* += b;
+                for (dX, dX_attn2) |*a, b| a.* += b;
             } else {
                 // Recompute Q,K,V,alpha,beta
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
