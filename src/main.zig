@@ -329,9 +329,9 @@ pub fn main(init: std.process.Init) void {
             }
         }
         var ncorrect2: usize = 0;
-        var ei: usize = 0;
-        while (ei < n_test) : (ei += 1) {
-            const x = testdata.images[ei];
+        var ei2: usize = 0;
+        while (ei2 < n_test) : (ei2 += 1) {
+            const x = testdata.images[ei2];
             var logits: [10]f32 = @splat(0);
             var j: usize = 0;
             while (j < n_classes) : (j += 1) {
@@ -349,7 +349,7 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) ncorrect2 += 1;
+            if (best == testdata.labels[ei2]) ncorrect2 += 1;
         }
         const raw_acc = @as(f32, @floatFromInt(ncorrect2)) / @as(f32, @floatFromInt(n_test));
         std.debug.print("raw-pixel softmax classifier accuracy: {d:.4}\n", .{raw_acc});
