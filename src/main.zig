@@ -390,9 +390,9 @@ pub fn main(init: std.process.Init) void {
         }
         // eval MLP
         var ncorrect3: usize = 0;
-        var ei: usize = 0;
-        while (ei < n_test) : (ei += 1) {
-            const x = testdata.images[ei];
+        var ei2: usize = 0;
+        while (ei2 < n_test) : (ei2 += 1) {
+            const x = testdata.images[ei2];
             var h = allocator.alloc(f32, mlp_hidden) catch return;
             defer allocator.free(h);
             var j: usize = 0;
@@ -420,7 +420,7 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) ncorrect3 += 1;
+            if (best == testdata.labels[ei2]) ncorrect3 += 1;
         }
         const mlp_acc = @as(f32, @floatFromInt(ncorrect3)) / @as(f32, @floatFromInt(n_test));
         std.debug.print("raw-pixel MLP classifier accuracy: {d:.4}\\n", .{mlp_acc});
