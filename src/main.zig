@@ -214,7 +214,7 @@ pub fn main(init: std.process.Init) void {
                     best = j;
                 }
             }
-            if (best == testdata.labels[ei]) ncorrect2 += 1;
+            if (best == testdata.labels[ei]) ncorrect += 1;
         }
         const baseline_acc = @as(f32, @floatFromInt(ncorrect)) / @as(f32, @floatFromInt(testdata.n));
         std.debug.print("direct VQ-histogram classifier accuracy: {d:.4}\n", .{baseline_acc});
