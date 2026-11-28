@@ -134,7 +134,7 @@ pub fn main(init: std.process.Init) void {
         const wcls = allocator.alloc(f32, 10 * n_codes) catch return;
         defer allocator.free(wcls);
         const biasc = allocator.alloc(f32, 10) catch return;
-        defer allocator.free(bias);
+        defer allocator.free(biasc);
         @memset(wcls, 0);
         @memset(biasc, 0);
         var e: usize = 0;
@@ -287,7 +287,7 @@ pub fn main(init: std.process.Init) void {
         const w = allocator.alloc(f32, n_classes * in_dim) catch return;
         defer allocator.free(w);
         const bias = allocator.alloc(f32, n_classes) catch return;
-        defer allocator.free(bias);
+        defer allocator.free(biasc);
         @memset(w, 0);
         @memset(bias, 0);
         var epoch2: usize = 0;
