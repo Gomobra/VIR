@@ -42,9 +42,6 @@ pub const Model = struct {
         attn_n_kv_heads: usize = 0,
         attn_head_dim: usize = 0,
         attn_rope_base: f32 = 10000.0,
-        wq: []f32 = &[_]f32{},
-        wk: []f32 = &[_]f32{},
-        wv: []f32 = &[_]f32{},
         wo: []f32 = &[_]f32{},
         grad_wq: []f32 = &[_]f32{},
         grad_wk: []f32 = &[_]f32{},
@@ -70,8 +67,16 @@ pub const Model = struct {
         allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool, use_bit: bool, attn_n_heads: usize, attn_n_kv_heads: usize, attn_head_dim: usize, attn_rope_base: f32) !Block {
+            const use_gqa = !is_gdn and !use_bit;
+            const q_dim = attn_n_heads * attn_head_dim;
+            const kv_dim = attn_n_kv_heads * attn_head_dim;
+
             const wq: []f32 = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
+                break :blk s;
+            } else if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, q_dim * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
                 break :blk s;
             } else &[_]f32{};
@@ -79,9 +84,17 @@ pub const Model = struct {
                 const s = try allocator.alloc(f32, d * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
                 break :blk s;
+            } else if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, kv_dim * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
+                break :blk s;
             } else &[_]f32{};
             const wv: []f32 = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
+                break :blk s;
+            } else if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, kv_dim * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
                 break :blk s;
             } else &[_]f32{};
@@ -93,26 +106,6 @@ pub const Model = struct {
             const wb: []f32 = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d);
                 for (s) |*x| x.* = 0.0;
-                break :blk s;
-            } else &[_]f32{};
-
-            // GQA projections for non-GDN, non-bit attention path
-            const use_gqa = !is_gdn and !use_bit;
-            const q_dim = attn_n_heads * attn_head_dim;
-            const kv_dim = attn_n_kv_heads * attn_head_dim;
-            const wq: []f32 = if (use_gqa) blk: {
-                const s = try allocator.alloc(f32, q_dim * d);
-                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
-                break :blk s;
-            } else &[_]f32{};
-            const wk: []f32 = if (use_gqa) blk: {
-                const s = try allocator.alloc(f32, kv_dim * d);
-                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
-                break :blk s;
-            } else &[_]f32{};
-            const wv: []f32 = if (use_gqa) blk: {
-                const s = try allocator.alloc(f32, kv_dim * d);
-                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
                 break :blk s;
             } else &[_]f32{};
             const wo: []f32 = if (use_gqa) blk: {
@@ -200,9 +193,6 @@ pub const Model = struct {
             self.mlp.deinit();
             if (self.bit_attn) |*b| b.deinit();
             if (self.bit_mlp) |*b| b.deinit();
-            if (self.wq.len > 0) self.allocator.free(self.wq);
-            if (self.wk.len > 0) self.allocator.free(self.wk);
-            if (self.wv.len > 0) self.allocator.free(self.wv);
             if (self.wa.len > 0) self.allocator.free(self.wa);
             if (self.wb.len > 0) self.allocator.free(self.wb);
             if (self.engram) |*e| e.deinit();
@@ -282,7 +272,7 @@ pub const Model = struct {
                 }
                 self.gdn.forward(out, Q, K, Vv, alpha, beta, batch);
                 for (out, xcur) |*o, v| o.* += v;
-            } else if (self.wq.len > 0) {
+            } else if (self.wo.len > 0) {
                 const n_heads = self.attn_n_heads;
                 const n_kv_heads = self.attn_n_kv_heads;
                 const head_dim = self.attn_head_dim;
@@ -571,7 +561,7 @@ pub const Model = struct {
                     const slice_dx = dX_attn[b * d .. (b + 1) * d];
                     autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
-            } else if (self.wq.len > 0) {
+            } else if (self.wo.len > 0) {
                 const n_heads = self.attn_n_heads;
                 const n_kv_heads = self.attn_n_kv_heads;
                 const head_dim = self.attn_head_dim;
@@ -1116,7 +1106,7 @@ pub const Model = struct {
         const d = self.cfg.d_model;
         // Reset GQA projection gradients.
         for (self.blocks) |*bl| {
-            if (bl.grad_wq.len > 0) @memset(bl.grad_wq, 0);
+            if (bl.wo.len > 0) @memset(bl.grad_wq, 0);
             if (bl.grad_wk.len > 0) @memset(bl.grad_wk, 0);
             if (bl.grad_wv.len > 0) @memset(bl.grad_wv, 0);
             if (bl.grad_wo.len > 0) @memset(bl.grad_wo, 0);
@@ -1236,7 +1226,7 @@ pub const Model = struct {
                 self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
                 self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
                 self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
-            } else if (self.blocks[bi].wq.len > 0) {
+            } else if (self.blocks[bi].wo.len > 0) {
                 if (self.blocks[bi].opt_wq) |*o| o.step(self.blocks[bi].wq, self.blocks[bi].grad_wq, "original");
                 if (self.blocks[bi].opt_wk) |*o| o.step(self.blocks[bi].wk, self.blocks[bi].grad_wk, "original");
                 if (self.blocks[bi].opt_wv) |*o| o.step(self.blocks[bi].wv, self.blocks[bi].grad_wv, "original");
@@ -1257,7 +1247,7 @@ pub const Model = struct {
         const allocator = self.allocator;
         const d = self.cfg.d_model;
         for (self.blocks) |*bl| {
-            if (bl.grad_wq.len > 0) @memset(bl.grad_wq, 0);
+            if (bl.wo.len > 0) @memset(bl.grad_wq, 0);
             if (bl.grad_wk.len > 0) @memset(bl.grad_wk, 0);
             if (bl.grad_wv.len > 0) @memset(bl.grad_wv, 0);
             if (bl.grad_wo.len > 0) @memset(bl.grad_wo, 0);
@@ -1417,7 +1407,7 @@ pub const Model = struct {
                     self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
                     self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
                     self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
-                } else if (self.blocks[bi].wq.len > 0) {
+                } else if (self.blocks[bi].wo.len > 0) {
                     if (self.blocks[bi].opt_wq) |*o| o.step(self.blocks[bi].wq, self.blocks[bi].grad_wq, "original");
                     if (self.blocks[bi].opt_wk) |*o| o.step(self.blocks[bi].wk, self.blocks[bi].grad_wk, "original");
                     if (self.blocks[bi].opt_wv) |*o| o.step(self.blocks[bi].wv, self.blocks[bi].grad_wv, "original");
