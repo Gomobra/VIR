@@ -321,8 +321,8 @@ pub const Model = struct {
                     h = 0;
                     while (h < n_kv_heads) : (h += 1) {
                         const ks = K[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
-                        const autograd = @import("../autograd/autograd.zig");
-                        autograd.ropeForward(ks, ks, b, head_dim, self.attn_rope_base);
+                        const ag = @import("../autograd/autograd.zig");
+                        ag.ropeForward(ks, ks, b, head_dim, self.attn_rope_base);
                         const cpu = @import("../cpu/cpu.zig");
                         cpu.rmsnormF32(ks, ks, 1e-6);
                     }
@@ -583,8 +583,8 @@ pub const Model = struct {
                 defer self.allocator.free(Qn);
                 const Kn = self.allocator.alloc(f32, batch * kv_dim) catch return;
                 defer self.allocator.free(Kn);
-                const attn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
-                defer self.allocator.free(attn_out);
+                const gqa_attn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(gqa_attn_out);
 
                 var b: usize = 0;
                 while (b < batch) : (b += 1) {
@@ -635,7 +635,7 @@ pub const Model = struct {
                     }
                 }
                 const cpu = @import("../cpu/cpu.zig");
-                cpu.attentionGQAF32(attn_out, Qn, Kn, Vv, batch, n_heads, n_kv_heads, head_dim);
+                cpu.attentionGQAF32(gqa_attn_out, Qn, Kn, Vv, batch, n_heads, n_kv_heads, head_dim);
 
                 // dAttn_out = dR1 @ Wo^T
                 const dAttn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
@@ -658,7 +658,7 @@ pub const Model = struct {
                     while (t < q_dim) : (t += 1) {
                         var acc: f32 = 0;
                         var bb: usize = 0;
-                        while (bb < batch) : (bb += 1) acc += dR1[bb * d + i] * attn_out[bb * q_dim + t];
+                        while (bb < batch) : (bb += 1) acc += dR1[bb * d + i] * gqa_attn_out[bb * q_dim + t];
                         self.grad_wo[i * q_dim + t] += acc;
                     }
                 }
