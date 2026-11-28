@@ -300,15 +300,18 @@ pub fn buildImageClassificationSamples(allocator: std.mem.Allocator, images: []c
     var i: usize = 0;
     while (i < images.len) : (i += 1) {
         const img_tokens = try modality_mod.image_understanding.imageTokensFromPixels(allocator, images[i], ivq, layout);
-        const seq = img_tokens.len;
+        const seq = img_tokens.len + 1;
         const tokens = try allocator.alloc(u32, seq);
-        @memcpy(tokens, img_tokens);
+        @memcpy(tokens[0..img_tokens.len], img_tokens);
+        tokens[img_tokens.len] = 0; // dummy classification position
         const targets = try allocator.alloc(u32, seq);
         const mask = try allocator.alloc(bool, seq);
         @memset(mask, false);
-        // causal targets: intermediate positions predict next image token; last predicts label.
+        // intermediate positions predict next image token; final dummy position predicts label.
         var j: usize = 0;
-        while (j + 1 < seq) : (j += 1) targets[j] = img_tokens[j + 1];
+        while (j + 1 < seq) : (j += 1) {
+            if (j + 1 < img_tokens.len) targets[j] = img_tokens[j + 1] else targets[j] = 0;
+        }
         if (seq > 0) {
             targets[seq - 1] = labels[i];
             mask[seq - 1] = true;
@@ -346,10 +349,15 @@ pub fn runImageClassificationTraining(model: *model_mod.Model, images: []const [
 pub fn classifyImage(model: *const model_mod.Model, allocator: std.mem.Allocator, image: []const f32, ivq: *const modality_mod.image_vq.ImageVQ, layout: modality_mod.VocabLayout, label_tokens: []const u32) !usize {
     const img_tokens = try modality_mod.image_understanding.imageTokensFromPixels(allocator, image, ivq, layout);
     defer allocator.free(img_tokens);
-    const logits = try allocator.alloc(f32, img_tokens.len * model.cfg.vocab_size);
+    const seq = img_tokens.len + 1;
+    const tokens = try allocator.alloc(u32, seq);
+    defer allocator.free(tokens);
+    @memcpy(tokens[0..img_tokens.len], img_tokens);
+    tokens[img_tokens.len] = 0;
+    const logits = try allocator.alloc(f32, seq * model.cfg.vocab_size);
     defer allocator.free(logits);
-    model.forward(logits, img_tokens);
-    const last = logits[(img_tokens.len - 1) * model.cfg.vocab_size .. img_tokens.len * model.cfg.vocab_size];
+    model.forward(logits, tokens);
+    const last = logits[(seq - 1) * model.cfg.vocab_size .. seq * model.cfg.vocab_size];
     if (label_tokens.len == 0) return infer_argmax(last);
     var best_idx: usize = 0;
     var best_val: f32 = last[label_tokens[0]];
