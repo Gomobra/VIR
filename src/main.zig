@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) void {
     const mnist_dir: ?[]const u8 = if (mnist_dir_c) |p| std.mem.span(p) else null;
     if (mnist_dir) |dir| {
         std.debug.print("loading MNIST from {s}\n", .{dir});
-        const train = loadMnist(io, allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 300) catch |err| {
+        const train = loadMnist(io, allocator, dir, "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 5000) catch |err| {
             std.debug.print("MNIST load failed: {s}\n", .{@errorName(err)});
             return;
         };
