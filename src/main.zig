@@ -264,6 +264,172 @@ pub fn main(init: std.process.Init) void {
         const raw_acc = @as(f32, @floatFromInt(ncorrect)) / @as(f32, @floatFromInt(n_test));
         std.debug.print("raw-pixel softmax classifier accuracy: {d:.4}\n", .{raw_acc});
 
+        // Real CPU MLP classifier on raw MNIST pixels.
+        const mlp_hidden = 128;
+        const w1 = allocator.alloc(f32, mlp_hidden * in_dim) catch return;
+        defer allocator.free(w1);
+        const b1 = allocator.alloc(f32, mlp_hidden) catch return;
+        defer allocator.free(b1);
+        const w2m = allocator.alloc(f32, n_classes * mlp_hidden) catch return;
+        defer allocator.free(w2m);
+        const b2m = allocator.alloc(f32, n_classes) catch return;
+        defer allocator.free(b2m);
+        @memset(w1, 0);
+        @memset(b1, 0);
+        @memset(w2m, 0);
+        @memset(b2m, 0);
+        var wi: usize = 0;
+        while (wi < w1.len) : (wi += 1) w1[wi] = 0.01 * @as(f32, @floatFromInt(wi % 7)) - 0.03;
+        wi = 0;
+        while (wi < w2m.len) : (wi += 1) w2m[wi] = 0.01 * @as(f32, @floatFromInt(wi % 11)) - 0.03;
+
+        var epochm: usize = 0;
+        while (epochm < 20) : (epochm += 1) {
+            var i: usize = 0;
+            while (i < n_train) : (i += 1) {
+                const x = train.images[i];
+                // forward
+                var h = allocator.alloc(f32, mlp_hidden) catch return;
+                defer allocator.free(h);
+                var z1 = allocator.alloc(f32, mlp_hidden) catch return;
+                defer allocator.free(z1);
+                var j: usize = 0;
+                while (j < mlp_hidden) : (j += 1) {
+                    var acc: f32 = b1[j];
+                    var k: usize = 0;
+                    while (k < in_dim) : (k += 1) acc += w1[j * in_dim + k] * x[k];
+                    z1[j] = acc;
+                    h[j] = if (acc > 0) acc else 0;
+                }
+                var logitsm = allocator.alloc(f32, n_classes) catch return;
+                defer allocator.free(logitsm);
+                j = 0;
+                while (j < n_classes) : (j += 1) {
+                    var acc: f32 = b2m[j];
+                    var k: usize = 0;
+                    while (k < mlp_hidden) : (k += 1) acc += w2m[j * mlp_hidden + k] * h[k];
+                    logitsm[j] = acc;
+                }
+                // softmax
+                var mx: f32 = logitsm[0];
+                j = 1;
+                while (j < n_classes) : (j += 1) if (logitsm[j] > mx) {
+                    mx = logitsm[j];
+                };
+                var sum: f32 = 0;
+                j = 0;
+                while (j < n_classes) : (j += 1) {
+                    logitsm[j] = @exp(logitsm[j] - mx);
+                    sum += logitsm[j];
+                }
+                j = 0;
+                while (j < n_classes) : (j += 1) logitsm[j] /= sum;
+                const y = train.labels[i];
+                // backward
+                var dlogits = allocator.alloc(f32, n_classes) catch return;
+                defer allocator.free(dlogits);
+                j = 0;
+                while (j < n_classes) : (j += 1) dlogits[j] = logitsm[j];
+                dlogits[y] -= 1;
+                var dw2 = allocator.alloc(f32, n_classes * mlp_hidden) catch return;
+                defer allocator.free(dw2);
+                @memset(dw2, 0);
+                var db2 = allocator.alloc(f32, n_classes) catch return;
+                defer allocator.free(db2);
+                @memset(db2, 0);
+                j = 0;
+                while (j < n_classes) : (j += 1) {
+                    db2[j] = dlogits[j];
+                    var k: usize = 0;
+                    while (k < mlp_hidden) : (k += 1) {
+                        dw2[j * mlp_hidden + k] = dlogits[j] * h[k];
+                    }
+                }
+                var dh = allocator.alloc(f32, mlp_hidden) catch return;
+                defer allocator.free(dh);
+                @memset(dh, 0);
+                var k: usize = 0;
+                while (k < mlp_hidden) : (k += 1) {
+                    var acc: f32 = 0;
+                    var j2: usize = 0;
+                    while (j2 < n_classes) : (j2 += 1) {
+                        acc += dlogits[j2] * w2m[j2 * mlp_hidden + k];
+                    }
+                    dh[k] = acc;
+                }
+                var dz1 = allocator.alloc(f32, mlp_hidden) catch return;
+                defer allocator.free(dz1);
+                k = 0;
+                while (k < mlp_hidden) : (k += 1) {
+                    dz1[k] = if (z1[k] > 0) dh[k] else 0;
+                }
+                var db1 = allocator.alloc(f32, mlp_hidden) catch return;
+                defer allocator.free(db1);
+                @memset(db1, 0);
+                var dw1 = allocator.alloc(f32, mlp_hidden * in_dim) catch return;
+                defer allocator.free(dw1);
+                @memset(dw1, 0);
+                k = 0;
+                while (k < mlp_hidden) : (k += 1) {
+                    db1[k] = dz1[k];
+                    var kk: usize = 0;
+                    while (kk < in_dim) : (kk += 1) {
+                        dw1[k * in_dim + kk] = dz1[k] * x[kk];
+                    }
+                }
+                const lr: f32 = 0.1;
+                k = 0;
+                while (k < mlp_hidden * in_dim) : (k += 1) w1[k] -= lr * dw1[k];
+                k = 0;
+                while (k < mlp_hidden) : (k += 1) b1[k] -= lr * db1[k];
+                k = 0;
+                while (k < n_classes * mlp_hidden) : (k += 1) w2m[k] -= lr * dw2[k];
+                k = 0;
+                while (k < n_classes) : (k += 1) b2m[k] -= lr * db2[k];
+            }
+        }
+        // eval MLP
+        var ncorrect3: usize = 0;
+        var ei: usize = 0;
+        while (ei < n_test) : (ei += 1) {
+            const x = testdata.images[ei];
+            var h = allocator.alloc(f32, mlp_hidden) catch return;
+            defer allocator.free(h);
+            var j: usize = 0;
+            while (j < mlp_hidden) : (j += 1) {
+                var acc: f32 = b1[j];
+                var k: usize = 0;
+                while (k < in_dim) : (k += 1) acc += w1[j * in_dim + k] * x[k];
+                h[j] = if (acc > 0) acc else 0;
+            }
+            var logits = allocator.alloc(f32, n_classes) catch return;
+            defer allocator.free(logits);
+            j = 0;
+            while (j < n_classes) : (j += 1) {
+                var acc: f32 = b2m[j];
+                var k: usize = 0;
+                while (k < mlp_hidden) : (k += 1) acc += w2m[j * mlp_hidden + k] * h[k];
+                logits[j] = acc;
+            }
+            var best: usize = 0;
+            var bestv: f32 = logits[0];
+            j = 1;
+            while (j < n_classes) : (j += 1) {
+                if (logits[j] > bestv) {
+                    bestv = logits[j];
+                    best = j;
+                }
+            }
+            if (best == testdata.labels[ei]) ncorrect3 += 1;
+        }
+        const mlp_acc = @as(f32, @floatFromInt(ncorrect3)) / @as(f32, @floatFromInt(n_test));
+        std.debug.print("raw-pixel MLP classifier accuracy: {d:.4}\\n", .{mlp_acc});
+'''
+s=s[:start]+block+s[end:]
+open(p,'w').write(s)
+print('done')
+PY
+
         // Debug: print VQ codes for first image.
         const dbg_codes = allocator.alloc(usize, 49) catch return;
         defer allocator.free(dbg_codes);
