@@ -335,6 +335,92 @@ pub fn attentionNaiveF32(out: []f32, q: []const f32, k: []const f32, v: []const 
     }
 }
 
+
+// Causal scaled dot-product attention with grouped-query attention (GQA).
+// q: [seq, n_heads*head_dim], k/v: [seq, n_kv_heads*head_dim], out: [seq, n_heads*head_dim].
+pub fn attentionGQAF32(out: []f32, q: []const f32, k: []const f32, v: []const f32, seq: usize, n_heads: usize, n_kv_heads: usize, head_dim: usize) void {
+    std.debug.assert(n_kv_heads > 0 and n_heads % n_kv_heads == 0);
+    const q_dim = n_heads * head_dim;
+    const kv_dim = n_kv_heads * head_dim;
+    std.debug.assert(q.len == seq * q_dim);
+    std.debug.assert(k.len == seq * kv_dim);
+    std.debug.assert(v.len == seq * kv_dim);
+    std.debug.assert(out.len == seq * q_dim);
+    const scale = 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim)));
+    const heads_per_kv = n_heads / n_kv_heads;
+    var hi: usize = 0;
+    while (hi < n_heads) : (hi += 1) {
+        const kv_hi = hi / heads_per_kv;
+        var i: usize = 0;
+        while (i < seq) : (i += 1) {
+            // online softmax over causal positions
+            var m: f32 = -std.math.inf(f32);
+            var l: f32 = 0;
+            const o_base = i * q_dim + hi * head_dim;
+            const o = std.heap.page_allocator.alloc(f32, head_dim) catch return;
+            defer std.heap.page_allocator.free(o);
+            @memset(o, 0);
+            var j: usize = 0;
+            while (j <= i) : (j += 1) {
+                var score: f32 = 0;
+                var t: usize = 0;
+                while (t < head_dim) : (t += 1) {
+                    score += q[i * q_dim + hi * head_dim + t] * k[j * kv_dim + kv_hi * head_dim + t];
+                }
+                score *= scale;
+                if (score > m) {
+                    const new_m = score;
+                    const scale_old = @exp(m - new_m);
+                    l *= scale_old;
+                    var t2: usize = 0;
+                    while (t2 < head_dim) : (t2 += 1) o[t2] *= scale_old;
+                    const w = @exp(score - new_m);
+                    l += w;
+                    t2 = 0;
+                    while (t2 < head_dim) : (t2 += 1) o[t2] += w * v[j * kv_dim + kv_hi * head_dim + t2];
+                    m = new_m;
+                } else {
+                    const w = @exp(score - m);
+                    l += w;
+                    var t2: usize = 0;
+                    while (t2 < head_dim) : (t2 += 1) o[t2] += w * v[j * kv_dim + kv_hi * head_dim + t2];
+                }
+            }
+            var t: usize = 0;
+            while (t < head_dim) : (t += 1) {
+                if (l > 0) out[o_base + t] = o[t] / l else out[o_base + t] = 0;
+            }
+        }
+    }
+}
+
+
+test "attentionGQAF32 finite and single-head parity" {
+    const seq = 3;
+    const n_heads = 2;
+    const n_kv_heads = 1;
+    const head_dim = 2;
+    var q = [_]f32{ 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1 };
+    var k = [_]f32{ 1, 0, 0, 1, 1, 1 };
+    var v = [_]f32{ 1, 2, 3, 4, 5, 6 };
+    var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    attentionGQAF32(&out, &q, &k, &v, seq, n_heads, n_kv_heads, head_dim);
+    for (out) |x| try std.testing.expect(std.math.isFinite(x));
+
+    // Single-head GQA must match naive attention with matching q/k/v.
+    const seq2 = 2;
+    const hd = 2;
+    var q2 = [_]f32{ 1, 0, 0, 1 };
+    var k2 = [_]f32{ 1, 0, 0, 1 };
+    var v2 = [_]f32{ 1, 2, 3, 4 };
+    var out_naive = [_]f32{ 0, 0, 0, 0 };
+    var out_gqa = [_]f32{ 0, 0, 0, 0 };
+    attentionNaiveF32(&out_naive, &q2, &k2, &v2, seq2, hd);
+    attentionGQAF32(&out_gqa, &q2, &k2, &v2, seq2, 1, 1, hd);
+    for (out_naive, out_gqa) |a, b| try std.testing.expectApproxEqAbs(a, b, 1e-5);
+}
+
+
 test "attentionNaiveF32 finite" {
     const seq = 2;
     const d = 2;
