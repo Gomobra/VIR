@@ -545,7 +545,6 @@ pub fn runPipeline(allocator: std.mem.Allocator, docs: []const []const u8, cfg: 
     return result;
 }
 
-
 // --- JSONL streaming parser (PRD 3.6, T3.6-01) ---
 
 pub const JsonlRecord = struct {
@@ -606,8 +605,6 @@ pub fn readJsonlFile(allocator: std.mem.Allocator, path: []const u8) ![]JsonlRec
     return parseJsonl(allocator, buf);
 }
 
-
-
 test "parseJsonlLine basic" {
     const allocator = std.testing.allocator;
     const rec = try parseJsonlLine(allocator, "{\"text\":\"hello world\",\"source\":\"web\",\"license\":\"cc-by\"}");
@@ -633,7 +630,6 @@ test "parseJsonl skips blanks" {
     try std.testing.expectEqualStrings("b", recs[1].text);
     try std.testing.expectEqualStrings("s", recs[1].source);
 }
-
 
 test "runPipeline end-to-end" {
     const allocator = std.testing.allocator;
