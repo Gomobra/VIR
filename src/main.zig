@@ -202,9 +202,9 @@ pub fn main(init: std.process.Init) void {
         @memset(b, 0);
         var epoch2: usize = 0;
         while (epoch2 < 20) : (epoch2 += 1) {
-            var i: usize = 0;
-            while (i < n_train) : (i += 1) {
-                const x = train.images[i];
+            var ii: usize = 0;
+            while (ii < n_train) : (ii += 1) {
+                const x = train.images[ii];
                 var logits: [10]f32 = @splat(0);
                 var j: usize = 0;
                 while (j < n_classes) : (j += 1) {
@@ -226,7 +226,7 @@ pub fn main(init: std.process.Init) void {
                 }
                 j = 0;
                 while (j < n_classes) : (j += 1) logits[j] /= sum;
-                const y = train.labels[i];
+                const y = train.labels[ii];
                 j = 0;
                 while (j < n_classes) : (j += 1) {
                     const grad = logits[j] - (if (j == y) @as(f32, 1) else @as(f32, 0));
