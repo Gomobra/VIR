@@ -37,6 +37,23 @@ pub const Model = struct {
         is_gdn: bool = false,
         use_bit: bool = false,
         attn: nn.Linear,
+        // GQA attention (non-bit path). When attn_n_heads > 0, use GQA instead of attn.
+        attn_n_heads: usize = 0,
+        attn_n_kv_heads: usize = 0,
+        attn_head_dim: usize = 0,
+        attn_rope_base: f32 = 10000.0,
+        wq: []f32 = &[_]f32{},
+        wk: []f32 = &[_]f32{},
+        wv: []f32 = &[_]f32{},
+        wo: []f32 = &[_]f32{},
+        grad_wq: []f32 = &[_]f32{},
+        grad_wk: []f32 = &[_]f32{},
+        grad_wv: []f32 = &[_]f32{},
+        grad_wo: []f32 = &[_]f32{},
+        opt_wq: ?optim.Muon = null,
+        opt_wk: ?optim.Muon = null,
+        opt_wv: ?optim.Muon = null,
+        opt_wo: ?optim.Muon = null,
         mlp: nn.Linear,
         bit_attn: ?nn.bitlinear.BitLinear = null,
         bit_mlp: ?nn.bitlinear.BitLinear = null,
@@ -52,7 +69,7 @@ pub const Model = struct {
         engram: ?nn.engram.Engram = null,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool, use_bit: bool) !Block {
+        pub fn init(allocator: std.mem.Allocator, d: usize, is_gdn: bool, use_bit: bool, attn_n_heads: usize, attn_n_kv_heads: usize, attn_head_dim: usize, attn_rope_base: f32) !Block {
             const wq: []f32 = if (is_gdn) blk: {
                 const s = try allocator.alloc(f32, d * d);
                 for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
@@ -79,6 +96,51 @@ pub const Model = struct {
                 break :blk s;
             } else &[_]f32{};
 
+            // GQA projections for non-GDN, non-bit attention path
+            const use_gqa = !is_gdn and !use_bit;
+            const q_dim = attn_n_heads * attn_head_dim;
+            const kv_dim = attn_n_kv_heads * attn_head_dim;
+            const wq: []f32 = if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, q_dim * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 7)) - 0.06;
+                break :blk s;
+            } else &[_]f32{};
+            const wk: []f32 = if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, kv_dim * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 11)) - 0.06;
+                break :blk s;
+            } else &[_]f32{};
+            const wv: []f32 = if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, kv_dim * d);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 13)) - 0.06;
+                break :blk s;
+            } else &[_]f32{};
+            const wo: []f32 = if (use_gqa) blk: {
+                const s = try allocator.alloc(f32, d * q_dim);
+                for (s, 0..) |*x, i| x.* = 0.02 * @as(f32, @floatFromInt(i % 17)) - 0.06;
+                break :blk s;
+            } else &[_]f32{};
+            const grad_wq: []f32 = if (use_gqa) try allocator.alloc(f32, q_dim * d) else &[_]f32{};
+            const grad_wk: []f32 = if (use_gqa) try allocator.alloc(f32, kv_dim * d) else &[_]f32{};
+            const grad_wv: []f32 = if (use_gqa) try allocator.alloc(f32, kv_dim * d) else &[_]f32{};
+            const grad_wo: []f32 = if (use_gqa) try allocator.alloc(f32, d * q_dim) else &[_]f32{};
+            if (use_gqa) {
+                @memset(grad_wq, 0);
+                @memset(grad_wk, 0);
+                @memset(grad_wv, 0);
+                @memset(grad_wo, 0);
+            }
+            var opt_wq: ?optim.Muon = null;
+            var opt_wk: ?optim.Muon = null;
+            var opt_wv: ?optim.Muon = null;
+            var opt_wo: ?optim.Muon = null;
+            if (use_gqa) {
+                opt_wq = try optim.Muon.init(allocator, q_dim, d, 0.01);
+                opt_wk = try optim.Muon.init(allocator, kv_dim, d, 0.01);
+                opt_wv = try optim.Muon.init(allocator, kv_dim, d, 0.01);
+                opt_wo = try optim.Muon.init(allocator, d, q_dim, 0.01);
+            }
+
             var bit_attn: ?nn.bitlinear.BitLinear = null;
             var bit_mlp: ?nn.bitlinear.BitLinear = null;
             if (use_bit) {
@@ -89,6 +151,22 @@ pub const Model = struct {
                 .is_gdn = is_gdn,
                 .use_bit = use_bit,
                 .attn = try nn.Linear.init(allocator, d, d),
+                .attn_n_heads = if (use_gqa) attn_n_heads else 0,
+                .attn_n_kv_heads = if (use_gqa) attn_n_kv_heads else 0,
+                .attn_head_dim = if (use_gqa) attn_head_dim else 0,
+                .attn_rope_base = attn_rope_base,
+                .wq = wq,
+                .wk = wk,
+                .wv = wv,
+                .wo = wo,
+                .grad_wq = grad_wq,
+                .grad_wk = grad_wk,
+                .grad_wv = grad_wv,
+                .grad_wo = grad_wo,
+                .opt_wq = opt_wq,
+                .opt_wk = opt_wk,
+                .opt_wv = opt_wv,
+                .opt_wo = opt_wo,
                 .mlp = try nn.Linear.init(allocator, d, d * 2),
                 .bit_attn = bit_attn,
                 .bit_mlp = bit_mlp,
@@ -107,6 +185,18 @@ pub const Model = struct {
 
         pub fn deinit(self: *Block) void {
             self.attn.deinit();
+            if (self.wq.len > 0) self.allocator.free(self.wq);
+            if (self.wk.len > 0) self.allocator.free(self.wk);
+            if (self.wv.len > 0) self.allocator.free(self.wv);
+            if (self.wo.len > 0) self.allocator.free(self.wo);
+            if (self.grad_wq.len > 0) self.allocator.free(self.grad_wq);
+            if (self.grad_wk.len > 0) self.allocator.free(self.grad_wk);
+            if (self.grad_wv.len > 0) self.allocator.free(self.grad_wv);
+            if (self.grad_wo.len > 0) self.allocator.free(self.grad_wo);
+            if (self.opt_wq) |*o| o.deinit();
+            if (self.opt_wk) |*o| o.deinit();
+            if (self.opt_wv) |*o| o.deinit();
+            if (self.opt_wo) |*o| o.deinit();
             self.mlp.deinit();
             if (self.bit_attn) |*b| b.deinit();
             if (self.bit_mlp) |*b| b.deinit();
@@ -191,6 +281,83 @@ pub const Model = struct {
                     beta[b] = 1.0 / (1.0 + @exp(-bacc));
                 }
                 self.gdn.forward(out, Q, K, Vv, alpha, beta, batch);
+                for (out, xcur) |*o, v| o.* += v;
+            } else if (self.wq.len > 0) {
+                const n_heads = self.attn_n_heads;
+                const n_kv_heads = self.attn_n_kv_heads;
+                const head_dim = self.attn_head_dim;
+                const q_dim = n_heads * head_dim;
+                const kv_dim = n_kv_heads * head_dim;
+                const Q = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(Vv);
+                // projections
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    const xrow = tmp[b * d .. (b + 1) * d];
+                    var j: usize = 0;
+                    while (j < q_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wq[j * d + i];
+                        Q[b * q_dim + j] = acc;
+                    }
+                    j = 0;
+                    while (j < kv_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wk[j * d + i];
+                        K[b * kv_dim + j] = acc;
+                    }
+                    j = 0;
+                    while (j < kv_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wv[j * d + i];
+                        Vv[b * kv_dim + j] = acc;
+                    }
+                }
+                // RoPE + QK norm per head
+                b = 0;
+                while (b < batch) : (b += 1) {
+                    var h: usize = 0;
+                    while (h < n_heads) : (h += 1) {
+                        const qs = Q[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeForward(qs, qs, b, head_dim, self.attn_rope_base);
+                        const cpu = @import("../cpu/cpu.zig");
+                        cpu.rmsnormF32(qs, qs, 1e-6);
+                    }
+                    h = 0;
+                    while (h < n_kv_heads) : (h += 1) {
+                        const ks = K[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeForward(ks, ks, b, head_dim, self.attn_rope_base);
+                        const cpu = @import("../cpu/cpu.zig");
+                        cpu.rmsnormF32(ks, ks, 1e-6);
+                    }
+                }
+                const attn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(attn_out);
+                const cpu = @import("../cpu/cpu.zig");
+                cpu.attentionGQAF32(attn_out, Q, K, Vv, batch, n_heads, n_kv_heads, head_dim);
+                // output projection q_dim -> d
+                const outp = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(outp);
+                var bb: usize = 0;
+                while (bb < batch) : (bb += 1) {
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        var acc: f32 = 0;
+                        var t: usize = 0;
+                        while (t < q_dim) : (t += 1) acc += attn_out[bb * q_dim + t] * self.wo[i * q_dim + t];
+                        outp[bb * d + i] = acc;
+                    }
+                }
+                @memcpy(out, outp);
                 for (out, xcur) |*o, v| o.* += v;
             } else {
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
@@ -360,7 +527,7 @@ pub const Model = struct {
                     const slice_dx = dX_attn[b * d .. (b + 1) * d];
                     autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
-            } else if (!self.is_gdn) {
+            } else if (self.wq.len == 0) {
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
                 defer self.allocator.free(Q);
                 const K = self.allocator.alloc(f32, batch * d) catch return;
@@ -404,6 +571,231 @@ pub const Model = struct {
                     const slice_dx = dX_attn[b * d .. (b + 1) * d];
                     autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
                 }
+            } else if (self.wq.len > 0) {
+                const n_heads = self.attn_n_heads;
+                const n_kv_heads = self.attn_n_kv_heads;
+                const head_dim = self.attn_head_dim;
+                const q_dim = n_heads * head_dim;
+                const kv_dim = n_kv_heads * head_dim;
+
+                // Recompute forward intermediates
+                const norm1 = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(norm1);
+                self.norm1.forward(norm1, x);
+                const Q = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(Q);
+                const K = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(K);
+                const Vv = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(Vv);
+                const Qr = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(Qr);
+                const Kr = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(Kr);
+                const Qn = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(Qn);
+                const Kn = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(Kn);
+                const attn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(attn_out);
+
+                var b: usize = 0;
+                while (b < batch) : (b += 1) {
+                    const xrow = norm1[b * d .. (b + 1) * d];
+                    var j: usize = 0;
+                    while (j < q_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wq[j * d + i];
+                        Q[b * q_dim + j] = acc;
+                    }
+                    j = 0;
+                    while (j < kv_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wk[j * d + i];
+                        K[b * kv_dim + j] = acc;
+                    }
+                    j = 0;
+                    while (j < kv_dim) : (j += 1) {
+                        var acc: f32 = 0;
+                        var i: usize = 0;
+                        while (i < d) : (i += 1) acc += xrow[i] * self.wv[j * d + i];
+                        Vv[b * kv_dim + j] = acc;
+                    }
+                }
+                b = 0;
+                while (b < batch) : (b += 1) {
+                    var h: usize = 0;
+                    while (h < n_heads) : (h += 1) {
+                        const qs = Q[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
+                        const qrs = Qr[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
+                        const qns = Qn[b * q_dim + h * head_dim .. b * q_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeForward(qrs, qs, b, head_dim, self.attn_rope_base);
+                        const cpu = @import("../cpu/cpu.zig");
+                        cpu.rmsnormF32(qns, qrs, 1e-6);
+                    }
+                    h = 0;
+                    while (h < n_kv_heads) : (h += 1) {
+                        const ks = K[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
+                        const krs = Kr[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
+                        const kns = Kn[b * kv_dim + h * head_dim .. b * kv_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeForward(krs, ks, b, head_dim, self.attn_rope_base);
+                        const cpu = @import("../cpu/cpu.zig");
+                        cpu.rmsnormF32(kns, krs, 1e-6);
+                    }
+                }
+                const cpu = @import("../cpu/cpu.zig");
+                cpu.attentionGQAF32(attn_out, Qn, Kn, Vv, batch, n_heads, n_kv_heads, head_dim);
+
+                // dAttn_out = dR1 @ Wo^T
+                const dAttn_out = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(dAttn_out);
+                @memset(dAttn_out, 0);
+                var i: usize = 0;
+                while (i < d) : (i += 1) {
+                    var t: usize = 0;
+                    while (t < q_dim) : (t += 1) {
+                        var bb: usize = 0;
+                        while (bb < batch) : (bb += 1) {
+                            dAttn_out[bb * q_dim + t] += dR1[bb * d + i] * self.wo[i * q_dim + t];
+                        }
+                    }
+                }
+                // dWo
+                i = 0;
+                while (i < d) : (i += 1) {
+                    var t: usize = 0;
+                    while (t < q_dim) : (t += 1) {
+                        var acc: f32 = 0;
+                        var bb: usize = 0;
+                        while (bb < batch) : (bb += 1) acc += dR1[bb * d + i] * attn_out[bb * q_dim + t];
+                        self.grad_wo[i * q_dim + t] += acc;
+                    }
+                }
+
+                const dQn = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(dQn);
+                @memset(dQn, 0);
+                const dKn = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(dKn);
+                @memset(dKn, 0);
+                const dV = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(dV);
+                @memset(dV, 0);
+                cpu.backwardAttentionGQAF32(dQn, dKn, dV, Qn, Kn, Vv, dAttn_out, batch, n_heads, n_kv_heads, head_dim);
+
+                // QK norm backward
+                const dQr = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(dQr);
+                @memset(dQr, 0);
+                const dKr = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(dKr);
+                @memset(dKr, 0);
+                var bb: usize = 0;
+                while (bb < batch) : (bb += 1) {
+                    var h: usize = 0;
+                    while (h < n_heads) : (h += 1) {
+                        const sl_x = Qr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
+                        const sl_do = dQn[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
+                        const sl_dx = dQr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+                    }
+                    h = 0;
+                    while (h < n_kv_heads) : (h += 1) {
+                        const sl_x = Kr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
+                        const sl_do = dKn[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
+                        const sl_dx = dKr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.backwardRMSNorm(sl_dx, sl_x, sl_do, 1e-6);
+                    }
+                }
+
+                // RoPE backward
+                const dQ = self.allocator.alloc(f32, batch * q_dim) catch return;
+                defer self.allocator.free(dQ);
+                @memset(dQ, 0);
+                const dK = self.allocator.alloc(f32, batch * kv_dim) catch return;
+                defer self.allocator.free(dK);
+                @memset(dK, 0);
+                bb = 0;
+                while (bb < batch) : (bb += 1) {
+                    var h: usize = 0;
+                    while (h < n_heads) : (h += 1) {
+                        const sl_out = dQr[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
+                        const sl_dx = dQ[bb * q_dim + h * head_dim .. bb * q_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
+                    }
+                    h = 0;
+                    while (h < n_kv_heads) : (h += 1) {
+                        const sl_out = dKr[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
+                        const sl_dx = dK[bb * kv_dim + h * head_dim .. bb * kv_dim + (h + 1) * head_dim];
+                        const autograd = @import("../autograd/autograd.zig");
+                        autograd.ropeBackward(sl_dx, sl_out, bb, head_dim, self.attn_rope_base);
+                    }
+                }
+
+                // projection gradients
+                var j: usize = 0;
+                while (j < q_dim) : (j += 1) {
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        var acc: f32 = 0;
+                        var bb2: usize = 0;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dQ[bb2 * q_dim + j];
+                        self.grad_wq[j * d + i] += acc;
+                    }
+                }
+                j = 0;
+                while (j < kv_dim) : (j += 1) {
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        var acc: f32 = 0;
+                        var bb2: usize = 0;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dK[bb2 * kv_dim + j];
+                        self.grad_wk[j * d + i] += acc;
+                    }
+                }
+                j = 0;
+                while (j < kv_dim) : (j += 1) {
+                    var i: usize = 0;
+                    while (i < d) : (i += 1) {
+                        var acc: f32 = 0;
+                        var bb2: usize = 0;
+                        while (bb2 < batch) : (bb2 += 1) acc += norm1[bb2 * d + i] * dV[bb2 * kv_dim + j];
+                        self.grad_wv[j * d + i] += acc;
+                    }
+                }
+
+                // dNorm1
+                for (0..batch) |bb2| {
+                    for (0..d) |ii| {
+                        var acc: f32 = 0;
+                        var j2: usize = 0;
+                        while (j2 < q_dim) : (j2 += 1) acc += dQ[bb2 * q_dim + j2] * self.wq[j2 * d + ii];
+                        var j3: usize = 0;
+                        while (j3 < kv_dim) : (j3 += 1) {
+                            acc += dK[bb2 * kv_dim + j3] * self.wk[j3 * d + ii];
+                            acc += dV[bb2 * kv_dim + j3] * self.wv[j3 * d + ii];
+                        }
+                        dNorm1[bb2 * d + ii] = acc;
+                    }
+                }
+                const dX_attn = self.allocator.alloc(f32, batch * d) catch return;
+                defer self.allocator.free(dX_attn);
+                @memset(dX_attn, 0);
+                for (0..batch) |bb2| {
+                    const slice_x = x[bb2 * d .. (bb2 + 1) * d];
+                    const slice_do = dNorm1[bb2 * d .. (bb2 + 1) * d];
+                    const slice_dx = dX_attn[bb2 * d .. (bb2 + 1) * d];
+                    const autograd = @import("../autograd/autograd.zig");
+                    autograd.backwardRMSNorm(slice_dx, slice_x, slice_do, 1e-6);
+                }
+                for (dX, dX_attn) |*a, b| a.* += b;
             } else {
                 // Recompute Q,K,V,alpha,beta
                 const Q = self.allocator.alloc(f32, batch * d) catch return;
@@ -553,7 +945,7 @@ pub const Model = struct {
         const blocks = try allocator.alloc(Block, n_blocks);
         for (blocks, 0..) |*bl, i| {
             const is_gdn = (i % 4 != 3);
-            bl.* = try Block.init(allocator, d, is_gdn, cfg.bit.enabled);
+            bl.* = try Block.init(allocator, d, is_gdn, cfg.bit.enabled, cfg.attn.n_heads, cfg.attn.n_kv_heads, cfg.attn.head_dim, cfg.attn.rope_theta);
         }
         if (cfg.engram.enabled) {
             for (cfg.engram.layers) |li| {
@@ -722,6 +1114,13 @@ pub const Model = struct {
     pub fn trainStep(self: *Model, tokens: []const u32, targets: []const u32) !f32 {
         const allocator = self.allocator;
         const d = self.cfg.d_model;
+        // Reset GQA projection gradients.
+        for (self.blocks) |*bl| {
+            if (bl.grad_wq.len > 0) @memset(bl.grad_wq, 0);
+            if (bl.grad_wk.len > 0) @memset(bl.grad_wk, 0);
+            if (bl.grad_wv.len > 0) @memset(bl.grad_wv, 0);
+            if (bl.grad_wo.len > 0) @memset(bl.grad_wo, 0);
+        }
         const v = self.cfg.vocab_size;
         const seq = tokens.len;
         const n = self.blocks.len;
@@ -837,6 +1236,12 @@ pub const Model = struct {
                 self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
                 self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
                 self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
+            } else if (self.blocks[bi].wq.len > 0) {
+                if (self.blocks[bi].opt_wq) |*o| o.step(self.blocks[bi].wq, self.blocks[bi].grad_wq, "original");
+                if (self.blocks[bi].opt_wk) |*o| o.step(self.blocks[bi].wk, self.blocks[bi].grad_wk, "original");
+                if (self.blocks[bi].opt_wv) |*o| o.step(self.blocks[bi].wv, self.blocks[bi].grad_wv, "original");
+                if (self.blocks[bi].opt_wo) |*o| o.step(self.blocks[bi].wo, self.blocks[bi].grad_wo, "original");
+                self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
             } else {
                 self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
                 self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
@@ -851,6 +1256,12 @@ pub const Model = struct {
     pub fn trainStepMasked(self: *Model, tokens: []const u32, targets: []const u32, loss_mask: []const bool) !f32 {
         const allocator = self.allocator;
         const d = self.cfg.d_model;
+        for (self.blocks) |*bl| {
+            if (bl.grad_wq.len > 0) @memset(bl.grad_wq, 0);
+            if (bl.grad_wk.len > 0) @memset(bl.grad_wk, 0);
+            if (bl.grad_wv.len > 0) @memset(bl.grad_wv, 0);
+            if (bl.grad_wo.len > 0) @memset(bl.grad_wo, 0);
+        }
         const v = self.cfg.vocab_size;
         const seq = tokens.len;
         const n = self.blocks.len;
@@ -1005,6 +1416,12 @@ pub const Model = struct {
                     self.opt_gdn_v[bi].step(self.blocks[bi].wv, dBlocks_gdn_v[bi], "original");
                     self.opt_gdn_a[bi].step(self.blocks[bi].wa, dBlocks_gdn_a[bi]);
                     self.opt_gdn_b[bi].step(self.blocks[bi].wb, dBlocks_gdn_b[bi]);
+                    self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
+                } else if (self.blocks[bi].wq.len > 0) {
+                    if (self.blocks[bi].opt_wq) |*o| o.step(self.blocks[bi].wq, self.blocks[bi].grad_wq, "original");
+                    if (self.blocks[bi].opt_wk) |*o| o.step(self.blocks[bi].wk, self.blocks[bi].grad_wk, "original");
+                    if (self.blocks[bi].opt_wv) |*o| o.step(self.blocks[bi].wv, self.blocks[bi].grad_wv, "original");
+                    if (self.blocks[bi].opt_wo) |*o| o.step(self.blocks[bi].wo, self.blocks[bi].grad_wo, "original");
                     self.opt_blocks_mlp[bi].step(self.blocks[bi].mlp.w, dBlocks_mlp[bi], "original");
                 } else {
                     self.opt_blocks_attn[bi].step(self.blocks[bi].attn.w, dBlocks_attn[bi], "original");
@@ -1245,7 +1662,7 @@ pub const Model = struct {
 
     test "Block backward gradcheck" {
         const allocator = std.testing.allocator;
-        var blk = try Model.Block.init(allocator, 4, false, false);
+        var blk = try Model.Block.init(allocator, 4, false, false, 2, 1, 2, 10000.0);
         defer blk.deinit();
         var x = [_]f32{ 1, 2, 3, 4, 5, 6, 7, 8 };
         var out = [_]f32{ 0, 0, 0, 0, 0, 0, 0, 0 };
