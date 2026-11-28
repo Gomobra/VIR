@@ -190,7 +190,7 @@ pub fn main(init: std.process.Init) void {
         }
 
         // Real CPU softmax regression on raw MNIST pixels.
-        const n_train = @min(train.n, 2000);
+        const n_train = @min(train.n, 5000);
         const n_test = @min(testdata.n, 1000);
         const in_dim = 28 * 28;
         const n_classes = 10;
