@@ -200,8 +200,8 @@ pub fn main(init: std.process.Init) void {
         defer allocator.free(b);
         @memset(w, 0);
         @memset(b, 0);
-        var epoch: usize = 0;
-        while (epoch < 20) : (epoch += 1) {
+        var epoch2: usize = 0;
+        while (epoch2 < 20) : (epoch2 += 1) {
             var i: usize = 0;
             while (i < n_train) : (i += 1) {
                 const x = train.images[i];
